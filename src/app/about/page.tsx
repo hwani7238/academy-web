@@ -31,7 +31,7 @@ export default function AboutPage() {
                 <section className="grid gap-12 md:grid-cols-3 md:items-start">
                     <div className="relative aspect-square overflow-hidden rounded-2xl bg-muted">
                         <Image
-                            src="/director.png"
+                            src="/director.jpg"
                             alt="원장님 프로필"
                             fill
                             className="object-cover"
