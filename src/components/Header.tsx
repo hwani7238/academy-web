@@ -21,6 +21,11 @@ export function Header() {
                     <Link href="#contact" className="text-sm font-medium transition-colors hover:text-primary">
                         문의하기
                     </Link>
+                    <Button size="sm" asChild>
+                        <Link href="/login">
+                            로그인
+                        </Link>
+                    </Button>
                 </nav>
             </div>
         </header>
