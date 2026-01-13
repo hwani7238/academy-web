@@ -20,7 +20,7 @@ export default function LoginPage() {
 
         try {
             await signInWithEmailAndPassword(auth, email, password);
-            router.push("/"); // 로그인 성공 시 메인으로 이동 (추후 관리자 대시보드로 변경 가능)
+            router.push("/admin"); // 관리자 페이지로 이동
         } catch (err: any) {
             console.error("Login error:", err);
             setError("이메일 또는 비밀번호가 올바르지 않습니다.");
