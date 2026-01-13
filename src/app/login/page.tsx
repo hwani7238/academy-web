@@ -40,7 +40,7 @@ export default function LoginPage() {
                 </div>
                 <form onSubmit={handleLogin} className="grid gap-4">
                     <div className="grid gap-2">
-                        <label htmlFor="email">이메일</label>
+                        <label htmlFor="email">아이디</label>
                         <input
                             id="email"
                             type="email"
