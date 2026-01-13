@@ -6,7 +6,7 @@ export function Footer() {
             <div className="container mx-auto flex flex-col items-center justify-between gap-4 py-10 md:h-24 md:flex-row md:py-0">
                 <div className="flex flex-col items-center gap-1 text-center md:items-start md:text-left">
                     <p className="text-sm text-muted-foreground">
-                        © 2025 위뮤직 아카데미. All rights reserved.
+                        © 2025 위뮤직 아카데미. All rights reserved. v2.1
                     </p>
                     <div className="flex flex-col gap-1 text-xs text-muted-foreground/80 md:flex-row md:gap-4">
                         <span>사업자 등록번호: 658-98-01692</span>
