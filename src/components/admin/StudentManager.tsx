@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { collection, addDoc, getDocs, deleteDoc, doc, onSnapshot, query, orderBy } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { Button } from "@/components/ui/button";
+import { StudentDetail } from "./StudentDetail";
 
 interface Student {
     id: string;
@@ -11,6 +12,9 @@ interface Student {
     phone: string;
     instrument: string;
     status: string;
+    progress?: string;
+    level?: string;
+    feedback?: string;
     createdAt: any;
 }
 
@@ -20,6 +24,7 @@ export function StudentManager() {
     const [phone, setPhone] = useState("");
     const [instrument, setInstrument] = useState("");
     const [loading, setLoading] = useState(false);
+    const [selectedStudent, setSelectedStudent] = useState<Student | null>(null);
 
     useEffect(() => {
         const q = query(collection(db, "students"), orderBy("createdAt", "desc"));
@@ -68,6 +73,10 @@ export function StudentManager() {
             alert("삭제 실패");
         }
     };
+
+    if (selectedStudent) {
+        return <StudentDetail student={selectedStudent} onBack={() => setSelectedStudent(null)} />;
+    }
 
     return (
         <div className="grid gap-8 md:grid-cols-2">
@@ -122,12 +131,18 @@ export function StudentManager() {
                     ) : (
                         <ul className="space-y-3">
                             {students.map((student) => (
-                                <li key={student.id} className="flex items-center justify-between rounded-md border p-3">
+                                <li key={student.id}
+                                    className="flex items-center justify-between rounded-md border p-3 cursor-pointer hover:bg-slate-50 transition-colors"
+                                    onClick={() => setSelectedStudent(student)}
+                                >
                                     <div>
                                         <p className="font-medium">{student.name} <span className="text-xs text-muted-foreground">({student.instrument})</span></p>
                                         <p className="text-sm text-muted-foreground">{student.phone}</p>
                                     </div>
-                                    <Button variant="ghost" size="sm" onClick={() => handleDelete(student.id)} className="text-red-500 hover:text-red-700">
+                                    <Button variant="ghost" size="sm" onClick={(e) => {
+                                        e.stopPropagation();
+                                        handleDelete(student.id);
+                                    }} className="text-red-500 hover:text-red-700">
                                         삭제
                                     </Button>
                                 </li>
