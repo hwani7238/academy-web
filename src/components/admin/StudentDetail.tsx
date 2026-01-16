@@ -23,12 +23,13 @@ interface LearningLog {
     createdAt: any;
 }
 
-interface Video {
+interface MediaItem {
     id: string;
     title: string;
     url: string;
     createdAt: any;
     storagePath: string;
+    type?: 'video' | 'image';
 }
 
 interface StudentDetailProps {
@@ -41,11 +42,11 @@ export function StudentDetail({ student, onBack }: StudentDetailProps) {
     const [level, setLevel] = useState("");
     const [feedback, setFeedback] = useState("");
     const [logs, setLogs] = useState<LearningLog[]>([]);
-    const [videos, setVideos] = useState<Video[]>([]);
+    const [mediaItems, setMediaItems] = useState<MediaItem[]>([]);
     const [uploading, setUploading] = useState(false);
     const [uploadProgress, setUploadProgress] = useState(0);
-    const [videoFile, setVideoFile] = useState<File | null>(null);
-    const [videoTitle, setVideoTitle] = useState("");
+    const [mediaFile, setMediaFile] = useState<File | null>(null);
+    const [mediaTitle, setMediaTitle] = useState("");
     const [saving, setSaving] = useState(false);
 
     useEffect(() => {
@@ -59,19 +60,26 @@ export function StudentDetail({ student, onBack }: StudentDetailProps) {
             setLogs(logsData);
         });
 
-        // Subscribe to videos subcollection
-        const videosQuery = query(collection(db, "students", student.id, "videos"), orderBy("createdAt", "desc"));
-        const unsubscribeVideos = onSnapshot(videosQuery, (snapshot) => {
-            const videoData: Video[] = [];
+        // Subscribe to videos subcollection (keeping collection name for backward compatibility, but treating as generic media)
+        const mediaQuery = query(collection(db, "students", student.id, "videos"), orderBy("createdAt", "desc"));
+        const unsubscribeMedia = onSnapshot(mediaQuery, (snapshot) => {
+            const items: MediaItem[] = [];
             snapshot.forEach((doc) => {
-                videoData.push({ id: doc.id, ...doc.data() } as Video);
+                const data = doc.data();
+                items.push({
+                    id: doc.id,
+                    ...data,
+                    // If type is missing (legacy data), assume video logic or check extension? 
+                    // For now default to video if unsure, but new items will have type.
+                    type: data.type || 'video'
+                } as MediaItem);
             });
-            setVideos(videoData);
+            setMediaItems(items);
         });
 
         return () => {
             unsubscribeLogs();
-            unsubscribeVideos();
+            unsubscribeMedia();
         };
     }, [student.id]);
 
@@ -89,9 +97,6 @@ export function StudentDetail({ student, onBack }: StudentDetailProps) {
                 feedback,
                 createdAt: new Date()
             });
-
-            // Update main student document with latest info for quick access if needed (optional, keeping it clean for now)
-            // But user requirement specifically asked for a LIST below.
 
             setProgress("");
             setLevel("");
@@ -122,14 +127,15 @@ export function StudentDetail({ student, onBack }: StudentDetailProps) {
         }
     };
 
-    const handleUploadVideo = async (e: React.FormEvent) => {
+    const handleUploadMedia = async (e: React.FormEvent) => {
         e.preventDefault();
-        if (!videoFile || !videoTitle) return;
+        if (!mediaFile || !mediaTitle) return;
 
         setUploading(true);
-        const storagePath = `videos/${student.id}/${Date.now()}_${videoFile.name}`;
+        const fileType = mediaFile.type.startsWith('image/') ? 'image' : 'video';
+        const storagePath = `videos/${student.id}/${Date.now()}_${mediaFile.name}`; // Keep path consistent or rename? 'videos' folder is fine
         const storageRef = ref(storage, storagePath);
-        const uploadTask = uploadBytesResumable(storageRef, videoFile);
+        const uploadTask = uploadBytesResumable(storageRef, mediaFile);
 
         uploadTask.on(
             "state_changed",
@@ -145,33 +151,34 @@ export function StudentDetail({ student, onBack }: StudentDetailProps) {
             async () => {
                 const downloadURL = await getDownloadURL(uploadTask.snapshot.ref);
                 await addDoc(collection(db, "students", student.id, "videos"), {
-                    title: videoTitle,
+                    title: mediaTitle,
                     url: downloadURL,
                     storagePath: storagePath,
+                    type: fileType,
                     createdAt: new Date()
                 });
 
                 setUploading(false);
-                setVideoFile(null);
-                setVideoTitle("");
+                setMediaFile(null);
+                setMediaTitle("");
                 setUploadProgress(0);
-                alert("영상 업로드 완료");
+                alert("업로드 완료");
             }
         );
     };
 
-    const handleDeleteVideo = async (video: Video) => {
+    const handleDeleteMedia = async (item: MediaItem) => {
         if (!confirm("정말 삭제하시겠습니까?")) return;
 
         try {
             // Delete from Storage
-            const videoRef = ref(storage, video.storagePath);
-            await deleteObject(videoRef);
+            const mediaRef = ref(storage, item.storagePath);
+            await deleteObject(mediaRef);
 
             // Delete from Firestore
-            await deleteDoc(doc(db, "students", student.id, "videos", video.id));
+            await deleteDoc(doc(db, "students", student.id, "videos", item.id));
         } catch (error) {
-            console.error("Delete video error:", error);
+            console.error("Delete media error:", error);
             alert("삭제 실패");
         }
     };
@@ -186,7 +193,7 @@ export function StudentDetail({ student, onBack }: StudentDetailProps) {
             </div>
 
             <div className="grid gap-6 md:grid-cols-2">
-                {/* Info Management */}
+                {/* Info Management & Upload Form */}
                 <div className="space-y-6">
                     <div className="rounded-lg border p-6 shadow-sm">
                         <h3 className="mb-4 text-lg font-semibold">새로운 학습 로그 작성</h3>
@@ -221,6 +228,44 @@ export function StudentDetail({ student, onBack }: StudentDetailProps) {
                             <Button onClick={handleAddLog} disabled={saving} className="w-full">
                                 {saving ? "저장 중..." : "학습 로그 저장"}
                             </Button>
+
+                            <hr className="my-6 border-t" />
+
+                            {/* Media Upload Section Moved Here */}
+                            <div>
+                                <h3 className="mb-4 text-lg font-semibold">연주 영상/사진 업로드</h3>
+                                <form onSubmit={handleUploadMedia} className="space-y-4">
+                                    <div className="grid gap-2">
+                                        <label className="text-sm font-medium">제목</label>
+                                        <input
+                                            className="flex h-10 w-full rounded-md border border-input px-3 py-2 text-sm"
+                                            value={mediaTitle}
+                                            onChange={(e) => setMediaTitle(e.target.value)}
+                                            placeholder="예: 2024 봄 연주회"
+                                            required
+                                        />
+                                    </div>
+                                    <div className="grid gap-2">
+                                        <label className="text-sm font-medium">파일 선택</label>
+                                        <input
+                                            type="file"
+                                            accept="video/*,image/*"
+                                            className="flex w-full rounded-md border border-input px-3 py-2 text-sm"
+                                            onChange={(e) => setMediaFile(e.target.files ? e.target.files[0] : null)}
+                                            required
+                                        />
+                                        <p className="text-xs text-muted-foreground">모바일에서도 바로 선택하거나 촬영하여 업로드할 수 있습니다.</p>
+                                    </div>
+                                    {uploading && (
+                                        <div className="h-2 w-full overflow-hidden rounded-full bg-secondary">
+                                            <div className="h-full bg-primary transition-all duration-300" style={{ width: `${uploadProgress}%` }} />
+                                        </div>
+                                    )}
+                                    <Button type="submit" disabled={uploading} variant="secondary" className="w-full">
+                                        {uploading ? `업로드 중 ${Math.round(uploadProgress)}%` : "업로드"}
+                                    </Button>
+                                </form>
+                            </div>
                         </div>
                     </div>
 
@@ -258,60 +303,36 @@ export function StudentDetail({ student, onBack }: StudentDetailProps) {
                     </div>
                 </div>
 
-                {/* Video Management */}
-                <div className="rounded-lg border p-6 shadow-sm h-fit">
-                    <h3 className="mb-4 text-lg font-semibold">연주 영상 업로드</h3>
-                    <form onSubmit={handleUploadVideo} className="mb-6 space-y-4">
-                        <div className="grid gap-2">
-                            <label className="text-sm font-medium">영상 제목</label>
-                            <input
-                                className="flex h-10 w-full rounded-md border border-input px-3 py-2 text-sm"
-                                value={videoTitle}
-                                onChange={(e) => setVideoTitle(e.target.value)}
-                                placeholder="예: 2024 봄 연주회"
-                                required
-                            />
-                        </div>
-                        <div className="grid gap-2">
-                            <label className="text-sm font-medium">영상 파일</label>
-                            <input
-                                type="file"
-                                accept="video/*"
-                                className="flex w-full rounded-md border border-input px-3 py-2 text-sm"
-                                onChange={(e) => setVideoFile(e.target.files ? e.target.files[0] : null)}
-                                required
-                            />
-                            <p className="text-xs text-muted-foreground">모바일에서도 바로 영상을 선택하거나 촬영하여 업로드할 수 있습니다.</p>
-                        </div>
-                        {uploading && (
-                            <div className="h-2 w-full overflow-hidden rounded-full bg-secondary">
-                                <div className="h-full bg-primary transition-all duration-300" style={{ width: `${uploadProgress}%` }} />
-                            </div>
-                        )}
-                        <Button type="submit" disabled={uploading} className="w-full">
-                            {uploading ? `업로드 중 ${Math.round(uploadProgress)}%` : "영상 업로드"}
-                        </Button>
-                    </form>
-
-                    <div className="space-y-4">
-                        <h4 className="font-medium">업로드된 영상 ({videos.length})</h4>
-                        <div className="max-h-[500px] overflow-y-auto space-y-3">
-                            {videos.map((video) => (
-                                <div key={video.id} className="rounded-md border p-3">
+                {/* Right Column: Uploaded Media List (Moved from bottom of left or was separate? It was right column before under 'Video Management') */}
+                <div className="space-y-6">
+                    <div className="rounded-lg border p-6 shadow-sm h-fit">
+                        <h3 className="font-semibold text-lg mb-4">업로드된 미디어 ({mediaItems.length})</h3>
+                        <div className="max-h-[600px] overflow-y-auto space-y-4">
+                            {mediaItems.map((item) => (
+                                <div key={item.id} className="rounded-md border p-3">
                                     <div className="mb-2 flex items-center justify-between">
-                                        <span className="font-medium">{video.title}</span>
-                                        <Button variant="ghost" size="sm" onClick={() => handleDeleteVideo(video)} className="text-red-500 hover:text-red-700">
+                                        <span className="font-medium">{item.title}</span>
+                                        <Button variant="ghost" size="sm" onClick={() => handleDeleteMedia(item)} className="text-red-500 hover:text-red-700">
                                             삭제
                                         </Button>
                                     </div>
-                                    <video controls className="w-full rounded bg-black">
-                                        <source src={video.url} />
-                                    </video>
+
+                                    {item.type === 'image' ? (
+                                        <img src={item.url} alt={item.title} className="w-full rounded bg-black object-contain max-h-[300px]" />
+                                    ) : (
+                                        <video controls className="w-full rounded bg-black max-h-[300px]">
+                                            <source src={item.url} />
+                                        </video>
+                                    )}
+
                                     <p className="mt-1 text-xs text-muted-foreground">
-                                        {video.createdAt.toDate ? video.createdAt.toDate().toLocaleDateString() : new Date(video.createdAt.seconds * 1000).toLocaleDateString()}
+                                        {item.createdAt.toDate ? item.createdAt.toDate().toLocaleDateString() : new Date(item.createdAt.seconds * 1000).toLocaleDateString()}
                                     </p>
                                 </div>
                             ))}
+                            {mediaItems.length === 0 && (
+                                <p className="text-center text-muted-foreground py-8">업로드된 영상이나 사진이 없습니다.</p>
+                            )}
                         </div>
                     </div>
                 </div>
