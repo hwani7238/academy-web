@@ -106,7 +106,7 @@ export default function ReportPage() {
                 </div>
 
                 {log.mediaUrl && (
-                    <div>
+                    <div className="px-6">
                         <h3 className="mb-3 text-lg font-semibold">첨부 미디어</h3>
                         <div className="rounded-lg border bg-white p-2">
                             {log.mediaTitle && <p className="mb-2 font-medium px-1">{log.mediaTitle}</p>}
@@ -121,7 +121,7 @@ export default function ReportPage() {
                     </div>
                 )}
 
-                <div className="pt-4 text-center">
+                <div className="p-6 pt-0 text-center">
                     <p className="text-xs text-muted-foreground">
                         본 리포트는 위뮤직 아카데미에서 발송된 학습 기록입니다.<br />
                         문의사항은 학원으로 연락 부탁드립니다.
@@ -129,6 +129,5 @@ export default function ReportPage() {
                 </div>
             </div>
         </div>
-        </div >
     );
 }
