@@ -23,6 +23,10 @@ interface LearningLog {
     createdAt: any;
     authorName?: string;
     authorId?: string;
+    mediaUrl?: string;
+    mediaType?: string;
+    mediaPath?: string;
+    mediaTitle?: string;
 }
 
 // ... existing interfaces ...
@@ -65,26 +69,8 @@ export function StudentDetail({ student, onBack, currentUser }: StudentDetailPro
             setLogs(logsData);
         });
 
-        // Subscribe to videos subcollection (keeping collection name for backward compatibility, but treating as generic media)
-        const mediaQuery = query(collection(db, "students", student.id, "videos"), orderBy("createdAt", "desc"));
-        const unsubscribeMedia = onSnapshot(mediaQuery, (snapshot) => {
-            const items: MediaItem[] = [];
-            snapshot.forEach((doc) => {
-                const data = doc.data();
-                items.push({
-                    id: doc.id,
-                    ...data,
-                    // If type is missing (legacy data), assume video logic or check extension? 
-                    // For now default to video if unsure, but new items will have type.
-                    type: data.type || 'video'
-                } as MediaItem);
-            });
-            setMediaItems(items);
-        });
-
         return () => {
             unsubscribeLogs();
-            unsubscribeMedia();
         };
     }, [student.id]);
 
@@ -92,290 +78,263 @@ export function StudentDetail({ student, onBack, currentUser }: StudentDetailPro
 
     const handleAddLog = async () => {
         if (!progress && !level && !feedback) {
-            alert("정보를 입력해주세요.");
-            return;
-        }
-
-        setSaving(true);
-        try {
-            const docRef = await addDoc(collection(db, "students", student.id, "logs"), {
-                progress,
-                level,
-                feedback,
-                authorId: currentUser.uid,
-                authorName: currentUser.name || currentUser.email,
-                createdAt: new Date()
-            });
-
-            if (sendNotification) {
-                // Determine template parameters based on logic
-                // For now, generating a link
-                const reportLink = `${window.location.origin}/report/${student.id}/${docRef.id}`;
-
-                await fetch('/api/send-alimtalk', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        phone: student.phone, // Assuming student has phone field
-                        templateId: 'FEEDBACK_TEMPLATE', // Placeholder
-                        templateParameter: {
-                            student_name: student.name,
-                            link: reportLink
-                        }
-                    })
-                });
+            if (!progress && !level && !feedback && !mediaFile) {
+                alert("정보를 입력해주세요.");
+                return;
             }
 
-            setProgress("");
-            setLevel("");
-            setFeedback("");
-            alert("학습 로그가 저장되었습니다." + (sendNotification ? " (알림 발송 시도함)" : ""));
-        } catch (error) {
-            console.error("Error adding log:", error);
-            alert("저장 실패");
-        } finally {
-            setSaving(false);
-        }
-    };
+            setSaving(true);
+            try {
+                let downloadURL = "";
+                let fileType = "";
+                let storagePath = "";
 
-    const handleCopyLink = (logId: string) => {
-        const link = `${window.location.origin}/report/${student.id}/${logId}`;
-        navigator.clipboard.writeText(link).then(() => {
-            alert("리포트 링크가 복사되었습니다. 학부모님께 전달해주세요!");
-        });
-    };
+                if (mediaFile) {
+                    setUploading(true);
+                    fileType = mediaFile.type.startsWith('image/') ? 'image' : 'video';
+                    storagePath = `logs/${student.id}/${Date.now()}_${mediaFile.name}`;
+                    const storageRef = ref(storage, storagePath);
+                    const uploadTask = uploadBytesResumable(storageRef, mediaFile);
 
-    const handleDeleteLog = async (logId: string) => {
-        if (!confirm("정말 삭제하시겠습니까?")) return;
-        try {
-            await deleteDoc(doc(db, "students", student.id, "logs", logId));
-        } catch (error) {
-            console.error("Error deleting log:", error);
-            alert("삭제 실패");
-        }
-    };
+                    await new Promise<void>((resolve, reject) => {
+                        uploadTask.on(
+                            "state_changed",
+                            (snapshot) => {
+                                const progress = (snapshot.bytesTransferred / snapshot.totalBytes) * 100;
+                                setUploadProgress(progress);
+                            },
+                            (error) => {
+                                console.error("Upload error details:", error);
+                                reject(error);
+                            },
+                            async () => {
+                                downloadURL = await getDownloadURL(uploadTask.snapshot.ref);
+                                resolve();
+                            }
+                        );
+                    });
+                    setUploading(false);
+                }
 
-    const handleUploadMedia = async (e: React.FormEvent) => {
-        e.preventDefault();
-        if (!mediaFile || !mediaTitle) return;
-
-        setUploading(true);
-        const fileType = mediaFile.type.startsWith('image/') ? 'image' : 'video';
-        const storagePath = `videos/${student.id}/${Date.now()}_${mediaFile.name}`; // Keep path consistent or rename? 'videos' folder is fine
-        const storageRef = ref(storage, storagePath);
-        const uploadTask = uploadBytesResumable(storageRef, mediaFile);
-
-        uploadTask.on(
-            "state_changed",
-            (snapshot) => {
-                const progress = (snapshot.bytesTransferred / snapshot.totalBytes) * 100;
-                setUploadProgress(progress);
-            },
-            (error) => {
-                console.error("Upload error:", error);
-                alert("업로드 실패");
-                setUploading(false);
-            },
-            async () => {
-                const downloadURL = await getDownloadURL(uploadTask.snapshot.ref);
-                await addDoc(collection(db, "students", student.id, "videos"), {
-                    title: mediaTitle,
-                    url: downloadURL,
-                    storagePath: storagePath,
-                    type: fileType,
-                    createdAt: new Date()
+                const docRef = await addDoc(collection(db, "students", student.id, "logs"), {
+                    progress,
+                    level,
+                    feedback,
+                    authorId: currentUser.uid,
+                    authorName: currentUser.name || currentUser.email,
+                    createdAt: new Date(),
+                    mediaUrl: downloadURL,
+                    mediaType: fileType,
+                    mediaPath: storagePath,
+                    mediaTitle: mediaTitle
                 });
 
-                setUploading(false);
+                if (sendNotification) {
+                    const reportLink = `${window.location.origin}/report/${student.id}/${docRef.id}`;
+
+                    await fetch('/api/send-alimtalk', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            phone: student.phone,
+                            templateId: 'FEEDBACK_TEMPLATE',
+                            templateParameter: {
+                                student_name: student.name,
+                                link: reportLink
+                            }
+                        })
+                    });
+                }
+
+                setProgress("");
+                setLevel("");
+                setFeedback("");
                 setMediaFile(null);
                 setMediaTitle("");
                 setUploadProgress(0);
-                alert("업로드 완료");
+                alert("학습 로그가 저장되었습니다." + (sendNotification ? " (알림 발송 시도함)" : ""));
+            } catch (error: any) {
+                console.error("Error adding log:", error);
+                let message = "저장 실패";
+                if (error.code === 'storage/unauthorized') {
+                    message = "파일 업로드 권한이 없습니다. 관리자에게 문의하세요.";
+                } else if (error.code === 'storage/canceled') {
+                    message = "파일 업로드가 취소되었습니다.";
+                } else if (error.code === 'storage/unknown') {
+                    message = "파일 업로드 중 알 수 없는 오류가 발생했습니다.";
+                }
+                alert(message);
+            } finally {
+                setSaving(false);
+                setUploading(false);
             }
-        );
-    };
+        };
 
-    const handleDeleteMedia = async (item: MediaItem) => {
-        if (!confirm("정말 삭제하시겠습니까?")) return;
+        const handleCopyLink = (logId: string) => {
+            const link = `${window.location.origin}/report/${student.id}/${logId}`;
+            navigator.clipboard.writeText(link).then(() => {
+                alert("리포트 링크가 복사되었습니다. 학부모님께 전달해주세요!");
+            });
+        };
 
-        try {
-            // Delete from Storage
-            const mediaRef = ref(storage, item.storagePath);
-            await deleteObject(mediaRef);
+        const handleDeleteLog = async (log: LearningLog) => {
+            if (!confirm("정말 삭제하시겠습니까?")) return;
+            try {
+                // Delete media if exists
+                if (log.mediaPath) {
+                    try {
+                        const mediaRef = ref(storage, log.mediaPath);
+                        await deleteObject(mediaRef);
+                    } catch (e) {
+                        console.error("Error deleting media file:", e);
+                    }
+                }
+                await deleteDoc(doc(db, "students", student.id, "logs", log.id));
+            } catch (error) {
+                console.error("Error deleting log:", error);
+                alert("삭제 실패");
+            }
+        };
 
-            // Delete from Firestore
-            await deleteDoc(doc(db, "students", student.id, "videos", item.id));
-        } catch (error) {
-            console.error("Delete media error:", error);
-            alert("삭제 실패");
-        }
-    };
+        return (
+            <div className="space-y-6">
+                <div className="flex items-center justify-between">
+                    <Button variant="outline" onClick={onBack}>
+                        &larr; 뒤로가기
+                    </Button>
+                    <h2 className="text-2xl font-bold">{student.name} 학생 상세 정보</h2>
+                </div>
 
-    return (
-        <div className="space-y-6">
-            <div className="flex items-center justify-between">
-                <Button variant="outline" onClick={onBack}>
-                    &larr; 뒤로가기
-                </Button>
-                <h2 className="text-2xl font-bold">{student.name} 학생 상세 정보</h2>
-            </div>
+                <div className="grid gap-6 md:grid-cols-2">
+                    {/* Info Management & Upload Form */}
+                    <div className="space-y-6">
+                        <div className="rounded-lg border p-6 shadow-sm">
+                            <h3 className="mb-4 text-lg font-semibold">새로운 학습 로그 작성</h3>
+                            <div className="space-y-4">
+                                <div className="grid gap-2">
+                                    <label className="text-sm font-medium">현재 진도</label>
+                                    <input
+                                        className="flex h-10 w-full rounded-md border border-input px-3 py-2 text-sm"
+                                        value={progress}
+                                        onChange={(e) => setProgress(e.target.value)}
+                                        placeholder="예: 바이엘 3권"
+                                    />
+                                </div>
+                                <div className="grid gap-2">
+                                    <label className="text-sm font-medium">현재 레벨</label>
+                                    <input
+                                        className="flex h-10 w-full rounded-md border border-input px-3 py-2 text-sm"
+                                        value={level}
+                                        onChange={(e) => setLevel(e.target.value)}
+                                        placeholder="예: 초급"
+                                    />
+                                </div>
+                                <div className="grid gap-2">
+                                    <label className="text-sm font-medium">피드백</label>
+                                    <textarea
+                                        className="flex min-h-[100px] w-full rounded-md border border-input px-3 py-2 text-sm"
+                                        value={feedback}
+                                        onChange={(e) => setFeedback(e.target.value)}
+                                        placeholder="학생에 대한 피드백을 입력하세요."
+                                    />
+                                </div>
 
-            <div className="grid gap-6 md:grid-cols-2">
-                {/* Info Management & Upload Form */}
-                <div className="space-y-6">
-                    <div className="rounded-lg border p-6 shadow-sm">
-                        <h3 className="mb-4 text-lg font-semibold">새로운 학습 로그 작성</h3>
-                        <div className="space-y-4">
-                            <div className="grid gap-2">
-                                <label className="text-sm font-medium">현재 진도</label>
-                                <input
-                                    className="flex h-10 w-full rounded-md border border-input px-3 py-2 text-sm"
-                                    value={progress}
-                                    onChange={(e) => setProgress(e.target.value)}
-                                    placeholder="예: 바이엘 3권"
-                                />
-                            </div>
-                            <div className="grid gap-2">
-                                <label className="text-sm font-medium">현재 레벨</label>
-                                <input
-                                    className="flex h-10 w-full rounded-md border border-input px-3 py-2 text-sm"
-                                    value={level}
-                                    onChange={(e) => setLevel(e.target.value)}
-                                    placeholder="예: 초급"
-                                />
-                            </div>
-                            <div className="grid gap-2">
-                                <label className="text-sm font-medium">피드백</label>
-                                <textarea
-                                    className="flex min-h-[100px] w-full rounded-md border border-input px-3 py-2 text-sm"
-                                    value={feedback}
-                                    onChange={(e) => setFeedback(e.target.value)}
-                                    placeholder="학생에 대한 피드백을 입력하세요."
-                                />
-                            </div>
-                            <div className="flex items-center space-x-2">
-                                <input
-                                    type="checkbox"
-                                    id="notify"
-                                    className="h-4 w-4 rounded border-gray-300"
-                                    checked={sendNotification}
-                                    onChange={(e) => setSendNotification(e.target.checked)}
-                                />
-                                <label htmlFor="notify" className="text-sm font-medium">학부모님께 알림톡 발송</label>
-                            </div>
-                            <Button onClick={handleAddLog} disabled={saving} className="w-full">
-                                {saving ? "저장 중..." : "학습 로그 저장"}
-                            </Button>
+                                <hr className="my-4 border-t" />
 
-                            <hr className="my-6 border-t" />
-
-                            {/* Media Upload Section Moved Here */}
-                            <div>
-                                <h3 className="mb-4 text-lg font-semibold">연주 영상/사진 업로드</h3>
-                                <form onSubmit={handleUploadMedia} className="space-y-4">
+                                <div className="space-y-4">
+                                    <p className="text-sm font-medium">영상/사진 첨부 (선택)</p>
                                     <div className="grid gap-2">
-                                        <label className="text-sm font-medium">제목</label>
+                                        <label className="text-xs text-muted-foreground">제목 (선택)</label>
                                         <input
                                             className="flex h-10 w-full rounded-md border border-input px-3 py-2 text-sm"
                                             value={mediaTitle}
                                             onChange={(e) => setMediaTitle(e.target.value)}
                                             placeholder="예: 2024 봄 연주회"
-                                            required
                                         />
                                     </div>
                                     <div className="grid gap-2">
-                                        <label className="text-sm font-medium">파일 선택</label>
                                         <input
                                             type="file"
                                             accept="video/*,image/*"
                                             className="flex w-full rounded-md border border-input px-3 py-2 text-sm"
                                             onChange={(e) => setMediaFile(e.target.files ? e.target.files[0] : null)}
-                                            required
                                         />
-                                        <p className="text-xs text-muted-foreground">모바일에서도 바로 선택하거나 촬영하여 업로드할 수 있습니다.</p>
                                     </div>
                                     {uploading && (
                                         <div className="h-2 w-full overflow-hidden rounded-full bg-secondary">
                                             <div className="h-full bg-primary transition-all duration-300" style={{ width: `${uploadProgress}%` }} />
                                         </div>
                                     )}
-                                    <Button type="submit" disabled={uploading} variant="secondary" className="w-full">
-                                        {uploading ? `업로드 중 ${Math.round(uploadProgress)}%` : "업로드"}
-                                    </Button>
-                                </form>
+                                </div>
+
+                                <div className="flex items-center space-x-2 pt-2">
+                                    <input
+                                        type="checkbox"
+                                        id="notify"
+                                        className="h-4 w-4 rounded border-gray-300"
+                                        checked={sendNotification}
+                                        onChange={(e) => setSendNotification(e.target.checked)}
+                                    />
+                                    <label htmlFor="notify" className="text-sm font-medium">학부모님께 알림톡 발송</label>
+                                </div>
+                                <Button onClick={handleAddLog} disabled={saving || uploading} className="w-full">
+                                    {saving || uploading ? "저장/업로드 중..." : "학습 로그 저장"}
+                                </Button>
                             </div>
                         </div>
                     </div>
 
                     {/* Learning Log History */}
-                    <div className="rounded-lg border p-6 shadow-sm">
-                        <h3 className="mb-4 text-lg font-semibold">학습 기록 ({logs.length})</h3>
-                        <div className="max-h-[400px] overflow-y-auto space-y-4">
-                            {logs.map((log) => (
-                                <div key={log.id} className="rounded-md border p-4 bg-slate-50">
-                                    <div className="flex justify-between items-start mb-2">
-                                        <p className="text-sm text-muted-foreground">
-                                            {log.createdAt.toDate ? log.createdAt.toDate().toLocaleDateString() : new Date(log.createdAt.seconds * 1000).toLocaleDateString()}
-                                            {log.authorName && <span className="ml-2 text-xs text-blue-600 font-medium">By {log.authorName}</span>}
-                                        </p>
-                                        <div className="flex gap-2">
-                                            <Button variant="outline" size="sm" onClick={() => handleCopyLink(log.id)} className="h-7 text-xs">
-                                                링크 복사
-                                            </Button>
-                                            <Button variant="ghost" size="sm" onClick={() => handleDeleteLog(log.id)} className="h-7 w-7 p-0 text-red-500 hover:text-red-700">
-                                                &times;
-                                            </Button>
+                    <div className="space-y-6">
+                        <div className="rounded-lg border p-6 shadow-sm">
+                            <h3 className="mb-4 text-lg font-semibold">학습 기록 ({logs.length})</h3>
+                            <div className="max-h-[600px] overflow-y-auto space-y-4">
+                                {logs.map((log) => (
+                                    <div key={log.id} className="rounded-md border p-4 bg-slate-50">
+                                        <div className="flex justify-between items-start mb-2">
+                                            <p className="text-sm text-muted-foreground">
+                                                {log.createdAt.toDate ? log.createdAt.toDate().toLocaleDateString() : new Date(log.createdAt.seconds * 1000).toLocaleDateString()}
+                                                {log.authorName && <span className="ml-2 text-xs text-blue-600 font-medium">By {log.authorName}</span>}
+                                            </p>
+                                            <div className="flex gap-2">
+                                                <Button variant="outline" size="sm" onClick={() => handleCopyLink(log.id)} className="h-7 text-xs">
+                                                    링크 복사
+                                                </Button>
+                                                <Button variant="ghost" size="sm" onClick={() => handleDeleteLog(log)} className="h-7 w-7 p-0 text-red-500 hover:text-red-700">
+                                                    &times;
+                                                </Button>
+                                            </div>
+                                        </div>
+                                        <div className="space-y-2 text-sm">
+                                            {log.progress && <p><span className="font-semibold">진도:</span> {log.progress}</p>}
+                                            {log.level && <p><span className="font-semibold">레벨:</span> {log.level}</p>}
+                                            {log.feedback && (
+                                                <div className="p-2 bg-white rounded border">
+                                                    <p className="whitespace-pre-wrap">{log.feedback}</p>
+                                                </div>
+                                            )}
+                                            {log.mediaUrl && (
+                                                <div className="mt-3">
+                                                    {log.mediaTitle && <p className="font-medium mb-1">{log.mediaTitle}</p>}
+                                                    {log.mediaType === 'image' ? (
+                                                        <img src={log.mediaUrl} alt="첨부 이미지" className="w-full rounded bg-black object-contain max-h-[300px]" />
+                                                    ) : (
+                                                        <video controls className="w-full rounded bg-black max-h-[300px]">
+                                                            <source src={log.mediaUrl} />
+                                                        </video>
+                                                    )}
+                                                </div>
+                                            )}
                                         </div>
                                     </div>
-                                    <div className="space-y-1 text-sm">
-                                        {log.progress && <p><span className="font-semibold">진도:</span> {log.progress}</p>}
-                                        {log.level && <p><span className="font-semibold">레벨:</span> {log.level}</p>}
-                                        {log.feedback && (
-                                            <div className="mt-2 p-2 bg-white rounded border">
-                                                <p className="whitespace-pre-wrap">{log.feedback}</p>
-                                            </div>
-                                        )}
-                                    </div>
-                                </div>
-                            ))}
-                        </div>
-                    </div>
-                </div>
-
-                {/* Right Column: Uploaded Media List (Moved from bottom of left or was separate? It was right column before under 'Video Management') */}
-                <div className="space-y-6">
-                    <div className="rounded-lg border p-6 shadow-sm h-fit">
-                        <h3 className="font-semibold text-lg mb-4">업로드된 미디어 ({mediaItems.length})</h3>
-                        <div className="max-h-[600px] overflow-y-auto space-y-4">
-                            {mediaItems.map((item) => (
-                                <div key={item.id} className="rounded-md border p-3">
-                                    <div className="mb-2 flex items-center justify-between">
-                                        <span className="font-medium">{item.title}</span>
-                                        <Button variant="ghost" size="sm" onClick={() => handleDeleteMedia(item)} className="text-red-500 hover:text-red-700">
-                                            삭제
-                                        </Button>
-                                    </div>
-
-                                    {item.type === 'image' ? (
-                                        <img src={item.url} alt={item.title} className="w-full rounded bg-black object-contain max-h-[300px]" />
-                                    ) : (
-                                        <video controls className="w-full rounded bg-black max-h-[300px]">
-                                            <source src={item.url} />
-                                        </video>
-                                    )}
-
-                                    <p className="mt-1 text-xs text-muted-foreground">
-                                        {item.createdAt.toDate ? item.createdAt.toDate().toLocaleDateString() : new Date(item.createdAt.seconds * 1000).toLocaleDateString()}
-                                    </p>
-                                </div>
-                            ))}
-                            {mediaItems.length === 0 && (
-                                <p className="text-center text-muted-foreground py-8">업로드된 영상이나 사진이 없습니다.</p>
-                            )}
+                                ))}
+                                {logs.length === 0 && (
+                                    <p className="text-center text-muted-foreground py-8">작성된 학습 로그가 없습니다.</p>
+                                )}
+                            </div>
                         </div>
                     </div>
                 </div>
             </div>
-        </div>
-    );
-}
+        );
+    }

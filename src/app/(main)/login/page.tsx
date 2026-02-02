@@ -23,7 +23,14 @@ export default function LoginPage() {
             router.push("/admin"); // 관리자 페이지로 이동
         } catch (err: any) {
             console.error("Login error:", err);
-            setError("이메일 또는 비밀번호가 올바르지 않습니다.");
+            let message = "로그인에 실패했습니다.";
+            if (err.code === "auth/wrong-password") message = "비밀번호가 올바르지 않습니다.";
+            else if (err.code === "auth/user-not-found") message = "등록되지 않은 사용자입니다.";
+            else if (err.code === "auth/invalid-email") message = "유효하지 않은 이메일 형식입니다.";
+            else if (err.code === "auth/too-many-requests") message = "잠시 후 다시 시도해주세요.";
+            else if (err.code === "auth/invalid-credential") message = "이메일이 존재하지 않거나 비밀번호가 틀렸습니다.";
+
+            setError(message + " (" + err.code + ")");
         } finally {
             setLoading(false);
         }

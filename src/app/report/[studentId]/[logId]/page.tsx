@@ -15,6 +15,9 @@ interface LearningLog {
     level: string;
     feedback: string;
     createdAt: any;
+    mediaUrl?: string;
+    mediaType?: string;
+    mediaTitle?: string;
 }
 
 export default function ReportPage() {
@@ -96,21 +99,36 @@ export default function ReportPage() {
                         </div>
                     </div>
 
+                    <h3 className="mb-3 text-lg font-semibold">선생님 피드백</h3>
+                    <div className="rounded-lg border bg-white p-4 text-slate-700 leading-relaxed whitespace-pre-wrap">
+                        {log.feedback}
+                    </div>
+                </div>
+
+                {log.mediaUrl && (
                     <div>
-                        <h3 className="mb-3 text-lg font-semibold">선생님 피드백</h3>
-                        <div className="rounded-lg border bg-white p-4 text-slate-700 leading-relaxed whitespace-pre-wrap">
-                            {log.feedback}
+                        <h3 className="mb-3 text-lg font-semibold">첨부 미디어</h3>
+                        <div className="rounded-lg border bg-white p-2">
+                            {log.mediaTitle && <p className="mb-2 font-medium px-1">{log.mediaTitle}</p>}
+                            {log.mediaType === 'image' ? (
+                                <img src={log.mediaUrl} alt="첨부 이미지" className="w-full rounded" />
+                            ) : (
+                                <video controls className="w-full rounded">
+                                    <source src={log.mediaUrl} />
+                                </video>
+                            )}
                         </div>
                     </div>
+                )}
 
-                    <div className="pt-4 text-center">
-                        <p className="text-xs text-muted-foreground">
-                            본 리포트는 위뮤직 아카데미에서 발송된 학습 기록입니다.<br />
-                            문의사항은 학원으로 연락 부탁드립니다.
-                        </p>
-                    </div>
+                <div className="pt-4 text-center">
+                    <p className="text-xs text-muted-foreground">
+                        본 리포트는 위뮤직 아카데미에서 발송된 학습 기록입니다.<br />
+                        문의사항은 학원으로 연락 부탁드립니다.
+                    </p>
                 </div>
             </div>
         </div>
+        </div >
     );
 }
