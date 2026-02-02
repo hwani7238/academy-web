@@ -18,7 +18,11 @@ interface Student {
     createdAt: any;
 }
 
-export function StudentManager() {
+interface StudentManagerProps {
+    currentUser: any;
+}
+
+export function StudentManager({ currentUser }: StudentManagerProps) {
     const [students, setStudents] = useState<Student[]>([]);
     const [name, setName] = useState("");
     const [phone, setPhone] = useState("");
@@ -75,7 +79,7 @@ export function StudentManager() {
     };
 
     if (selectedStudent) {
-        return <StudentDetail student={selectedStudent} onBack={() => setSelectedStudent(null)} />;
+        return <StudentDetail student={selectedStudent} currentUser={currentUser} onBack={() => setSelectedStudent(null)} />;
     }
 
     return (

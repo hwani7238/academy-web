@@ -21,7 +21,11 @@ interface LearningLog {
     level: string;
     feedback: string;
     createdAt: any;
+    authorName?: string;
+    authorId?: string;
 }
+
+// ... existing interfaces ...
 
 interface MediaItem {
     id: string;
@@ -35,9 +39,10 @@ interface MediaItem {
 interface StudentDetailProps {
     student: Student;
     onBack: () => void;
+    currentUser: any;
 }
 
-export function StudentDetail({ student, onBack }: StudentDetailProps) {
+export function StudentDetail({ student, onBack, currentUser }: StudentDetailProps) {
     const [progress, setProgress] = useState("");
     const [level, setLevel] = useState("");
     const [feedback, setFeedback] = useState("");
@@ -83,6 +88,8 @@ export function StudentDetail({ student, onBack }: StudentDetailProps) {
         };
     }, [student.id]);
 
+    const [sendNotification, setSendNotification] = useState(true);
+
     const handleAddLog = async () => {
         if (!progress && !level && !feedback) {
             alert("정보를 입력해주세요.");
@@ -91,17 +98,38 @@ export function StudentDetail({ student, onBack }: StudentDetailProps) {
 
         setSaving(true);
         try {
-            await addDoc(collection(db, "students", student.id, "logs"), {
+            const docRef = await addDoc(collection(db, "students", student.id, "logs"), {
                 progress,
                 level,
                 feedback,
+                authorId: currentUser.uid,
+                authorName: currentUser.name || currentUser.email,
                 createdAt: new Date()
             });
+
+            if (sendNotification) {
+                // Determine template parameters based on logic
+                // For now, generating a link
+                const reportLink = `${window.location.origin}/report/${student.id}/${docRef.id}`;
+
+                await fetch('/api/send-alimtalk', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        phone: student.phone, // Assuming student has phone field
+                        templateId: 'FEEDBACK_TEMPLATE', // Placeholder
+                        templateParameter: {
+                            student_name: student.name,
+                            link: reportLink
+                        }
+                    })
+                });
+            }
 
             setProgress("");
             setLevel("");
             setFeedback("");
-            alert("학습 로그가 저장되었습니다.");
+            alert("학습 로그가 저장되었습니다." + (sendNotification ? " (알림 발송 시도함)" : ""));
         } catch (error) {
             console.error("Error adding log:", error);
             alert("저장 실패");
@@ -225,6 +253,16 @@ export function StudentDetail({ student, onBack }: StudentDetailProps) {
                                     placeholder="학생에 대한 피드백을 입력하세요."
                                 />
                             </div>
+                            <div className="flex items-center space-x-2">
+                                <input
+                                    type="checkbox"
+                                    id="notify"
+                                    className="h-4 w-4 rounded border-gray-300"
+                                    checked={sendNotification}
+                                    onChange={(e) => setSendNotification(e.target.checked)}
+                                />
+                                <label htmlFor="notify" className="text-sm font-medium">학부모님께 알림톡 발송</label>
+                            </div>
                             <Button onClick={handleAddLog} disabled={saving} className="w-full">
                                 {saving ? "저장 중..." : "학습 로그 저장"}
                             </Button>
@@ -278,6 +316,7 @@ export function StudentDetail({ student, onBack }: StudentDetailProps) {
                                     <div className="flex justify-between items-start mb-2">
                                         <p className="text-sm text-muted-foreground">
                                             {log.createdAt.toDate ? log.createdAt.toDate().toLocaleDateString() : new Date(log.createdAt.seconds * 1000).toLocaleDateString()}
+                                            {log.authorName && <span className="ml-2 text-xs text-blue-600 font-medium">By {log.authorName}</span>}
                                         </p>
                                         <div className="flex gap-2">
                                             <Button variant="outline" size="sm" onClick={() => handleCopyLink(log.id)} className="h-7 text-xs">
