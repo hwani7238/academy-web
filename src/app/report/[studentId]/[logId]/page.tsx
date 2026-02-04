@@ -15,6 +15,7 @@ interface LearningLog {
     level: string;
     feedback: string;
     createdAt: any;
+    studentName?: string;
     mediaUrl?: string;
     mediaType?: string;
     mediaTitle?: string;
@@ -30,28 +31,47 @@ export default function ReportPage() {
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(false);
 
+    const [debugInfo, setDebugInfo] = useState<string>("");
+
     useEffect(() => {
         const fetchData = async () => {
             try {
-                // Fetch student info
-                const studentDoc = await getDoc(doc(db, "students", studentId));
-                if (studentDoc.exists()) {
-                    setStudent(studentDoc.data() as Student);
-                } else {
-                    setError(true);
-                    return;
-                }
+                // Fetch log info first
+                const logPath = `students/${studentId}/logs/${logId}`;
+                setDebugInfo(`Fetching log from: ${logPath}`);
 
-                // Fetch log info
                 const logDoc = await getDoc(doc(db, "students", studentId, "logs", logId));
                 if (logDoc.exists()) {
-                    setLog(logDoc.data() as LearningLog);
+                    const logData = logDoc.data() as LearningLog;
+                    setLog(logData);
+
+                    // If log has studentName, use it
+                    if (logData.studentName) {
+                        setStudent({ name: logData.studentName, instrument: "" }); // Partial student object
+                    } else {
+                        // Legacy: Try to fetch student info
+                        try {
+                            const studentDoc = await getDoc(doc(db, "students", studentId));
+                            if (studentDoc.exists()) {
+                                setStudent(studentDoc.data() as Student);
+                            } else {
+                                // Student exists but maybe deleted? Or permission error caught below
+                                setStudent({ name: "학생", instrument: "" });
+                            }
+                        } catch (studentErr: any) {
+                            console.warn("Could not fetch student profile (likely permission issue), using fallback.", studentErr);
+                            setStudent({ name: "학생", instrument: "" });
+                            setDebugInfo(prev => prev + `\nStudent fetch warning: ${studentErr?.message || studentErr}`);
+                        }
+                    }
                 } else {
                     setError(true);
+                    setDebugInfo(prev => prev + `\nLog document does not exist.`);
                 }
-            } catch (err) {
+            } catch (err: any) {
                 console.error("Error fetching report data:", err);
                 setError(true);
+                setDebugInfo(prev => prev + `\nCritical Error: ${err?.message || err}`);
             } finally {
                 setLoading(false);
             }
@@ -59,11 +79,23 @@ export default function ReportPage() {
 
         if (studentId && logId) {
             fetchData();
+        } else {
+            setDebugInfo(`Missing IDs. StudentId: ${studentId}, LogId: ${logId}`);
         }
     }, [studentId, logId]);
 
     if (loading) return <div className="flex h-screen items-center justify-center">Loading...</div>;
-    if (error || !student || !log) return <div className="flex h-screen items-center justify-center">리포트를 찾을 수 없습니다.</div>;
+    if (error || !student || !log) return (
+        <div className="flex flex-col h-screen items-center justify-center p-4">
+            <p className="text-lg font-bold text-red-500 mb-4">리포트를 찾을 수 없습니다.</p>
+            <div className="w-full max-w-lg bg-slate-100 p-4 rounded text-xs font-mono whitespace-pre-wrap text-slate-700">
+                <p className="font-bold mb-2">Debug Info (개발자용):</p>
+                {debugInfo}
+                <hr className="my-2" />
+                <p>URL: {typeof window !== 'undefined' ? window.location.href : ''}</p>
+            </div>
+        </div>
+    );
 
     const date = log.createdAt.toDate ? log.createdAt.toDate().toLocaleDateString() : new Date(log.createdAt.seconds * 1000).toLocaleDateString();
 
