@@ -23,7 +23,6 @@ interface LearningLog {
     createdAt: any;
     authorName?: string;
     authorId?: string;
-    studentName?: string;
     mediaUrl?: string;
     mediaType?: string;
     mediaPath?: string;
@@ -117,12 +116,12 @@ export function StudentDetail({ student, onBack, currentUser }: StudentDetailPro
             }
 
             const docRef = await addDoc(collection(db, "students", student.id, "logs"), {
+                studentName: student.name, // Add student name for safe display
                 progress,
                 level,
                 feedback,
                 authorId: currentUser.uid,
                 authorName: currentUser.name || currentUser.email,
-                studentName: student.name,
                 createdAt: new Date(),
                 mediaUrl: downloadURL,
                 mediaType: fileType,
