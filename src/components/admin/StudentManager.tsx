@@ -21,9 +21,10 @@ interface Student {
 
 interface StudentManagerProps {
     currentUser: any;
+    onViewModeChange?: (isViewMode: boolean) => void;
 }
 
-export function StudentManager({ currentUser }: StudentManagerProps) {
+export function StudentManager({ currentUser, onViewModeChange }: StudentManagerProps) {
     const [students, setStudents] = useState<Student[]>([]);
     const [name, setName] = useState("");
     const [phone, setPhone] = useState("");
@@ -114,7 +115,10 @@ export function StudentManager({ currentUser }: StudentManagerProps) {
     };
 
     if (selectedStudent) {
-        return <StudentDetail student={selectedStudent} currentUser={currentUser} onBack={() => setSelectedStudent(null)} />;
+        return <StudentDetail student={selectedStudent} currentUser={currentUser} onBack={() => {
+            setSelectedStudent(null);
+            onViewModeChange?.(false);
+        }} />;
     }
 
     return (
@@ -196,7 +200,12 @@ export function StudentManager({ currentUser }: StudentManagerProps) {
                                 .map((student) => (
                                     <li key={student.id}
                                         className="flex items-center justify-between rounded-md border p-3 cursor-pointer hover:bg-slate-50 transition-colors"
-                                        onClick={() => !editingId && setSelectedStudent(student)}
+                                        onClick={() => {
+                                            if (!editingId) {
+                                                setSelectedStudent(student);
+                                                onViewModeChange?.(true);
+                                            }
+                                        }}
                                     >
                                         {editingId === student.id ? (
                                             <div className="flex-1 grid gap-2 sm:grid-cols-3 mr-2 items-center" onClick={(e) => e.stopPropagation()}>

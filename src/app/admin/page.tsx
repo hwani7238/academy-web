@@ -13,6 +13,7 @@ export default function AdminPage() {
     const [user, setUser] = useState<any>(null);
     const [userData, setUserData] = useState<any>(null);
     const [loading, setLoading] = useState(true);
+    const [isDetailView, setIsDetailView] = useState(false);
     const router = useRouter();
 
     useEffect(() => {
@@ -71,16 +72,19 @@ export default function AdminPage() {
             </header>
             <main className="flex-1 p-6">
                 <div className="mx-auto max-w-6xl space-y-8">
-                    {!isTeacher && (
+                    {!isTeacher && !isDetailView && (
                         <section>
                             <h2 className="mb-4 text-2xl font-bold">강사 관리</h2>
                             <TeacherManager />
                         </section>
                     )}
                     <section>
-                        <h2 className="mb-4 text-2xl font-bold">학생 관리 ({isTeacher ? '피드백 작성' : '전체 관리'})</h2>
+                        {!isDetailView && <h2 className="mb-4 text-2xl font-bold">학생 관리 ({isTeacher ? '피드백 작성' : '전체 관리'})</h2>}
                         {/* We will need to pass userData to StudentManager for attribution */}
-                        <StudentManager currentUser={{ uid: user.uid, ...userData }} />
+                        <StudentManager
+                            currentUser={{ uid: user.uid, ...userData }}
+                            onViewModeChange={setIsDetailView}
+                        />
                     </section>
                 </div>
             </main>
