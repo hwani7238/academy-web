@@ -5,6 +5,7 @@ import { collection, addDoc, getDocs, deleteDoc, doc, onSnapshot, query, orderBy
 import { db } from "@/lib/firebase";
 import { Button } from "@/components/ui/button";
 import { StudentDetail } from "./StudentDetail";
+import { INSTRUMENTS, ADMIN_ROLES } from "@/lib/constants";
 
 interface Student {
     id: string;
@@ -26,7 +27,7 @@ export function StudentManager({ currentUser }: StudentManagerProps) {
     const [students, setStudents] = useState<Student[]>([]);
     const [name, setName] = useState("");
     const [phone, setPhone] = useState("");
-    const [instrument, setInstrument] = useState("");
+    const [instrument, setInstrument] = useState<string>(INSTRUMENTS[0]);
     const [loading, setLoading] = useState(false);
     const [selectedStudent, setSelectedStudent] = useState<Student | null>(null);
 
@@ -59,7 +60,7 @@ export function StudentManager({ currentUser }: StudentManagerProps) {
             // Reset form
             setName("");
             setPhone("");
-            setInstrument("");
+            setInstrument(INSTRUMENTS[0]);
         } catch (error) {
             console.error("Error adding student: ", error);
             alert("학생 등록 실패");
@@ -112,13 +113,15 @@ export function StudentManager({ currentUser }: StudentManagerProps) {
                     </div>
                     <div className="grid gap-2">
                         <label className="text-sm font-medium">수강 악기</label>
-                        <input
-                            type="text"
+                        <select
                             className="flex h-10 w-full rounded-md border border-input px-3 py-2 text-sm"
                             value={instrument}
                             onChange={(e) => setInstrument(e.target.value)}
-                            placeholder="피아노"
-                        />
+                        >
+                            {INSTRUMENTS.map((inst) => (
+                                <option key={inst} value={inst}>{inst}</option>
+                            ))}
+                        </select>
                     </div>
                     <Button type="submit" className="w-full" disabled={loading}>
                         {loading ? "등록 중..." : "등록하기"}
@@ -134,23 +137,45 @@ export function StudentManager({ currentUser }: StudentManagerProps) {
                         <p className="text-sm text-muted-foreground">등록된 학생이 없습니다.</p>
                     ) : (
                         <ul className="space-y-3">
-                            {students.map((student) => (
-                                <li key={student.id}
-                                    className="flex items-center justify-between rounded-md border p-3 cursor-pointer hover:bg-slate-50 transition-colors"
-                                    onClick={() => setSelectedStudent(student)}
-                                >
-                                    <div>
-                                        <p className="font-medium">{student.name} <span className="text-xs text-muted-foreground">({student.instrument})</span></p>
-                                        <p className="text-sm text-muted-foreground">{student.phone}</p>
-                                    </div>
-                                    <Button variant="ghost" size="sm" onClick={(e) => {
-                                        e.stopPropagation();
-                                        handleDelete(student.id);
-                                    }} className="text-red-500 hover:text-red-700">
-                                        삭제
-                                    </Button>
-                                </li>
-                            ))}
+                            {students
+                                .filter((student) => {
+                                    // 1. If admin role, show all
+                                    if (currentUser?.role && ADMIN_ROLES.includes(currentUser.role)) {
+                                        return true;
+                                    }
+
+                                    // 2. If teacher, check subject
+                                    if (currentUser?.role === 'teacher') {
+                                        const teacherSubject = currentUser.subject;
+                                        if (!teacherSubject) return false; // Should not happen if registered correctly
+
+                                        if (teacherSubject === '피아노') {
+                                            return student.instrument === '어린이 피아노 취미' || student.instrument === '성인 피아노 취미';
+                                        }
+                                        return student.instrument === teacherSubject;
+                                    }
+
+                                    // Default fallback (e.g. unknown role) -> show none or all? 
+                                    // Safer to show none or just matching id if there's filtering logic later
+                                    return false;
+                                })
+                                .map((student) => (
+                                    <li key={student.id}
+                                        className="flex items-center justify-between rounded-md border p-3 cursor-pointer hover:bg-slate-50 transition-colors"
+                                        onClick={() => setSelectedStudent(student)}
+                                    >
+                                        <div>
+                                            <p className="font-medium">{student.name} <span className="text-xs text-muted-foreground">({student.instrument})</span></p>
+                                            <p className="text-sm text-muted-foreground">{student.phone}</p>
+                                        </div>
+                                        <Button variant="ghost" size="sm" onClick={(e) => {
+                                            e.stopPropagation();
+                                            handleDelete(student.id);
+                                        }} className="text-red-500 hover:text-red-700">
+                                            삭제
+                                        </Button>
+                                    </li>
+                                ))}
                         </ul>
                     )}
                 </div>

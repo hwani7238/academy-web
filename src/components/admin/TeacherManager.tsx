@@ -6,12 +6,14 @@ import { getAuth, createUserWithEmailAndPassword, signOut } from "firebase/auth"
 import { collection, doc, setDoc, onSnapshot, query, where, deleteDoc } from "firebase/firestore";
 import { db, firebaseConfig } from "@/lib/firebase";
 import { Button } from "@/components/ui/button";
+import { TEACHER_SUBJECTS } from "@/lib/constants";
 
 interface User {
     id: string;
     email: string;
     name: string;
     role: string;
+    subject?: string;
 }
 
 export function TeacherManager() {
@@ -19,6 +21,7 @@ export function TeacherManager() {
     const [email, setEmail] = useState("");
     const [password, setPassword] = useState("");
     const [name, setName] = useState("");
+    const [subject, setSubject] = useState<string>(TEACHER_SUBJECTS[0]);
     const [loading, setLoading] = useState(false);
 
     useEffect(() => {
@@ -61,6 +64,7 @@ export function TeacherManager() {
                 email: user.email,
                 name: name,
                 role: "teacher",
+                subject: subject,
                 createdAt: new Date()
             });
 
@@ -74,6 +78,7 @@ export function TeacherManager() {
             setEmail("");
             setPassword("");
             setName("");
+            setSubject(TEACHER_SUBJECTS[0]);
             alert("강사 계정이 생성되었습니다.");
 
         } catch (error: any) {
@@ -105,6 +110,18 @@ export function TeacherManager() {
                         value={name} onChange={e => setName(e.target.value)} required placeholder="김선생" />
                 </div>
                 <div className="grid gap-2">
+                    <label className="text-sm font-medium">담당 과목</label>
+                    <select
+                        className="flex h-10 w-full rounded-md border border-input px-3 py-2 text-sm"
+                        value={subject}
+                        onChange={e => setSubject(e.target.value)}
+                    >
+                        {TEACHER_SUBJECTS.map((sub) => (
+                            <option key={sub} value={sub}>{sub}</option>
+                        ))}
+                    </select>
+                </div>
+                <div className="grid gap-2">
                     <label className="text-sm font-medium">이메일 (ID)</label>
                     <input className="flex h-10 w-full rounded-md border border-input px-3 py-2 text-sm"
                         type="email" value={email} onChange={e => setEmail(e.target.value)} required placeholder="teacher@example.com" />
@@ -124,6 +141,7 @@ export function TeacherManager() {
                         <li key={teacher.id} className="flex justify-between items-center bg-slate-50 p-3 rounded text-sm">
                             <div>
                                 <span className="font-bold">{teacher.name}</span>
+                                <span className="ml-2 text-sm text-slate-600">({teacher.subject || "과목 미지정"})</span>
                                 <span className="ml-2 text-slate-500">{teacher.email}</span>
                             </div>
                             <Button variant="ghost" size="sm" onClick={() => handleDelete(teacher.id)} className="text-red-500">삭제</Button>
