@@ -121,6 +121,26 @@ export function StudentManager({ currentUser, onViewModeChange }: StudentManager
         }} />;
     }
 
+    const filteredStudents = students.filter((student) => {
+        // 1. If admin role, show all
+        if (currentUser?.role && ADMIN_ROLES.includes(currentUser.role)) {
+            return true;
+        }
+
+        // 2. If teacher, check subject
+        if (currentUser?.role === 'teacher') {
+            const teacherSubject = currentUser.subject;
+            if (!teacherSubject) return false;
+
+            if (teacherSubject === '피아노') {
+                return student.instrument === '어린이 피아노 취미' || student.instrument === '성인 피아노 취미';
+            }
+            return student.instrument === teacherSubject;
+        }
+
+        return false;
+    });
+
     return (
         <div className="grid gap-8 md:grid-cols-2">
             {/* Student Registration Form */}
@@ -134,18 +154,18 @@ export function StudentManager({ currentUser, onViewModeChange }: StudentManager
                             className="flex h-10 w-full rounded-md border border-input px-3 py-2 text-sm"
                             value={name}
                             onChange={(e) => setName(e.target.value)}
-                            placeholder="홍길동"
+                            placeholder="학생 이름"
                             required
                         />
                     </div>
                     <div className="grid gap-2">
                         <label className="text-sm font-medium">연락처</label>
                         <input
-                            type="text"
+                            type="tel"
                             className="flex h-10 w-full rounded-md border border-input px-3 py-2 text-sm"
                             value={phone}
                             onChange={(e) => setPhone(e.target.value)}
-                            placeholder="010-1234-5678"
+                            placeholder="010-0000-0000"
                             required
                         />
                     </div>
@@ -162,41 +182,20 @@ export function StudentManager({ currentUser, onViewModeChange }: StudentManager
                         </select>
                     </div>
                     <Button type="submit" className="w-full" disabled={loading}>
-                        {loading ? "등록 중..." : "등록하기"}
+                        {loading ? "등록 중..." : "학생 등록"}
                     </Button>
                 </form>
             </div>
 
             {/* Student List */}
             <div className="rounded-lg border p-6 shadow-sm">
-                <h3 className="mb-4 text-lg font-semibold">학생 목록 ({students.length}명)</h3>
+                <h3 className="mb-4 text-lg font-semibold">학생 목록 ({filteredStudents.length}명)</h3>
                 <div className="max-h-[500px] overflow-y-auto">
-                    {students.length === 0 ? (
+                    {filteredStudents.length === 0 ? (
                         <p className="text-sm text-muted-foreground">등록된 학생이 없습니다.</p>
                     ) : (
                         <ul className="space-y-3">
-                            {students
-                                .filter((student) => {
-                                    // 1. If admin role, show all
-                                    if (currentUser?.role && ADMIN_ROLES.includes(currentUser.role)) {
-                                        return true;
-                                    }
-
-                                    // 2. If teacher, check subject
-                                    if (currentUser?.role === 'teacher') {
-                                        const teacherSubject = currentUser.subject;
-                                        if (!teacherSubject) return false; // Should not happen if registered correctly
-
-                                        if (teacherSubject === '피아노') {
-                                            return student.instrument === '어린이 피아노 취미' || student.instrument === '성인 피아노 취미';
-                                        }
-                                        return student.instrument === teacherSubject;
-                                    }
-
-                                    // Default fallback (e.g. unknown role) -> show none or all? 
-                                    // Safer to show none or just matching id if there's filtering logic later
-                                    return false;
-                                })
+                            {filteredStudents
                                 .map((student) => (
                                     <li key={student.id}
                                         className="flex items-center justify-between rounded-md border p-3 cursor-pointer hover:bg-slate-50 transition-colors"
