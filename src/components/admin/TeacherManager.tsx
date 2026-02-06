@@ -150,29 +150,28 @@ export function TeacherManager() {
                         value={phone} onChange={e => setPhone(e.target.value)} placeholder="010-0000-0000" />
                 </div>
                 <div className="grid gap-2">
-                    <div className="grid gap-2">
-                        <label className="text-sm font-medium">담당 과목</label>
-                        <select
-                            className="flex h-10 w-full rounded-md border border-input px-3 py-2 text-sm"
-                            value={subject}
-                            onChange={e => setSubject(e.target.value)}
-                        >
-                            {TEACHER_SUBJECTS.map((sub) => (
-                                <option key={sub} value={sub}>{sub}</option>
-                            ))}
-                        </select>
-                    </div>
-                    <div className="grid gap-2">
-                        <label className="text-sm font-medium">이메일 (ID)</label>
-                        <input className="flex h-10 w-full rounded-md border border-input px-3 py-2 text-sm"
-                            type="email" value={email} onChange={e => setEmail(e.target.value)} required placeholder="teacher@example.com" />
-                    </div>
-                    <div className="grid gap-2">
-                        <label className="text-sm font-medium">비밀번호</label>
-                        <input className="flex h-10 w-full rounded-md border border-input px-3 py-2 text-sm"
-                            type="password" value={password} onChange={e => setPassword(e.target.value)} required placeholder="******" />
-                    </div>
-                    <Button type="submit" disabled={loading}>{loading ? "생성 중..." : "강사 계정 생성"}</Button>
+                    <label className="text-sm font-medium">담당 과목</label>
+                    <select
+                        className="flex h-10 w-full rounded-md border border-input px-3 py-2 text-sm"
+                        value={subject}
+                        onChange={e => setSubject(e.target.value)}
+                    >
+                        {TEACHER_SUBJECTS.map((sub) => (
+                            <option key={sub} value={sub}>{sub}</option>
+                        ))}
+                    </select>
+                </div>
+                <div className="grid gap-2">
+                    <label className="text-sm font-medium">이메일 (ID)</label>
+                    <input className="flex h-10 w-full rounded-md border border-input px-3 py-2 text-sm"
+                        type="email" value={email} onChange={e => setEmail(e.target.value)} required placeholder="teacher@example.com" />
+                </div>
+                <div className="grid gap-2">
+                    <label className="text-sm font-medium">비밀번호</label>
+                    <input className="flex h-10 w-full rounded-md border border-input px-3 py-2 text-sm"
+                        type="password" value={password} onChange={e => setPassword(e.target.value)} required placeholder="******" />
+                </div>
+                <Button type="submit" disabled={loading}>{loading ? "생성 중..." : "강사 계정 생성"}</Button>
             </form>
 
             <div>
