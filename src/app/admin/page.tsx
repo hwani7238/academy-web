@@ -8,6 +8,7 @@ import { auth, db } from "@/lib/firebase";
 import { Button } from "@/components/ui/button";
 import { StudentManager } from "@/components/admin/StudentManager";
 import { TeacherManager } from "@/components/admin/TeacherManager";
+import { FeedbackList } from "@/components/admin/FeedbackList";
 
 export default function AdminPage() {
     const [user, setUser] = useState<any>(null);
@@ -78,6 +79,14 @@ export default function AdminPage() {
                             <TeacherManager />
                         </section>
                     )}
+
+                    {/* Add Feedback List for Admins */}
+                    {!isTeacher && !isDetailView && (
+                        <section>
+                            <FeedbackList />
+                        </section>
+                    )}
+
                     <section>
                         {!isDetailView && <h2 className="mb-4 text-2xl font-bold">학생 관리 ({isTeacher ? '피드백 작성' : '전체 관리'})</h2>}
                         {/* We will need to pass userData to StudentManager for attribution */}
