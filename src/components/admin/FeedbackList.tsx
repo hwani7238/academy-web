@@ -21,6 +21,8 @@ export function FeedbackList() {
     const [logs, setLogs] = useState<FeedbackLog[]>([]);
     const [loading, setLoading] = useState(true);
     const [selectedLog, setSelectedLog] = useState<FeedbackLog | null>(null);
+    const [errorMsg, setErrorMsg] = useState<string | null>(null);
+    const [indexLink, setIndexLink] = useState<string | null>(null);
 
     useEffect(() => {
         // Query across all 'logs' subcollections
@@ -37,9 +39,18 @@ export function FeedbackList() {
             });
             setLogs(fetchedLogs);
             setLoading(false);
+            setErrorMsg(null);
         }, (error) => {
             console.error("Error fetching feedback logs:", error);
             setLoading(false);
+            setErrorMsg(error.message);
+            // Check for index error link
+            if (error.message.includes("indexes?create_composite=")) {
+                const match = error.message.match(/https:\/\/console\.firebase\.google\.com[^\s]*/);
+                if (match) {
+                    setIndexLink(match[0]);
+                }
+            }
         });
 
         return () => unsubscribe();
@@ -59,8 +70,23 @@ export function FeedbackList() {
 
             {loading ? (
                 <div className="p-6 text-center text-sm text-muted-foreground">목록을 불러오는 중...</div>
+            ) : indexLink ? (
+                <div className="p-6 border rounded bg-yellow-50 text-center">
+                    <p className="mb-4 font-bold text-red-600">⚠ 데이터베이스 색인(Index) 설정이 필요합니다.</p>
+                    <p className="mb-4">아래 파란색 버튼을 눌러 승인창에서 '색인 만들기'를 진행해 주세요.</p>
+                    <a
+                        href={indexLink}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="inline-block px-6 py-3 bg-blue-600 text-white rounded-lg font-bold hover:bg-blue-700"
+                    >
+                        색인 만들기 (클릭)
+                    </a>
+                </div>
             ) : logs.length === 0 ? (
-                <div className="p-6 text-center text-sm text-muted-foreground">등록된 피드백이 없습니다.</div>
+                <div className="p-6 text-center text-sm text-muted-foreground">
+                    {errorMsg ? `오류가 발생했습니다: ${errorMsg}` : "등록된 피드백이 없습니다."}
+                </div>
             ) : (
                 <div className="divide-y max-h-[400px] overflow-y-auto">
                     {logs.map((log) => (
