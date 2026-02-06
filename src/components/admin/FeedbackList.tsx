@@ -44,8 +44,8 @@ export function FeedbackList() {
             console.error("Error fetching feedback logs:", error);
             setLoading(false);
             setErrorMsg(error.message);
-            // Check for index error link
-            if (error.message.includes("indexes?create_composite=")) {
+            // Check for index error link (composite or exemption)
+            if (error.message.includes("https://console.firebase.google.com")) {
                 const match = error.message.match(/https:\/\/console\.firebase\.google\.com[^\s]*/);
                 if (match) {
                     setIndexLink(match[0]);
