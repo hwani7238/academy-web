@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { collection, addDoc, getDocs, deleteDoc, doc, onSnapshot, query, orderBy } from "firebase/firestore";
+import { collection, addDoc, getDocs, deleteDoc, doc, onSnapshot, query, orderBy, updateDoc } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { Button } from "@/components/ui/button";
 import { StudentDetail } from "./StudentDetail";
@@ -30,6 +30,12 @@ export function StudentManager({ currentUser }: StudentManagerProps) {
     const [instrument, setInstrument] = useState<string>(INSTRUMENTS[0]);
     const [loading, setLoading] = useState(false);
     const [selectedStudent, setSelectedStudent] = useState<Student | null>(null);
+
+    // Edit state
+    const [editingId, setEditingId] = useState<string | null>(null);
+    const [editName, setEditName] = useState("");
+    const [editPhone, setEditPhone] = useState("");
+    const [editInstrument, setEditInstrument] = useState("");
 
     useEffect(() => {
         const q = query(collection(db, "students"), orderBy("createdAt", "desc"));
@@ -76,6 +82,34 @@ export function StudentManager({ currentUser }: StudentManagerProps) {
         } catch (error) {
             console.error("Error deleting student: ", error);
             alert("삭제 실패");
+        }
+    };
+
+    const startEdit = (e: React.MouseEvent, student: Student) => {
+        e.stopPropagation();
+        setEditingId(student.id);
+        setEditName(student.name);
+        setEditPhone(student.phone);
+        setEditInstrument(student.instrument || INSTRUMENTS[0]);
+    };
+
+    const cancelEdit = (e: React.MouseEvent) => {
+        e.stopPropagation();
+        setEditingId(null);
+    };
+
+    const saveEdit = async (e: React.MouseEvent, id: string) => {
+        e.stopPropagation();
+        try {
+            await updateDoc(doc(db, "students", id), {
+                name: editName,
+                phone: editPhone,
+                instrument: editInstrument
+            });
+            setEditingId(null);
+        } catch (error) {
+            console.error("Error updating student:", error);
+            alert("수정 실패");
         }
     };
 
@@ -162,18 +196,63 @@ export function StudentManager({ currentUser }: StudentManagerProps) {
                                 .map((student) => (
                                     <li key={student.id}
                                         className="flex items-center justify-between rounded-md border p-3 cursor-pointer hover:bg-slate-50 transition-colors"
-                                        onClick={() => setSelectedStudent(student)}
+                                        onClick={() => !editingId && setSelectedStudent(student)}
                                     >
-                                        <div>
-                                            <p className="font-medium">{student.name} <span className="text-xs text-muted-foreground">({student.instrument})</span></p>
-                                            <p className="text-sm text-muted-foreground">{student.phone}</p>
+                                        {editingId === student.id ? (
+                                            <div className="flex-1 grid gap-2 sm:grid-cols-3 mr-2 items-center" onClick={(e) => e.stopPropagation()}>
+                                                <input
+                                                    className="h-8 rounded-md border px-2 text-sm"
+                                                    value={editName}
+                                                    onChange={e => setEditName(e.target.value)}
+                                                    placeholder="이름"
+                                                />
+                                                <input
+                                                    className="h-8 rounded-md border px-2 text-sm"
+                                                    value={editPhone}
+                                                    onChange={e => setEditPhone(e.target.value)}
+                                                    placeholder="연락처"
+                                                />
+                                                <select
+                                                    className="h-8 rounded-md border px-2 text-sm"
+                                                    value={editInstrument}
+                                                    onChange={e => setEditInstrument(e.target.value)}
+                                                >
+                                                    {INSTRUMENTS.map((inst) => (
+                                                        <option key={inst} value={inst}>{inst}</option>
+                                                    ))}
+                                                </select>
+                                            </div>
+                                        ) : (
+                                            <div>
+                                                <p className="font-medium">{student.name} <span className="text-xs text-muted-foreground">({student.instrument})</span></p>
+                                                <p className="text-sm text-muted-foreground">{student.phone}</p>
+                                            </div>
+                                        )}
+
+                                        <div className="flex items-center gap-1">
+                                            {editingId === student.id ? (
+                                                <>
+                                                    <Button variant="ghost" size="sm" onClick={(e) => saveEdit(e, student.id)} className="text-green-600 font-medium">
+                                                        저장
+                                                    </Button>
+                                                    <Button variant="ghost" size="sm" onClick={cancelEdit} className="text-slate-500 font-medium">
+                                                        취소
+                                                    </Button>
+                                                </>
+                                            ) : (
+                                                <>
+                                                    <Button variant="ghost" size="sm" onClick={(e) => startEdit(e, student)} className="text-blue-500 font-medium h-8">
+                                                        수정
+                                                    </Button>
+                                                    <Button variant="ghost" size="sm" onClick={(e) => {
+                                                        e.stopPropagation();
+                                                        handleDelete(student.id);
+                                                    }} className="text-red-500 font-medium h-8">
+                                                        삭제
+                                                    </Button>
+                                                </>
+                                            )}
                                         </div>
-                                        <Button variant="ghost" size="sm" onClick={(e) => {
-                                            e.stopPropagation();
-                                            handleDelete(student.id);
-                                        }} className="text-red-500 hover:text-red-700">
-                                            삭제
-                                        </Button>
                                     </li>
                                 ))}
                         </ul>
