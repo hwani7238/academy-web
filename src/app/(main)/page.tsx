@@ -1,112 +1,75 @@
 import Link from "next/link";
+import Image from "next/image";
 import { Button } from "@/components/ui/button";
-import { ArrowRight, Music, Star, Users, CheckCircle } from "lucide-react";
+import { ArrowRight, Music, Star, Users } from "lucide-react";
 
 export default function Home() {
   return (
-    <div className="flex flex-col min-h-screen bg-[#f5f5f7]">
+    <div className="flex flex-col">
       {/* Hero Section */}
-      <section className="relative flex flex-col items-center justify-center pt-32 pb-20 px-4 text-center overflow-hidden">
-        <div className="absolute inset-0 -z-10 bg-[radial-gradient(circle_at_50%_120%,#dbeafe,transparent)] opacity-70" />
-        
-        <div className="animate-fade-in-up space-y-6 max-w-4xl mx-auto z-10">
-            <h1 className="text-5xl md:text-7xl font-semibold tracking-tight text-slate-900 leading-[1.1]">
-            음악이 당신의<br/>
-            <span className="text-gradient">삶이 되는 순간.</span>
-            </h1>
-            <p className="text-xl md:text-2xl text-slate-500 font-medium max-w-2xl mx-auto leading-relaxed">
-            위뮤직 아카데미에서 시작하는<br className="md:hidden"/> 프리미엄 음악 교육 경험.
-            </p>
-            
-            <div className="flex flex-col sm:flex-row gap-4 justify-center pt-8">
-            <Button size="lg" className="rounded-full px-8 py-6 text-lg shadow-lg hover:shadow-xl transition-all duration-300 bg-[#0071e3] hover:bg-[#0077ed]">
-                무료 상담 신청하기
-            </Button>
-            <Button variant="outline" size="lg" className="rounded-full px-8 py-6 text-lg border-slate-300 hover:bg-white/50 backdrop-blur-sm">
-                커리큘럼 살펴보기
-            </Button>
-            </div>
+      <section className="relative flex min-h-[80vh] flex-col items-center justify-center overflow-hidden px-4 py-24 text-center md:px-8">
+        <Image
+          src="/hero-bg.png"
+          alt="Music Academy Interior"
+          fill
+          className="object-cover -z-20"
+          priority
+        />
+        <div className="absolute inset-0 -z-10 bg-black/40"></div>
+        <h1 className="mb-6 text-4xl font-extrabold tracking-tight sm:text-6xl md:text-7xl text-white">
+          당신의 <span className="text-secondary">음악 여정</span>을<br className="md:hidden" /> 시작하세요
+        </h1>
+        <p className="mb-8 max-w-2xl text-lg text-white/90 sm:text-xl">
+          위뮤직 아카데미는 모든 연령대를 위한 전문 음악 교육을 제공합니다.
+          최고의 강사진과 함께 여러분의 재능을 발견해보세요.
+        </p>
+        <div className="flex flex-col gap-4 sm:flex-row">
+          <Button size="lg" className="rounded-full text-lg">
+            상담 신청하기 <ArrowRight className="ml-2 h-4 w-4" />
+          </Button>
+          <Button variant="outline" size="lg" className="rounded-full text-lg">
+            수업 과정 보기
+          </Button>
         </div>
       </section>
 
-      {/* Bento Grid Features */}
-      <section className="container mx-auto px-4 py-24">
-        <h2 className="text-3xl md:text-5xl font-semibold text-center mb-16 tracking-tight">
-          왜 위뮤직인가요?
-        </h2>
-        
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 max-w-6xl mx-auto">
-          {/* Feature 1 (Large) */}
-          <div className="md:col-span-2 rounded-3xl bg-white p-10 shadow-sm hover:shadow-md transition-shadow duration-300 border border-slate-100 flex flex-col justify-between h-[320px]">
-            <div>
-                <div className="w-12 h-12 rounded-2xl bg-blue-50 flex items-center justify-center text-blue-600 mb-6">
-                <Music className="w-6 h-6" />
-                </div>
-                <h3 className="text-2xl font-bold mb-3">개인 맞춤형 커리큘럼</h3>
-                <p className="text-slate-500 text-lg">
-                수강생의 목표와 실력에 맞춰 1:1로 설계되는 독자적인 교육 과정.<br/>
-                취미부터 입시까지, 당신만을 위한 로드맵을 제시합니다.
-                </p>
+      {/* Features Section */}
+      <section id="about" className="container mx-auto py-24 px-4 sm:px-8">
+        <div className="grid gap-8 md:grid-cols-3">
+          <div className="flex flex-col items-center text-center p-6 rounded-2xl bg-muted/30">
+            <div className="mb-4 rounded-full bg-primary/10 p-4 text-primary">
+              <Music className="h-8 w-8" />
             </div>
+            <h3 className="mb-2 text-xl font-bold">전문 강사진</h3>
+            <p className="text-muted-foreground">풍부한 경험을 가진 뮤지션들에게 체계적으로 배워보세요.</p>
           </div>
-
-          {/* Feature 2 */}
-          <div className="rounded-3xl bg-white p-10 shadow-sm hover:shadow-md transition-shadow duration-300 border border-slate-100 flex flex-col justify-between h-[320px]">
-             <div>
-                <div className="w-12 h-12 rounded-2xl bg-purple-50 flex items-center justify-center text-purple-600 mb-6">
-                <Users className="w-6 h-6" />
-                </div>
-                <h3 className="text-2xl font-bold mb-3">최고의 강사진</h3>
-                <p className="text-slate-500 text-lg">
-                현역 뮤지션으로 구성된<br/>강사진의 생생한 노하우.
-                </p>
-             </div>
-          </div>
-
-          {/* Feature 3 */}
-          <div className="rounded-3xl bg-white p-10 shadow-sm hover:shadow-md transition-shadow duration-300 border border-slate-100 flex flex-col justify-between h-[320px]">
-             <div>
-                <div className="w-12 h-12 rounded-2xl bg-green-50 flex items-center justify-center text-green-600 mb-6">
-                <CheckCircle className="w-6 h-6" />
-                </div>
-                <h3 className="text-2xl font-bold mb-3">연습실 무제한</h3>
-                <p className="text-slate-500 text-lg">
-                수강생이라면 언제든.<br/>쾌적한 연습 공간 제공.
-                </p>
-             </div>
-          </div>
-
-          {/* Feature 4 (Large) */}
-          <div className="md:col-span-2 rounded-3xl bg-black text-white p-10 shadow-lg hover:shadow-xl transition-shadow duration-300 flex flex-col justify-between h-[320px] relative overflow-hidden group">
-            <div className="relative z-10">
-                <div className="w-12 h-12 rounded-2xl bg-white/10 flex items-center justify-center mb-6">
-                <Star className="w-6 h-6 text-yellow-400" />
-                </div>
-                <h3 className="text-2xl font-bold mb-3">정기 연주회 & 무대 경험</h3>
-                <p className="text-white/70 text-lg">
-                연습실을 넘어 무대로. <br/>
-                매년 개최되는 정기 연주회를 통해 뮤지션으로서의 첫 걸음을 내딛으세요.
-                </p>
+          <div className="flex flex-col items-center text-center p-6 rounded-2xl bg-muted/30">
+            <div className="mb-4 rounded-full bg-primary/10 p-4 text-primary">
+              <Users className="h-8 w-8" />
             </div>
-            <div className="absolute right-0 bottom-0 w-64 h-64 bg-gradient-to-tl from-blue-600 to-purple-600 rounded-full blur-[80px] opacity-50 group-hover:opacity-70 transition-opacity" />
+            <h3 className="mb-2 text-xl font-bold">커뮤니티</h3>
+            <p className="text-muted-foreground">음악을 사랑하는 사람들과 함께 소통하며 성장하세요.</p>
+          </div>
+          <div className="flex flex-col items-center text-center p-6 rounded-2xl bg-muted/30">
+            <div className="mb-4 rounded-full bg-primary/10 p-4 text-primary">
+              <Star className="h-8 w-8" />
+            </div>
+            <h3 className="mb-2 text-xl font-bold">정기 공연</h3>
+            <p className="text-muted-foreground">갈고 닦은 실력을 무대 위에서 마음껏 뽐낼 수 있습니다.</p>
           </div>
         </div>
       </section>
 
-      {/* CTA Section */}
-      <section className="py-32 px-4 text-center">
-        <div className="max-w-3xl mx-auto space-y-8">
-            <h2 className="text-4xl md:text-6xl font-semibold tracking-tight">
-            망설이지 말고 시작하세요.
-            </h2>
-            <p className="text-xl text-slate-500">
-            상담은 언제나 무료입니다.
-            </p>
-            <div className="pt-4">
-                <Button size="lg" className="rounded-full px-10 py-7 text-lg bg-black text-white hover:bg-slate-800 shadow-xl">
-                    상담 예약하기
-                </Button>
-            </div>
+      {/* Call to Action */}
+      <section className="bg-primary py-24 text-primary-foreground">
+        <div className="container mx-auto px-4 text-center sm:px-8">
+          <h2 className="mb-4 text-3xl font-bold sm:text-4xl text-white">연주할 준비 되셨나요?</h2>
+          <p className="mb-8 text-white/80">
+            지금 바로 등록하고 당신만의 음악을 시작하세요.
+          </p>
+          <Button variant="secondary" size="lg" className="rounded-full">
+            문의하기
+          </Button>
         </div>
       </section>
     </div>
