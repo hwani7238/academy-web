@@ -38,6 +38,10 @@ export function StudentManager({ currentUser, onViewModeChange }: StudentManager
     const [editPhone, setEditPhone] = useState("");
     const [editInstrument, setEditInstrument] = useState("");
 
+    // Filter & Search states
+    const [filterInstrument, setFilterInstrument] = useState("전체");
+    const [searchQuery, setSearchQuery] = useState("");
+
     useEffect(() => {
         let q;
         if (currentUser?.role === 'teacher' && currentUser.subject) {
@@ -138,8 +142,7 @@ export function StudentManager({ currentUser, onViewModeChange }: StudentManager
         }} />;
     }
 
-    const [filterInstrument, setFilterInstrument] = useState("전체");
-    const [searchQuery, setSearchQuery] = useState("");
+    // Moved to top of component to avoid React Hook order error
 
     const filteredStudents = students.filter((student) => {
         // 1. Role-based filtering (Teacher)
