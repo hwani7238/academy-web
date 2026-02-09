@@ -165,8 +165,8 @@ export function StudentManager({ currentUser, onViewModeChange }: StudentManager
         // 3. Search Query filtering (Name or Phone)
         if (searchQuery) {
             const query = searchQuery.toLowerCase();
-            const matchesName = student.name.toLowerCase().includes(query);
-            const matchesPhone = student.phone.includes(query);
+            const matchesName = (student.name || "").toLowerCase().includes(query);
+            const matchesPhone = (student.phone || "").includes(query);
             if (!matchesName && !matchesPhone) return false;
         }
 
