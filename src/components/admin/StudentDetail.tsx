@@ -146,6 +146,9 @@ export function StudentDetail({ student, onBack, currentUser }: StudentDetailPro
             if (sendNotification) {
                 const reportLink = `${window.location.origin}/report/${student.id}/${docRef.id}`;
 
+                // Remove protocol from link because the template alimtalk button forces a protocol prefix (e.g. https://#{link})
+                const linkForTemplate = reportLink.replace(/^https?:\/\//, '');
+
                 await fetch('/api/send-alimtalk', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -154,7 +157,7 @@ export function StudentDetail({ student, onBack, currentUser }: StudentDetailPro
                         templateId: 'FEEDBACK_TEMPLATE',
                         templateParameter: {
                             student_name: student.name,
-                            link: reportLink
+                            link: linkForTemplate
                         }
                     })
                 });
@@ -208,6 +211,14 @@ export function StudentDetail({ student, onBack, currentUser }: StudentDetailPro
             console.error("Error deleting log:", error);
             alert("삭제 실패");
         }
+    };
+
+    const formatDate = (date: any) => {
+        if (!date) return "";
+        if (date.toDate) return date.toDate().toLocaleDateString();
+        if (date instanceof Date) return date.toLocaleDateString();
+        if (typeof date.seconds === 'number') return new Date(date.seconds * 1000).toLocaleDateString();
+        return "";
     };
 
     return (
@@ -307,7 +318,7 @@ export function StudentDetail({ student, onBack, currentUser }: StudentDetailPro
                                 <div key={log.id} className="rounded-md border p-4 bg-slate-50">
                                     <div className="flex justify-between items-start mb-2">
                                         <p className="text-sm text-muted-foreground">
-                                            {log.createdAt.toDate ? log.createdAt.toDate().toLocaleDateString() : new Date(log.createdAt.seconds * 1000).toLocaleDateString()}
+                                            {formatDate(log.createdAt)}
                                             {log.authorName && <span className="ml-2 text-xs text-blue-600 font-medium">By {log.authorName}</span>}
                                         </p>
                                         <div className="flex gap-2">
