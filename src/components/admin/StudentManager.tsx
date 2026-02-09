@@ -158,8 +158,14 @@ export function StudentManager({ currentUser, onViewModeChange }: StudentManager
         }
 
         // 2. Admin filtering
-        if (filterInstrument !== "전체" && student.instrument !== filterInstrument) {
-            return false;
+        if (filterInstrument !== "전체") {
+            if (filterInstrument === '피아노') {
+                if (student.instrument !== '어린이 피아노 취미' && student.instrument !== '성인 피아노 취미') {
+                    return false;
+                }
+            } else if (student.instrument !== filterInstrument) {
+                return false;
+            }
         }
 
         return true;
@@ -221,7 +227,8 @@ export function StudentManager({ currentUser, onViewModeChange }: StudentManager
                         onChange={(e) => setFilterInstrument(e.target.value)}
                     >
                         <option value="전체">전체 보기</option>
-                        {INSTRUMENTS.map((inst) => (
+                        <option value="피아노">피아노</option>
+                        {INSTRUMENTS.filter(inst => !inst.includes('피아노')).map((inst) => (
                             <option key={inst} value={inst}>{inst}</option>
                         ))}
                     </select>
