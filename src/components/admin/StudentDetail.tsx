@@ -77,6 +77,44 @@ export function StudentDetail({ student, onBack, currentUser }: StudentDetailPro
 
     const [sendNotification, setSendNotification] = useState(true);
 
+    const handleFileUpload = async (file: File): Promise<{ url: string, path: string, type: string }> => {
+        return new Promise((resolve, reject) => {
+            const fileType = file.type.startsWith('image/') ? 'image' : 'video';
+            const storagePath = `logs/${student.id}/${Date.now()}_${file.name}`;
+            const storageRef = ref(storage, storagePath);
+            const uploadTask = uploadBytesResumable(storageRef, file);
+
+            setUploading(true);
+
+            uploadTask.on(
+                "state_changed",
+                (snapshot) => {
+                    const progress = (snapshot.bytesTransferred / snapshot.totalBytes) * 100;
+                    setUploadProgress(progress);
+                },
+                (error) => {
+                    console.error("Upload error details:", error);
+                    setUploading(false);
+                    reject(error);
+                },
+                async () => {
+                    try {
+                        const downloadURL = await getDownloadURL(uploadTask.snapshot.ref);
+                        setUploading(false);
+                        resolve({
+                            url: downloadURL,
+                            path: storagePath,
+                            type: fileType
+                        });
+                    } catch (e) {
+                        setUploading(false);
+                        reject(e);
+                    }
+                }
+            );
+        });
+    };
+
     const handleAddLog = async () => {
         if (!progress && !level && !feedback && !mediaFile) {
             alert("정보를 입력해주세요.");
@@ -85,35 +123,10 @@ export function StudentDetail({ student, onBack, currentUser }: StudentDetailPro
 
         setSaving(true);
         try {
-            let downloadURL = "";
-            let fileType = "";
-            let storagePath = "";
+            let mediaData = { url: "", path: "", type: "" };
 
             if (mediaFile) {
-                setUploading(true);
-                fileType = mediaFile.type.startsWith('image/') ? 'image' : 'video';
-                storagePath = `logs/${student.id}/${Date.now()}_${mediaFile.name}`;
-                const storageRef = ref(storage, storagePath);
-                const uploadTask = uploadBytesResumable(storageRef, mediaFile);
-
-                await new Promise<void>((resolve, reject) => {
-                    uploadTask.on(
-                        "state_changed",
-                        (snapshot) => {
-                            const progress = (snapshot.bytesTransferred / snapshot.totalBytes) * 100;
-                            setUploadProgress(progress);
-                        },
-                        (error) => {
-                            console.error("Upload error details:", error);
-                            reject(error);
-                        },
-                        async () => {
-                            downloadURL = await getDownloadURL(uploadTask.snapshot.ref);
-                            resolve();
-                        }
-                    );
-                });
-                setUploading(false);
+                mediaData = await handleFileUpload(mediaFile);
             }
 
             const docRef = await addDoc(collection(db, "students", student.id, "logs"), {
@@ -124,9 +137,9 @@ export function StudentDetail({ student, onBack, currentUser }: StudentDetailPro
                 authorName: currentUser.name || currentUser.email,
                 studentName: student.name,
                 createdAt: new Date(),
-                mediaUrl: downloadURL,
-                mediaType: fileType,
-                mediaPath: storagePath,
+                mediaUrl: mediaData.url,
+                mediaType: mediaData.type,
+                mediaPath: mediaData.path,
                 mediaTitle: mediaTitle
             });
 

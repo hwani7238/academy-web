@@ -29,7 +29,7 @@ export function FeedbackList() {
         const q = query(
             collectionGroup(db, "logs"),
             orderBy("createdAt", "desc"),
-            limit(20) // Limit to recent 20 for performance
+            limit(20) // Limit to recent 20 items to reduce read costs and improve load time
         );
 
         const unsubscribe = onSnapshot(q, (snapshot) => {

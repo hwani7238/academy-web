@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { collection, addDoc, getDocs, deleteDoc, doc, onSnapshot, query, orderBy, updateDoc } from "firebase/firestore";
+import { collection, addDoc, getDocs, deleteDoc, doc, onSnapshot, query, orderBy, updateDoc, where } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { Button } from "@/components/ui/button";
 import { StudentDetail } from "./StudentDetail";
@@ -39,17 +39,34 @@ export function StudentManager({ currentUser, onViewModeChange }: StudentManager
     const [editInstrument, setEditInstrument] = useState("");
 
     useEffect(() => {
-        const q = query(collection(db, "students"), orderBy("createdAt", "desc"));
+        let q;
+        if (currentUser?.role === 'teacher' && currentUser.subject) {
+            // Teacher: Query only students matching their subject
+            // Note: This requires a composite index on [instrument, createdAt] in Firestore.
+            // If the index is missing, Firestore will provide a link to create it in the console.
+            q = query(
+                collection(db, "students"),
+                where("instrument", "==", currentUser.subject),
+                orderBy("createdAt", "desc")
+            );
+        } else {
+            // Admin: Query all students
+            q = query(collection(db, "students"), orderBy("createdAt", "desc"));
+        }
+
         const unsubscribe = onSnapshot(q, (querySnapshot) => {
             const studentsData: Student[] = [];
             querySnapshot.forEach((doc) => {
                 studentsData.push({ id: doc.id, ...doc.data() } as Student);
             });
             setStudents(studentsData);
+        }, (error) => {
+            console.error("Error fetching students:", error);
+            // Handle index error specifically if needed
         });
 
         return () => unsubscribe();
-    }, []);
+    }, [currentUser]);
 
     const handleAddStudent = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -121,24 +138,31 @@ export function StudentManager({ currentUser, onViewModeChange }: StudentManager
         }} />;
     }
 
-    const filteredStudents = students.filter((student) => {
-        // 1. If admin role, show all
-        if (currentUser?.role && ADMIN_ROLES.includes(currentUser.role)) {
-            return true;
-        }
+    const [filterInstrument, setFilterInstrument] = useState("전체");
 
-        // 2. If teacher, check subject
+    const filteredStudents = students.filter((student) => {
+        // 1. Role-based filtering (Teacher)
         if (currentUser?.role === 'teacher') {
             const teacherSubject = currentUser.subject;
             if (!teacherSubject) return false;
 
+            // Special handling for Piano which has two categories
             if (teacherSubject === '피아노') {
-                return student.instrument === '어린이 피아노 취미' || student.instrument === '성인 피아노 취미';
+                // If attempting to filter by something not in their scope, return false
+                if (filterInstrument !== "전체" && student.instrument !== filterInstrument) return false;
+
+                return student.instrument === '어린이 피아노 취미' || student.instrument === '성인 피아노 취미' || student.instrument === '피아노';
             }
+            // For other subjects, instrument must match subject exactly, so filter is redundant but safe
             return student.instrument === teacherSubject;
         }
 
-        return false;
+        // 2. Admin filtering
+        if (filterInstrument !== "전체" && student.instrument !== filterInstrument) {
+            return false;
+        }
+
+        return true;
     });
 
     return (
@@ -189,7 +213,19 @@ export function StudentManager({ currentUser, onViewModeChange }: StudentManager
 
             {/* Student List */}
             <div className="rounded-lg border p-6 shadow-sm">
-                <h3 className="mb-4 text-lg font-semibold">학생 목록 ({filteredStudents.length}명)</h3>
+                <div className="flex items-center justify-between mb-4">
+                    <h3 className="text-lg font-semibold">학생 목록 ({filteredStudents.length}명)</h3>
+                    <select
+                        className="h-9 rounded-md border border-input px-3 text-sm"
+                        value={filterInstrument}
+                        onChange={(e) => setFilterInstrument(e.target.value)}
+                    >
+                        <option value="전체">전체 보기</option>
+                        {INSTRUMENTS.map((inst) => (
+                            <option key={inst} value={inst}>{inst}</option>
+                        ))}
+                    </select>
+                </div>
                 <div className="max-h-[500px] overflow-y-auto">
                     {filteredStudents.length === 0 ? (
                         <p className="text-sm text-muted-foreground">등록된 학생이 없습니다.</p>

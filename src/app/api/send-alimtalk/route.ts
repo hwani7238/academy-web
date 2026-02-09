@@ -3,12 +3,17 @@ import { NextResponse } from 'next/server';
 export async function POST(request: Request) {
     const { phone, templateId, templateParameter } = await request.json();
 
+    if (!phone || !templateId) {
+        return NextResponse.json({ success: false, error: "Missing required fields: phone or templateId" }, { status: 400 });
+    }
+
     const appKey = process.env.NHN_APP_KEY;
     const secretKey = process.env.NHN_SECRET_KEY;
     const senderKey = process.env.NHN_SENDER_KEY; // Required for AlimTalk
 
     if (!appKey || !secretKey || !senderKey) {
         console.warn("NHN Cloud Keys are missing. Skipping actual send.");
+        // In development, we might want to return success to avoid breaking the UI
         return NextResponse.json({ success: false, message: "Keys missing, simulated" });
     }
 
@@ -34,9 +39,9 @@ export async function POST(request: Request) {
 
         const data = await response.json();
 
-        if (!response.ok || data.header.isSuccessful === false) {
+        if (!response.ok || data.header?.isSuccessful === false) {
             console.error("NHN Cloud Error:", data);
-            return NextResponse.json({ success: false, error: data }, { status: 500 });
+            return NextResponse.json({ success: false, error: data.header?.resultMessage || "Unknown Error", details: data }, { status: 500 });
         }
 
         return NextResponse.json({ success: true, data });
