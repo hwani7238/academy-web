@@ -139,6 +139,7 @@ export function StudentManager({ currentUser, onViewModeChange }: StudentManager
     }
 
     const [filterInstrument, setFilterInstrument] = useState("전체");
+    const [searchQuery, setSearchQuery] = useState("");
 
     const filteredStudents = students.filter((student) => {
         // 1. Role-based filtering (Teacher)
@@ -148,18 +149,25 @@ export function StudentManager({ currentUser, onViewModeChange }: StudentManager
 
             // Special handling for Piano which has two categories
             if (teacherSubject === '피아노') {
-                // If attempting to filter by something not in their scope, return false
                 if (filterInstrument !== "전체" && student.instrument !== filterInstrument) return false;
-
-                return student.instrument === '피아노';
+                if (student.instrument !== '피아노') return false; // Should be redundant after migration but safe
+            } else {
+                // For other subjects, instrument must match subject exactly
+                if (student.instrument !== teacherSubject) return false;
             }
-            // For other subjects, instrument must match subject exactly, so filter is redundant but safe
-            return student.instrument === teacherSubject;
         }
 
-        // 2. Admin filtering
+        // 2. Admin filtering (Instrument)
         if (filterInstrument !== "전체" && student.instrument !== filterInstrument) {
             return false;
+        }
+
+        // 3. Search Query filtering (Name or Phone)
+        if (searchQuery) {
+            const query = searchQuery.toLowerCase();
+            const matchesName = student.name.toLowerCase().includes(query);
+            const matchesPhone = student.phone.includes(query);
+            if (!matchesName && !matchesPhone) return false;
         }
 
         return true;
@@ -213,18 +221,27 @@ export function StudentManager({ currentUser, onViewModeChange }: StudentManager
 
             {/* Student List */}
             <div className="rounded-lg border p-6 shadow-sm">
-                <div className="flex items-center justify-between mb-4">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-4 gap-2">
                     <h3 className="text-lg font-semibold">학생 목록 ({filteredStudents.length}명)</h3>
-                    <select
-                        className="h-9 rounded-md border border-input px-3 text-sm"
-                        value={filterInstrument}
-                        onChange={(e) => setFilterInstrument(e.target.value)}
-                    >
-                        <option value="전체">전체 보기</option>
-                        {INSTRUMENTS.map((inst) => (
-                            <option key={inst} value={inst}>{inst}</option>
-                        ))}
-                    </select>
+                    <div className="flex gap-2">
+                        <input
+                            type="text"
+                            placeholder="이름/번호 검색"
+                            className="h-9 w-32 sm:w-40 rounded-md border border-input px-3 text-sm"
+                            value={searchQuery}
+                            onChange={(e) => setSearchQuery(e.target.value)}
+                        />
+                        <select
+                            className="h-9 rounded-md border border-input px-3 text-sm"
+                            value={filterInstrument}
+                            onChange={(e) => setFilterInstrument(e.target.value)}
+                        >
+                            <option value="전체">전체 보기</option>
+                            {INSTRUMENTS.map((inst) => (
+                                <option key={inst} value={inst}>{inst}</option>
+                            ))}
+                        </select>
+                    </div>
                 </div>
                 <div className="max-h-[500px] overflow-y-auto">
                     {filteredStudents.length === 0 ? (
