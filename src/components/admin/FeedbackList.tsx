@@ -37,6 +37,13 @@ export function FeedbackList() {
 
     // ... (formatting functions remain valid)
 
+    const formatDate = (timestamp: any) => {
+        if (!timestamp) return "-";
+        if (timestamp.toDate) return timestamp.toDate().toLocaleDateString();
+        return new Date(timestamp.seconds * 1000).toLocaleDateString();
+    };
+
+    // Custom render for day to show dots
     const hasLog = (day: Date) => {
         return markedDates.some(d => isSameDay(d, day));
     };
