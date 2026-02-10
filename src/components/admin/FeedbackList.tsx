@@ -51,43 +51,84 @@ export function FeedbackList() {
     return (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
             {/* Calendar Section */}
-            <div className="bg-white rounded-xl border shadow-sm p-6 flex flex-col items-center">
-                <h3 className="text-xl font-bold mb-6 w-full text-left text-slate-800">피드백 캘린더</h3>
+            <div className="bg-white rounded-xl shadow-sm p-6 flex flex-col w-full">
                 <style>{`
                     .rdp { 
                         --rdp-cell-size: 44px; 
-                        margin: 0; 
+                        margin: 0;
+                        width: 100%;
+                    }
+                    .rdp-month {
+                        width: 100%;
+                    }
+                    .rdp-caption {
+                        display: flex;
+                        justify-content: space-between;
+                        align-items: center;
+                        position: relative;
+                        padding: 0 10px;
+                        margin-bottom: 20px;
                     }
                     .rdp-caption_label { 
-                        font-size: 1.1rem; 
-                        font-weight: 700; 
-                        color: #1e293b;
+                        font-size: 1.25rem; 
+                        font-weight: 800; 
+                        color: #1f2937;
+                        border: none;
+                    }
+                    .rdp-nav {
+                        position: static;
+                        display: flex;
+                        gap: 10px;
+                    }
+                    .rdp-head_row {
+                        display: flex;
+                        justify-content: space-around;
+                        margin-bottom: 10px;
+                    }
+                    .rdp-row {
+                        display: flex;
+                        justify-content: space-around;
                     }
                     .rdp-head_cell {
                         font-size: 0.9rem;
-                        font-weight: 600;
-                        color: #64748b;
+                        font-weight: 500;
+                        color: #6b7280;
+                        text-transform: uppercase;
                         padding-bottom: 12px;
                     }
                     .rdp-day {
-                        font-size: 0.95rem;
-                        border-radius: 9999px; /* Circle */
+                        font-size: 1rem;
+                        border-radius: 50%;
                     }
-                    .rdp-day_selected { 
-                        background-color: #0f172a; 
-                        color: white; 
+                    .rdp-day_selected, .rdp-day_selected:focus-visible, .rdp-day_selected:hover { 
+                        background-color: #ef4444 !important; /* Red-500 */
+                        color: white !important; 
                         font-weight: bold;
-                    }
-                    .rdp-day_selected:hover { 
-                        background-color: #334155; 
+                        border-radius: 50%;
                     }
                     .rdp-button:hover:not([disabled]):not(.rdp-day_selected) { 
-                        background-color: #f1f5f9; 
+                        background-color: #f3f4f6; 
                         color: #0f172a;
+                        border-radius: 50%;
                     }
                     .rdp-day_today {
-                        border: 2px solid #cbd5e1;
                         font-weight: bold;
+                        color: #ef4444; 
+                    }
+                    /* Markers (Dots) */
+                    .rdp-day_hasLog:not(.rdp-day_selected) {
+                        position: relative;
+                    }
+                    .rdp-day_hasLog:not(.rdp-day_selected)::after {
+                        content: '';
+                        position: absolute;
+                        bottom: 6px;
+                        left: 50%;
+                        transform: translateX(-50%);
+                        width: 4px;
+                        height: 4px;
+                        background-color: #ef4444;
+                        border-radius: 50%;
                     }
                     /* Weekend Colors */
                     .rdp-day_sunday { color: #ef4444; }
@@ -109,14 +150,14 @@ export function FeedbackList() {
                         }
                     }}
                     modifiersClassNames={{
-                        hasLog: "font-bold relative after:content-[''] after:absolute after:bottom-1.5 after:left-1/2 after:-translate-x-1/2 after:w-1.5 after:h-1.5 after:bg-green-500 after:rounded-full",
+                        hasLog: "rdp-day_hasLog",
                         holiday: "text-red-500"
                     }}
                     weekStartsOn={0}
                     formatters={{
-                        formatCaption: (date, options) => format(date, "yyyy년 MM월", { locale: ko })
+                        formatCaption: (date, options) => format(date, "yyyy년 M월", { locale: ko })
                     }}
-                    className="p-2"
+                    className="flex justify-center"
                 />
 
                 {indexLink && (
