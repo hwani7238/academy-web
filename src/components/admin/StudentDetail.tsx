@@ -10,7 +10,8 @@ interface Student {
     id: string;
     name: string;
     phone: string;
-    instrument: string;
+    instrument?: string;
+    instruments?: string[]; // Multi-subject
     status: string;
     createdAt: any;
 }
@@ -28,6 +29,7 @@ interface LearningLog {
     mediaType?: string;
     mediaPath?: string;
     mediaTitle?: string;
+    instrument?: string; // Subject for this log
 }
 
 // ... existing interfaces ...
@@ -48,9 +50,15 @@ interface StudentDetailProps {
 }
 
 export function StudentDetail({ student, onBack, currentUser }: StudentDetailProps) {
+    const studentInstruments = student.instruments && student.instruments.length > 0
+        ? student.instruments
+        : (student.instrument ? [student.instrument] : []);
+
     const [progress, setProgress] = useState("");
     const [level, setLevel] = useState("");
     const [feedback, setFeedback] = useState("");
+    const [selectedInstrument, setSelectedInstrument] = useState(studentInstruments[0] || "피아노");
+
     const [logs, setLogs] = useState<LearningLog[]>([]);
     const [mediaItems, setMediaItems] = useState<MediaItem[]>([]);
     const [uploading, setUploading] = useState(false);
@@ -130,6 +138,7 @@ export function StudentDetail({ student, onBack, currentUser }: StudentDetailPro
             }
 
             const docRef = await addDoc(collection(db, "students", student.id, "logs"), {
+                instrument: selectedInstrument, // Save selected instrument
                 progress,
                 level,
                 feedback,
@@ -237,7 +246,12 @@ export function StudentDetail({ student, onBack, currentUser }: StudentDetailPro
                 <Button variant="outline" onClick={onBack}>
                     &larr; 뒤로가기
                 </Button>
-                <h2 className="text-2xl font-bold">{student.name} 학생 상세 정보</h2>
+                <h2 className="text-2xl font-bold">
+                    {student.name} 학생
+                    <span className="text-lg font-normal text-muted-foreground ml-2">
+                        ({studentInstruments.join(", ")})
+                    </span>
+                </h2>
             </div>
 
             <div className="grid gap-6 md:grid-cols-2">
@@ -251,6 +265,18 @@ export function StudentDetail({ student, onBack, currentUser }: StudentDetailPro
                             <p className="text-xs mt-1 opacity-90">예) 태도가 좋지 않아 (X) → ~을 ~하면 더 나은 연주를 할 수 있을 거에요! (O)</p>
                         </div>
                         <div className="space-y-4">
+                            <div className="grid gap-2">
+                                <label className="text-sm font-medium">과목 (피드백 대상)</label>
+                                <select
+                                    className="flex h-10 w-full rounded-md border border-input px-3 py-2 text-sm"
+                                    value={selectedInstrument}
+                                    onChange={(e) => setSelectedInstrument(e.target.value)}
+                                >
+                                    {studentInstruments.map((inst) => (
+                                        <option key={inst} value={inst}>{inst}</option>
+                                    ))}
+                                </select>
+                            </div>
                             <div className="grid gap-2">
                                 <label className="text-sm font-medium">교재</label>
                                 <input
@@ -346,6 +372,7 @@ export function StudentDetail({ student, onBack, currentUser }: StudentDetailPro
                                         </div>
                                     </div>
                                     <div className="space-y-2 text-sm">
+                                        {log.instrument && <p className="px-2 py-1 bg-yellow-50 inline-block rounded text-xs font-bold text-yellow-700 mb-1">{log.instrument}</p>}
                                         {log.progress && <p><span className="font-semibold">교재:</span> {log.progress}</p>}
                                         {log.level && <p><span className="font-semibold">레벨:</span> {log.level}</p>}
                                         {log.feedback && (

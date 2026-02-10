@@ -7,11 +7,12 @@ import { Button } from "@/components/ui/button";
 import { StudentDetail } from "./StudentDetail";
 import { INSTRUMENTS, ADMIN_ROLES } from "@/lib/constants";
 
-interface Student {
+export interface Student {
     id: string;
     name: string;
     phone: string;
-    instrument: string;
+    instrument?: string; // Legacy support
+    instruments?: string[]; // New multi-subject support
     status: string;
     progress?: string;
     level?: string;
@@ -28,7 +29,9 @@ export function StudentManager({ currentUser, onViewModeChange }: StudentManager
     const [students, setStudents] = useState<Student[]>([]);
     const [name, setName] = useState("");
     const [phone, setPhone] = useState("");
-    const [instrument, setInstrument] = useState<string>(INSTRUMENTS[0]);
+    // New state for multi-selection
+    const [selectedInstruments, setSelectedInstruments] = useState<string[]>([]);
+
     const [loading, setLoading] = useState(false);
     const [selectedStudent, setSelectedStudent] = useState<Student | null>(null);
 
@@ -36,7 +39,7 @@ export function StudentManager({ currentUser, onViewModeChange }: StudentManager
     const [editingId, setEditingId] = useState<string | null>(null);
     const [editName, setEditName] = useState("");
     const [editPhone, setEditPhone] = useState("");
-    const [editInstrument, setEditInstrument] = useState("");
+    const [editInstruments, setEditInstruments] = useState<string[]>([]);
 
     // Filter & Search states
     const [filterInstrument, setFilterInstrument] = useState("전체");
@@ -46,13 +49,12 @@ export function StudentManager({ currentUser, onViewModeChange }: StudentManager
         let q;
         if (currentUser?.role === 'teacher' && currentUser.subject) {
             // Teacher: Query only students matching their subject
-            // Note: This requires a composite index on [instrument, createdAt] in Firestore.
-            // If the index is missing, Firestore will provide a link to create it in the console.
-            q = query(
-                collection(db, "students"),
-                where("instrument", "==", currentUser.subject),
-                orderBy("createdAt", "desc")
-            );
+            // Note: Limited querying for array-contains might need index
+            // For now, fetch all and filter client-side if complex querying is needed without index
+            // Or use array-contains if simple enough.
+            // Given the legacy mixed data, let's fetch ordered by date and filter client side for safety & flexibility initially
+            // unless dataset is huge.
+            q = query(collection(db, "students"), orderBy("createdAt", "desc"));
         } else {
             // Admin: Query all students
             q = query(collection(db, "students"), orderBy("createdAt", "desc"));
@@ -61,34 +63,62 @@ export function StudentManager({ currentUser, onViewModeChange }: StudentManager
         const unsubscribe = onSnapshot(q, (querySnapshot) => {
             const studentsData: Student[] = [];
             querySnapshot.forEach((doc) => {
-                studentsData.push({ id: doc.id, ...doc.data() } as Student);
+                const data = doc.data();
+                // Migration logic on read: ensure instruments array exists
+                let instruments = data.instruments || [];
+                if (instruments.length === 0 && data.instrument) {
+                    instruments = [data.instrument];
+                }
+                studentsData.push({ id: doc.id, ...data, instruments } as Student);
             });
             setStudents(studentsData);
         }, (error) => {
             console.error("Error fetching students:", error);
-            // Handle index error specifically if needed
         });
 
         return () => unsubscribe();
     }, [currentUser]);
 
+    const handleInstrumentToggle = (instrument: string) => {
+        setSelectedInstruments(prev =>
+            prev.includes(instrument)
+                ? prev.filter(i => i !== instrument)
+                : [...prev, instrument]
+        );
+    };
+
+    const handleEditInstrumentToggle = (instrument: string) => {
+        setEditInstruments(prev =>
+            prev.includes(instrument)
+                ? prev.filter(i => i !== instrument)
+                : [...prev, instrument]
+        );
+    };
+
     const handleAddStudent = async (e: React.FormEvent) => {
         e.preventDefault();
         if (!name || !phone) return;
+        if (selectedInstruments.length === 0) {
+            alert("최소 하나의 악기(과목)를 선택해주세요.");
+            return;
+        }
 
         setLoading(true);
         try {
             await addDoc(collection(db, "students"), {
                 name,
                 phone,
-                instrument,
+                instruments: selectedInstruments,
+                // Keep legitimate legacy field or primary instrument for simple queries if needed, 
+                // but moving forward 'instruments' is source of truth.
+                instrument: selectedInstruments[0],
                 status: "등록",
                 createdAt: new Date(),
             });
             // Reset form
             setName("");
             setPhone("");
-            setInstrument(INSTRUMENTS[0]);
+            setSelectedInstruments([]);
         } catch (error) {
             console.error("Error adding student: ", error);
             alert("학생 등록 실패");
@@ -112,7 +142,11 @@ export function StudentManager({ currentUser, onViewModeChange }: StudentManager
         setEditingId(student.id);
         setEditName(student.name);
         setEditPhone(student.phone);
-        setEditInstrument(student.instrument || INSTRUMENTS[0]);
+        // Ensure we load from array, fallback to single legacy
+        const currentInstruments = student.instruments && student.instruments.length > 0
+            ? student.instruments
+            : (student.instrument ? [student.instrument] : []);
+        setEditInstruments(currentInstruments);
     };
 
     const cancelEdit = (e: React.MouseEvent) => {
@@ -122,11 +156,17 @@ export function StudentManager({ currentUser, onViewModeChange }: StudentManager
 
     const saveEdit = async (e: React.MouseEvent, id: string) => {
         e.stopPropagation();
+        if (editInstruments.length === 0) {
+            alert("최소 하나의 악기(과목)를 선택해야 합니다.");
+            return;
+        }
+
         try {
             await updateDoc(doc(db, "students", id), {
                 name: editName,
                 phone: editPhone,
-                instrument: editInstrument
+                instruments: editInstruments,
+                instrument: editInstruments[0] // Update legacy field to primary
             });
             setEditingId(null);
         } catch (error) {
@@ -142,27 +182,31 @@ export function StudentManager({ currentUser, onViewModeChange }: StudentManager
         }} />;
     }
 
-    // Moved to top of component to avoid React Hook order error
-
     const filteredStudents = students.filter((student) => {
+        // Normalize student instruments
+        const studentInstruments = student.instruments && student.instruments.length > 0
+            ? student.instruments
+            : (student.instrument ? [student.instrument] : []);
+
         // 1. Role-based filtering (Teacher)
         if (currentUser?.role === 'teacher') {
             const teacherSubject = currentUser.subject;
             if (!teacherSubject) return false;
 
-            // Special handling for Piano which has two categories
+            // Special handling for Piano
             if (teacherSubject === '피아노') {
-                if (filterInstrument !== "전체" && student.instrument !== filterInstrument) return false;
-                if (student.instrument !== '피아노') return false; // Should be redundant after migration but safe
+                // Check if student has piano
+                if (!studentInstruments.includes('피아노')) return false;
+                // If specific filter applies
+                if (filterInstrument !== "전체" && !studentInstruments.includes(filterInstrument)) return false;
             } else {
-                // For other subjects, instrument must match subject exactly
-                if (student.instrument !== teacherSubject) return false;
+                if (!studentInstruments.includes(teacherSubject)) return false;
             }
         }
 
         // 2. Admin filtering (Instrument)
-        if (filterInstrument !== "전체" && student.instrument !== filterInstrument) {
-            return false;
+        if (filterInstrument !== "전체") {
+            if (!studentInstruments.includes(filterInstrument)) return false;
         }
 
         // 3. Search Query filtering (Name or Phone)
@@ -205,16 +249,23 @@ export function StudentManager({ currentUser, onViewModeChange }: StudentManager
                         />
                     </div>
                     <div className="grid gap-2">
-                        <label className="text-sm font-medium">수강 악기</label>
-                        <select
-                            className="flex h-10 w-full rounded-md border border-input px-3 py-2 text-sm"
-                            value={instrument}
-                            onChange={(e) => setInstrument(e.target.value)}
-                        >
+                        <label className="text-sm font-medium">수강 악기 (다중 선택 가능)</label>
+                        <div className="grid grid-cols-2 gap-2 border rounded-md p-3">
                             {INSTRUMENTS.map((inst) => (
-                                <option key={inst} value={inst}>{inst}</option>
+                                <div key={inst} className="flex items-center space-x-2">
+                                    <input
+                                        type="checkbox"
+                                        id={`inst-${inst}`}
+                                        checked={selectedInstruments.includes(inst)}
+                                        onChange={() => handleInstrumentToggle(inst)}
+                                        className="rounded border-gray-300"
+                                    />
+                                    <label htmlFor={`inst-${inst}`} className="text-sm cursor-pointer select-none">
+                                        {inst}
+                                    </label>
+                                </div>
                             ))}
-                        </select>
+                        </div>
                     </div>
                     <Button type="submit" className="w-full" disabled={loading}>
                         {loading ? "등록 중..." : "학생 등록"}
@@ -252,73 +303,98 @@ export function StudentManager({ currentUser, onViewModeChange }: StudentManager
                     ) : (
                         <ul className="space-y-3">
                             {filteredStudents
-                                .map((student) => (
-                                    <li key={student.id}
-                                        className="flex items-center justify-between rounded-md border p-3 cursor-pointer hover:bg-slate-50 transition-colors"
-                                        onClick={() => {
-                                            if (!editingId) {
-                                                setSelectedStudent(student);
-                                                onViewModeChange?.(true);
-                                            }
-                                        }}
-                                    >
-                                        {editingId === student.id ? (
-                                            <div className="flex-1 grid gap-2 sm:grid-cols-3 mr-2 items-center" onClick={(e) => e.stopPropagation()}>
-                                                <input
-                                                    className="h-8 rounded-md border px-2 text-sm"
-                                                    value={editName}
-                                                    onChange={e => setEditName(e.target.value)}
-                                                    placeholder="이름"
-                                                />
-                                                <input
-                                                    className="h-8 rounded-md border px-2 text-sm"
-                                                    value={editPhone}
-                                                    onChange={e => setEditPhone(e.target.value)}
-                                                    placeholder="연락처"
-                                                />
-                                                <select
-                                                    className="h-8 rounded-md border px-2 text-sm"
-                                                    value={editInstrument}
-                                                    onChange={e => setEditInstrument(e.target.value)}
-                                                >
-                                                    {INSTRUMENTS.map((inst) => (
-                                                        <option key={inst} value={inst}>{inst}</option>
-                                                    ))}
-                                                </select>
-                                            </div>
-                                        ) : (
-                                            <div>
-                                                <p className="font-medium">{student.name} <span className="text-xs text-muted-foreground">({student.instrument})</span></p>
-                                                <p className="text-sm text-muted-foreground">{student.phone}</p>
-                                            </div>
-                                        )}
+                                .map((student) => {
+                                    const displayInstruments = student.instruments?.join(", ") || student.instrument;
 
-                                        <div className="flex items-center gap-1">
+                                    return (
+                                        <li key={student.id}
+                                            className="flex items-start justify-between rounded-md border p-3 cursor-pointer hover:bg-slate-50 transition-colors"
+                                            onClick={() => {
+                                                if (!editingId) {
+                                                    setSelectedStudent(student);
+                                                    onViewModeChange?.(true);
+                                                }
+                                            }}
+                                        >
                                             {editingId === student.id ? (
-                                                <>
-                                                    <Button variant="ghost" size="sm" onClick={(e) => saveEdit(e, student.id)} className="text-green-600 font-medium">
-                                                        저장
-                                                    </Button>
-                                                    <Button variant="ghost" size="sm" onClick={cancelEdit} className="text-slate-500 font-medium">
-                                                        취소
-                                                    </Button>
-                                                </>
+                                                <div className="flex-1 space-y-3 mr-2 bg-white p-2 rounded border" onClick={(e) => e.stopPropagation()}>
+                                                    <div className="grid grid-cols-2 gap-2">
+                                                        <input
+                                                            className="h-8 rounded-md border px-2 text-sm"
+                                                            value={editName}
+                                                            onChange={e => setEditName(e.target.value)}
+                                                            placeholder="이름"
+                                                        />
+                                                        <input
+                                                            className="h-8 rounded-md border px-2 text-sm"
+                                                            value={editPhone}
+                                                            onChange={e => setEditPhone(e.target.value)}
+                                                            placeholder="연락처"
+                                                        />
+                                                    </div>
+                                                    <div className="grid grid-cols-3 gap-2 text-xs">
+                                                        {INSTRUMENTS.map((inst) => (
+                                                            <div key={inst} className="flex items-center space-x-1">
+                                                                <input
+                                                                    type="checkbox"
+                                                                    checked={editInstruments.includes(inst)}
+                                                                    onChange={() => handleEditInstrumentToggle(inst)}
+                                                                    className="rounded border-gray-300 h-3 w-3"
+                                                                />
+                                                                <span className="truncate">{inst}</span>
+                                                            </div>
+                                                        ))}
+                                                    </div>
+                                                </div>
                                             ) : (
-                                                <>
-                                                    <Button variant="ghost" size="sm" onClick={(e) => startEdit(e, student)} className="text-blue-500 font-medium h-8">
-                                                        수정
-                                                    </Button>
-                                                    <Button variant="ghost" size="sm" onClick={(e) => {
-                                                        e.stopPropagation();
-                                                        handleDelete(student.id);
-                                                    }} className="text-red-500 font-medium h-8">
-                                                        삭제
-                                                    </Button>
-                                                </>
+                                                <div className="flex-1">
+                                                    <p className="font-medium">
+                                                        {student.name}
+                                                        <span className="ml-2 inline-flex gap-1 flex-wrap">
+                                                            {student.instruments && student.instruments.length > 0 ? (
+                                                                student.instruments.map(inst => (
+                                                                    <span key={inst} className="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800">
+                                                                        {inst}
+                                                                    </span>
+                                                                ))
+                                                            ) : (
+                                                                <span className="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-800">
+                                                                    {student.instrument}
+                                                                </span>
+                                                            )}
+                                                        </span>
+                                                    </p>
+                                                    <p className="text-sm text-muted-foreground mt-0.5">{student.phone}</p>
+                                                </div>
                                             )}
-                                        </div>
-                                    </li>
-                                ))}
+
+                                            <div className="flex items-center gap-1 ml-2 self-start mt-1">
+                                                {editingId === student.id ? (
+                                                    <div className="flex flex-col gap-1">
+                                                        <Button variant="ghost" size="sm" onClick={(e) => saveEdit(e, student.id)} className="text-green-600 font-medium h-7 text-xs border border-green-200 bg-green-50">
+                                                            저장
+                                                        </Button>
+                                                        <Button variant="ghost" size="sm" onClick={cancelEdit} className="text-slate-500 font-medium h-7 text-xs border">
+                                                            취소
+                                                        </Button>
+                                                    </div>
+                                                ) : (
+                                                    <div className="flex gap-1">
+                                                        <Button variant="ghost" size="sm" onClick={(e) => startEdit(e, student)} className="text-blue-500 font-medium h-8 w-8 p-0">
+                                                            ✎
+                                                        </Button>
+                                                        <Button variant="ghost" size="sm" onClick={(e) => {
+                                                            e.stopPropagation();
+                                                            handleDelete(student.id);
+                                                        }} className="text-red-500 font-medium h-8 w-8 p-0">
+                                                            🗑
+                                                        </Button>
+                                                    </div>
+                                                )}
+                                            </div>
+                                        </li>
+                                    )
+                                })}
                         </ul>
                     )}
                 </div>
