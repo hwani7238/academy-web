@@ -30,10 +30,8 @@ export default function AdminPage() {
                         setUserData(userDoc.data());
                     } else {
                         // User exists in Auth but not in Firestore 'users' collection
-                        console.error("User document not found");
-                        alert("사용자 정보를 찾을 수 없습니다. 관리자에게 문의하세요.");
-                        await signOut(auth);
-                        router.push("/login");
+                        console.log("User document not found, redirecting to setup");
+                        router.push("/setup-admin");
                         return;
                     }
                 } catch (e) {
