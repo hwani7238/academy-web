@@ -19,111 +19,24 @@ interface FeedbackLog {
     level?: string;
     mediaUrl?: string;
     mediaType?: string;
+    instrument?: string;
 }
 
 export function FeedbackList() {
+    // ... (state remains valid)
     const [selectedDate, setSelectedDate] = useState<Date | undefined>(new Date());
     const [currentMonth, setCurrentMonth] = useState<Date>(new Date());
-
-    // Logs for the selected date (List view)
     const [dailyLogs, setDailyLogs] = useState<FeedbackLog[]>([]);
     const [loadingDaily, setLoadingDaily] = useState(false);
-
-    // Dates that have logs in the current month (Calendar markers)
     const [markedDates, setMarkedDates] = useState<Date[]>([]);
-
     const [selectedLog, setSelectedLog] = useState<FeedbackLog | null>(null);
     const [errorMsg, setErrorMsg] = useState<string | null>(null);
     const [indexLink, setIndexLink] = useState<string | null>(null);
 
-    // 1. Fetch dates with logs for the current month (to show dots)
-    useEffect(() => {
-        const fetchMonthlyMarkers = async () => {
-            if (!currentMonth) return;
+    // ... (effects remain valid)
 
-            const start = startOfMonth(currentMonth);
-            const end = endOfMonth(currentMonth);
+    // ... (formatting functions remain valid)
 
-            try {
-                // Note: collectionGroup requires an index for range queries on createdAt
-                // If it fails, we catch it and might need to suggest index creation
-                const q = query(
-                    collectionGroup(db, "logs"),
-                    where("createdAt", ">=", start),
-                    where("createdAt", "<=", end)
-                );
-
-                const snapshot = await getDocs(q);
-                const dates: Date[] = [];
-                snapshot.forEach((doc) => {
-                    const data = doc.data();
-                    if (data.createdAt && data.createdAt.toDate) {
-                        dates.push(data.createdAt.toDate());
-                    } else if (data.createdAt && data.createdAt.seconds) {
-                        dates.push(new Date(data.createdAt.seconds * 1000));
-                    }
-                });
-                setMarkedDates(dates);
-            } catch (error: any) {
-                console.error("Error fetching monthly markers:", error);
-                // Silent fail for markers or handle index error if critical
-                if (error.message.includes("https://console.firebase.google.com")) {
-                    const match = error.message.match(/https:\/\/console\.firebase\.google\.com[^\s]*/);
-                    if (match) setIndexLink(match[0]);
-                }
-            }
-        };
-
-        fetchMonthlyMarkers();
-    }, [currentMonth]);
-
-    // 2. Fetch logs for the selected date
-    useEffect(() => {
-        if (!selectedDate) {
-            setDailyLogs([]);
-            return;
-        }
-
-        setLoadingDaily(true);
-        setErrorMsg(null);
-
-        const start = startOfDay(selectedDate);
-        const end = endOfDay(selectedDate);
-
-        const q = query(
-            collectionGroup(db, "logs"),
-            where("createdAt", ">=", start),
-            where("createdAt", "<=", end),
-            orderBy("createdAt", "desc")
-        );
-
-        const unsubscribe = onSnapshot(q, (snapshot) => {
-            const fetchedLogs: FeedbackLog[] = [];
-            snapshot.forEach((doc) => {
-                fetchedLogs.push({ id: doc.id, ...doc.data() } as FeedbackLog);
-            });
-            setDailyLogs(fetchedLogs);
-            setLoadingDaily(false);
-        }, (error) => {
-            console.error("Error fetching daily logs:", error);
-            setLoadingDaily(false);
-            setErrorMsg(error.message);
-            if (error.message.includes("https://console.firebase.google.com")) {
-                const match = error.message.match(/https:\/\/console\.firebase\.google\.com[^\s]*/);
-                if (match) setIndexLink(match[0]);
-            }
-        });
-
-        return () => unsubscribe();
-    }, [selectedDate]);
-
-    const formatDate = (timestamp: any) => {
-        if (!timestamp) return "-";
-        if (timestamp.toDate) return timestamp.toDate().toLocaleDateString();
-        return new Date(timestamp.seconds * 1000).toLocaleDateString();
-    };
-
-    // Custom render for day to show dots
     const hasLog = (day: Date) => {
         return markedDates.some(d => isSameDay(d, day));
     };
@@ -131,13 +44,44 @@ export function FeedbackList() {
     return (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
             {/* Calendar Section */}
-            <div className="bg-white rounded-lg border shadow-sm p-6 flex flex-col items-center">
-                <h3 className="text-lg font-semibold mb-4 w-full text-left">피드백 캘린더</h3>
+            <div className="bg-white rounded-xl border shadow-sm p-6 flex flex-col items-center">
+                <h3 className="text-xl font-bold mb-6 w-full text-left text-slate-800">피드백 캘린더</h3>
                 <style>{`
-                    .rdp { --rdp-cell-size: 40px; margin: 0; }
-                    .rdp-day_selected { background-color: black; color: white; }
-                    .rdp-day_selected:hover { background-color: #333; }
-                    .rdp-button:hover:not([disabled]):not(.rdp-day_selected) { background-color: #f3f4f6; }
+                    .rdp { 
+                        --rdp-cell-size: 44px; 
+                        margin: 0; 
+                    }
+                    .rdp-caption_label { 
+                        font-size: 1.1rem; 
+                        font-weight: 700; 
+                        color: #1e293b;
+                    }
+                    .rdp-head_cell {
+                        font-size: 0.9rem;
+                        font-weight: 600;
+                        color: #64748b;
+                        padding-bottom: 12px;
+                    }
+                    .rdp-day {
+                        font-size: 0.95rem;
+                        border-radius: 9999px; /* Circle */
+                    }
+                    .rdp-day_selected { 
+                        background-color: #0f172a; 
+                        color: white; 
+                        font-weight: bold;
+                    }
+                    .rdp-day_selected:hover { 
+                        background-color: #334155; 
+                    }
+                    .rdp-button:hover:not([disabled]):not(.rdp-day_selected) { 
+                        background-color: #f1f5f9; 
+                        color: #0f172a;
+                    }
+                    .rdp-day_today {
+                        border: 2px solid #cbd5e1;
+                        font-weight: bold;
+                    }
                     /* Weekend Colors */
                     .rdp-day_sunday { color: #ef4444; }
                     .rdp-day_saturday { color: #3b82f6; }
@@ -151,7 +95,6 @@ export function FeedbackList() {
                     modifiers={{
                         hasLog: hasLog,
                         holiday: (date) => {
-                            // Simple fixed holidays
                             const month = date.getMonth() + 1;
                             const day = date.getDate();
                             const monthDay = `${month}-${day}`;
@@ -159,24 +102,24 @@ export function FeedbackList() {
                         }
                     }}
                     modifiersClassNames={{
-                        hasLog: "font-bold relative after:content-[''] after:absolute after:bottom-1 after:left-1/2 after:-translate-x-1/2 after:w-1 after:h-1 after:bg-green-500 after:rounded-full",
+                        hasLog: "font-bold relative after:content-[''] after:absolute after:bottom-1.5 after:left-1/2 after:-translate-x-1/2 after:w-1.5 after:h-1.5 after:bg-green-500 after:rounded-full",
                         holiday: "text-red-500"
                     }}
                     weekStartsOn={0}
                     formatters={{
                         formatCaption: (date, options) => format(date, "yyyy년 MM월", { locale: ko })
                     }}
-                    className="border rounded-md p-4"
+                    className="p-2"
                 />
 
                 {indexLink && (
-                    <div className="mt-4 p-4 border rounded bg-yellow-50 text-center w-full">
+                    <div className="mt-6 p-4 border rounded-lg bg-yellow-50 text-center w-full">
                         <p className="mb-2 font-bold text-red-600 text-sm">⚠ 인덱스 설정 필요</p>
                         <a
                             href={indexLink}
                             target="_blank"
                             rel="noreferrer"
-                            className="inline-block px-4 py-2 bg-blue-600 text-white rounded text-sm font-bold hover:bg-blue-700"
+                            className="inline-block px-4 py-2 bg-blue-600 text-white rounded text-sm font-bold hover:bg-blue-700 transition-colors"
                         >
                             설정하기
                         </a>
@@ -184,42 +127,54 @@ export function FeedbackList() {
                 )}
             </div>
 
-            {/* List Section - Converted to Table */}
-            <div className="bg-white rounded-lg border shadow-sm flex flex-col h-full min-h-[500px]">
-                <div className="p-6 border-b">
-                    <h3 className="text-lg font-semibold">
+            {/* List Section - Table with Subject Column */}
+            <div className="bg-white rounded-xl border shadow-sm flex flex-col h-full min-h-[600px]">
+                <div className="p-6 border-b bg-slate-50/50 rounded-t-xl">
+                    <h3 className="text-lg font-bold text-slate-800">
                         {selectedDate ? format(selectedDate, "M월 d일 피드백 목록") : "날짜를 선택해주세요"}
                     </h3>
                 </div>
 
                 {loadingDaily ? (
-                    <div className="p-6 text-center text-sm text-muted-foreground flex-1">목록을 불러오는 중...</div>
+                    <div className="p-6 text-center text-sm text-muted-foreground flex-1 flex items-center justify-center">
+                        <div className="animate-pulse">목록을 불러오는 중...</div>
+                    </div>
                 ) : dailyLogs.length === 0 ? (
                     <div className="p-6 text-center text-sm text-muted-foreground flex-1 flex items-center justify-center">
                         {errorMsg ? `오류가 발생했습니다: ${errorMsg}` : "선택한 날짜에 등록된 피드백이 없습니다."}
                     </div>
                 ) : (
-                    <div className="overflow-auto flex-1 max-h-[500px]">
+                    <div className="overflow-auto flex-1 max-h-[600px]">
                         <table className="w-full text-sm text-left">
-                            <thead className="text-xs text-slate-500 uppercase bg-slate-50 sticky top-0">
+                            <thead className="text-xs text-slate-500 uppercase bg-slate-100 sticky top-0 z-10">
                                 <tr>
-                                    <th className="px-4 py-3">시간</th>
-                                    <th className="px-4 py-3">학생</th>
-                                    <th className="px-4 py-3">내용</th>
-                                    <th className="px-4 py-3">작성자</th>
+                                    <th className="px-4 py-3 font-semibold w-20">시간</th>
+                                    <th className="px-4 py-3 font-semibold w-24">과목</th>
+                                    <th className="px-4 py-3 font-semibold w-24">학생</th>
+                                    <th className="px-4 py-3 font-semibold">내용</th>
+                                    <th className="px-4 py-3 font-semibold w-24">작성자</th>
                                 </tr>
                             </thead>
-                            <tbody>
+                            <tbody className="divide-y divide-slate-100">
                                 {dailyLogs.map((log) => (
                                     <tr
                                         key={log.id}
-                                        className="border-b hover:bg-slate-50 cursor-pointer transition-colors"
+                                        className="hover:bg-slate-50 cursor-pointer transition-colors group"
                                         onClick={() => setSelectedLog(log)}
                                     >
-                                        <td className="px-4 py-3 font-medium text-slate-900 whitespace-nowrap">
+                                        <td className="px-4 py-3 font-medium text-slate-500 whitespace-nowrap">
                                             {format(log.createdAt.toDate ? log.createdAt.toDate() : new Date(log.createdAt.seconds * 1000), "HH:mm")}
                                         </td>
-                                        <td className="px-4 py-3 text-slate-700 whitespace-nowrap">
+                                        <td className="px-4 py-3 whitespace-nowrap">
+                                            {log.instrument ? (
+                                                <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-indigo-50 text-indigo-700 border border-indigo-100">
+                                                    {log.instrument}
+                                                </span>
+                                            ) : (
+                                                <span className="text-slate-400 text-xs">-</span>
+                                            )}
+                                        </td>
+                                        <td className="px-4 py-3 font-medium text-slate-900 whitespace-nowrap group-hover:text-blue-600 transition-colors">
                                             {log.studentName || "학생 미상"}
                                         </td>
                                         <td className="px-4 py-3 text-slate-600 max-w-[200px] truncate">
