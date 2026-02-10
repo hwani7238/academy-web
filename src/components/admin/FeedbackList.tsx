@@ -138,6 +138,9 @@ export function FeedbackList() {
                     .rdp-day_selected { background-color: black; color: white; }
                     .rdp-day_selected:hover { background-color: #333; }
                     .rdp-button:hover:not([disabled]):not(.rdp-day_selected) { background-color: #f3f4f6; }
+                    /* Weekend Colors */
+                    .rdp-day_sunday { color: #ef4444; }
+                    .rdp-day_saturday { color: #3b82f6; }
                 `}</style>
                 <DayPicker
                     mode="single"
@@ -145,9 +148,19 @@ export function FeedbackList() {
                     onSelect={setSelectedDate}
                     onMonthChange={setCurrentMonth}
                     locale={ko}
-                    modifiers={{ hasLog: hasLog }}
+                    modifiers={{
+                        hasLog: hasLog,
+                        holiday: (date) => {
+                            // Simple fixed holidays
+                            const month = date.getMonth() + 1;
+                            const day = date.getDate();
+                            const monthDay = `${month}-${day}`;
+                            return ["1-1", "3-1", "5-5", "6-6", "8-15", "10-3", "10-9", "12-25"].includes(monthDay);
+                        }
+                    }}
                     modifiersClassNames={{
-                        hasLog: "font-bold text-blue-600 relative after:content-[''] after:absolute after:bottom-1 after:left-1/2 after:-translate-x-1/2 after:w-1 after:h-1 after:bg-blue-600 after:rounded-full"
+                        hasLog: "font-bold relative after:content-[''] after:absolute after:bottom-1 after:left-1/2 after:-translate-x-1/2 after:w-1 after:h-1 after:bg-green-500 after:rounded-full",
+                        holiday: "text-red-500"
                     }}
                     weekStartsOn={0}
                     formatters={{
@@ -171,7 +184,7 @@ export function FeedbackList() {
                 )}
             </div>
 
-            {/* List Section */}
+            {/* List Section - Converted to Table */}
             <div className="bg-white rounded-lg border shadow-sm flex flex-col h-full min-h-[500px]">
                 <div className="p-6 border-b">
                     <h3 className="text-lg font-semibold">
@@ -186,25 +199,39 @@ export function FeedbackList() {
                         {errorMsg ? `오류가 발생했습니다: ${errorMsg}` : "선택한 날짜에 등록된 피드백이 없습니다."}
                     </div>
                 ) : (
-                    <div className="divide-y overflow-y-auto flex-1 max-h-[500px]">
-                        {dailyLogs.map((log) => (
-                            <div
-                                key={log.id}
-                                className="p-4 hover:bg-slate-50 cursor-pointer transition-colors"
-                                onClick={() => setSelectedLog(log)}
-                            >
-                                <div className="flex justify-between items-start mb-1">
-                                    <span className="font-medium text-slate-900">{log.studentName || "학생 미상"}</span>
-                                    <span className="text-xs text-slate-500">{format(log.createdAt.toDate ? log.createdAt.toDate() : new Date(log.createdAt.seconds * 1000), "HH:mm")}</span>
-                                </div>
-                                <div className="flex justify-between items-center text-sm text-muted-foreground mb-2">
-                                    <span>To: {log.studentName} / By: {log.authorName || "선생님"}</span>
-                                </div>
-                                <p className="text-sm text-slate-600 line-clamp-2">
-                                    {log.feedback || "내용 없음"}
-                                </p>
-                            </div>
-                        ))}
+                    <div className="overflow-auto flex-1 max-h-[500px]">
+                        <table className="w-full text-sm text-left">
+                            <thead className="text-xs text-slate-500 uppercase bg-slate-50 sticky top-0">
+                                <tr>
+                                    <th className="px-4 py-3">시간</th>
+                                    <th className="px-4 py-3">학생</th>
+                                    <th className="px-4 py-3">내용</th>
+                                    <th className="px-4 py-3">작성자</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {dailyLogs.map((log) => (
+                                    <tr
+                                        key={log.id}
+                                        className="border-b hover:bg-slate-50 cursor-pointer transition-colors"
+                                        onClick={() => setSelectedLog(log)}
+                                    >
+                                        <td className="px-4 py-3 font-medium text-slate-900 whitespace-nowrap">
+                                            {format(log.createdAt.toDate ? log.createdAt.toDate() : new Date(log.createdAt.seconds * 1000), "HH:mm")}
+                                        </td>
+                                        <td className="px-4 py-3 text-slate-700 whitespace-nowrap">
+                                            {log.studentName || "학생 미상"}
+                                        </td>
+                                        <td className="px-4 py-3 text-slate-600 max-w-[200px] truncate">
+                                            {log.feedback || "내용 없음"}
+                                        </td>
+                                        <td className="px-4 py-3 text-slate-500 whitespace-nowrap">
+                                            {log.authorName || "선생님"}
+                                        </td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
                     </div>
                 )}
             </div>

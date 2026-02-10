@@ -350,17 +350,11 @@ export function StudentManager({ currentUser, onViewModeChange }: StudentManager
                                                 <div className="flex-1">
                                                     <p className="font-medium">
                                                         {student.name}
-                                                        <span className="ml-2 inline-flex gap-1 flex-wrap">
+                                                        <span className="ml-2 text-sm text-slate-600 font-normal">
                                                             {student.instruments && student.instruments.length > 0 ? (
-                                                                student.instruments.map(inst => (
-                                                                    <span key={inst} className="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800">
-                                                                        {inst}
-                                                                    </span>
-                                                                ))
+                                                                `(${student.instruments.join(", ")})`
                                                             ) : (
-                                                                <span className="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-800">
-                                                                    {student.instrument}
-                                                                </span>
+                                                                `(${student.instrument})`
                                                             )}
                                                         </span>
                                                     </p>
@@ -368,28 +362,28 @@ export function StudentManager({ currentUser, onViewModeChange }: StudentManager
                                                 </div>
                                             )}
 
-                                            <div className="flex items-center gap-1 ml-2 self-start mt-1">
+                                            <div className="flex items-center gap-2 ml-2 self-start mt-1">
                                                 {editingId === student.id ? (
-                                                    <div className="flex flex-col gap-1">
-                                                        <Button variant="ghost" size="sm" onClick={(e) => saveEdit(e, student.id)} className="text-green-600 font-medium h-7 text-xs border border-green-200 bg-green-50">
+                                                    <>
+                                                        <Button variant="ghost" size="sm" onClick={(e) => saveEdit(e, student.id)} className="text-green-600 font-medium h-8 px-2 hover:bg-green-50">
                                                             저장
                                                         </Button>
-                                                        <Button variant="ghost" size="sm" onClick={cancelEdit} className="text-slate-500 font-medium h-7 text-xs border">
+                                                        <Button variant="ghost" size="sm" onClick={cancelEdit} className="text-slate-500 font-medium h-8 px-2">
                                                             취소
                                                         </Button>
-                                                    </div>
+                                                    </>
                                                 ) : (
-                                                    <div className="flex gap-1">
-                                                        <Button variant="ghost" size="sm" onClick={(e) => startEdit(e, student)} className="text-blue-500 font-medium h-8 w-8 p-0">
-                                                            ✎
+                                                    <>
+                                                        <Button variant="ghost" size="sm" onClick={(e) => startEdit(e, student)} className="text-blue-500 font-medium h-8 px-2 hover:text-blue-700">
+                                                            수정
                                                         </Button>
                                                         <Button variant="ghost" size="sm" onClick={(e) => {
                                                             e.stopPropagation();
                                                             handleDelete(student.id);
-                                                        }} className="text-red-500 font-medium h-8 w-8 p-0">
-                                                            🗑
+                                                        }} className="text-red-500 font-medium h-8 px-2 hover:text-red-700">
+                                                            삭제
                                                         </Button>
-                                                    </div>
+                                                    </>
                                                 )}
                                             </div>
                                         </li>
