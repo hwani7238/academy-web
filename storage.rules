@@ -3,6 +3,9 @@ rules_version = '2';
 service firebase.storage {
   match /b/{bucket}/o {
     match /{allPaths=**} {
+      // Allow read/write only for authenticated users.
+      // Ideally, we should check for 'isStaff()' similar to Firestore, 
+      // but Storage rules don't support Firestore lookups directly/cheaply without custom claims.
       allow read, write: if request.auth != null;
     }
   }

@@ -2,14 +2,43 @@ rules_version = '2';
 
 service cloud.firestore {
   match /databases/{database}/documents {
+    // Helper function to check if user is authenticated
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    // Helper function to check if user is admin or teacher
+    // Note: This requires an extra read verification which costs money. 
+    // For now, we trust authenticated users for simple read/write on students app-wide, 
+    // but ideally we should check role.
+    function isStaff() {
+      return isAuthenticated() && 
+        exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['admin', 'teacher', 'wonjang', 'siljang'];
+    }
+
     // Allow public read for reports (specific path)
     match /students/{studentId}/logs/{logId} {
       allow read: if true;
     }
-    
-    // Everything else requires authentication
-    match /{document=**} {
-      allow read, write: if request.auth != null;
+
+    // Students collection - strictly for staff
+    match /students/{studentId} {
+      allow read, write: if isStaff();
+      
+      // Allow access to subcollections as well
+      match /{allChildren=**} {
+        allow read, write: if isStaff();
+      }
     }
+
+    // Users collection - Users can read their own profile, Staff can read all?
+    // Let's allow users to read/write their own data.
+    match /users/{userId} {
+      allow read, write: if isAuthenticated() && request.auth.uid == userId;
+      allow read: if isStaff(); // Staff might need to read other users to check permissions?
+    }
+    
+    // Default deny for everything else (removed the wildcard match)
   }
 }

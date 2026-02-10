@@ -1,9 +1,13 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { collectionGroup, query, orderBy, limit, getDocs, onSnapshot } from "firebase/firestore";
+import { collectionGroup, query, orderBy, getDocs, onSnapshot, where, Timestamp } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { Button } from "@/components/ui/button";
+import { DayPicker } from "react-day-picker";
+import { format, startOfDay, endOfDay, startOfMonth, endOfMonth, isSameDay } from "date-fns";
+import { ko } from "date-fns/locale";
+import { ChevronLeft, ChevronRight } from "lucide-react";
 
 interface FeedbackLog {
     id: string;
@@ -18,18 +22,79 @@ interface FeedbackLog {
 }
 
 export function FeedbackList() {
-    const [logs, setLogs] = useState<FeedbackLog[]>([]);
-    const [loading, setLoading] = useState(true);
+    const [selectedDate, setSelectedDate] = useState<Date | undefined>(new Date());
+    const [currentMonth, setCurrentMonth] = useState<Date>(new Date());
+
+    // Logs for the selected date (List view)
+    const [dailyLogs, setDailyLogs] = useState<FeedbackLog[]>([]);
+    const [loadingDaily, setLoadingDaily] = useState(false);
+
+    // Dates that have logs in the current month (Calendar markers)
+    const [markedDates, setMarkedDates] = useState<Date[]>([]);
+
     const [selectedLog, setSelectedLog] = useState<FeedbackLog | null>(null);
     const [errorMsg, setErrorMsg] = useState<string | null>(null);
     const [indexLink, setIndexLink] = useState<string | null>(null);
 
+    // 1. Fetch dates with logs for the current month (to show dots)
     useEffect(() => {
-        // Query across all 'logs' subcollections
+        const fetchMonthlyMarkers = async () => {
+            if (!currentMonth) return;
+
+            const start = startOfMonth(currentMonth);
+            const end = endOfMonth(currentMonth);
+
+            try {
+                // Note: collectionGroup requires an index for range queries on createdAt
+                // If it fails, we catch it and might need to suggest index creation
+                const q = query(
+                    collectionGroup(db, "logs"),
+                    where("createdAt", ">=", start),
+                    where("createdAt", "<=", end)
+                );
+
+                const snapshot = await getDocs(q);
+                const dates: Date[] = [];
+                snapshot.forEach((doc) => {
+                    const data = doc.data();
+                    if (data.createdAt && data.createdAt.toDate) {
+                        dates.push(data.createdAt.toDate());
+                    } else if (data.createdAt && data.createdAt.seconds) {
+                        dates.push(new Date(data.createdAt.seconds * 1000));
+                    }
+                });
+                setMarkedDates(dates);
+            } catch (error: any) {
+                console.error("Error fetching monthly markers:", error);
+                // Silent fail for markers or handle index error if critical
+                if (error.message.includes("https://console.firebase.google.com")) {
+                    const match = error.message.match(/https:\/\/console\.firebase\.google\.com[^\s]*/);
+                    if (match) setIndexLink(match[0]);
+                }
+            }
+        };
+
+        fetchMonthlyMarkers();
+    }, [currentMonth]);
+
+    // 2. Fetch logs for the selected date
+    useEffect(() => {
+        if (!selectedDate) {
+            setDailyLogs([]);
+            return;
+        }
+
+        setLoadingDaily(true);
+        setErrorMsg(null);
+
+        const start = startOfDay(selectedDate);
+        const end = endOfDay(selectedDate);
+
         const q = query(
             collectionGroup(db, "logs"),
-            orderBy("createdAt", "desc"),
-            limit(20) // Limit to recent 20 items to reduce read costs and improve load time
+            where("createdAt", ">=", start),
+            where("createdAt", "<=", end),
+            orderBy("createdAt", "desc")
         );
 
         const unsubscribe = onSnapshot(q, (snapshot) => {
@@ -37,24 +102,20 @@ export function FeedbackList() {
             snapshot.forEach((doc) => {
                 fetchedLogs.push({ id: doc.id, ...doc.data() } as FeedbackLog);
             });
-            setLogs(fetchedLogs);
-            setLoading(false);
-            setErrorMsg(null);
+            setDailyLogs(fetchedLogs);
+            setLoadingDaily(false);
         }, (error) => {
-            console.error("Error fetching feedback logs:", error);
-            setLoading(false);
+            console.error("Error fetching daily logs:", error);
+            setLoadingDaily(false);
             setErrorMsg(error.message);
-            // Check for index error link (composite or exemption)
             if (error.message.includes("https://console.firebase.google.com")) {
                 const match = error.message.match(/https:\/\/console\.firebase\.google\.com[^\s]*/);
-                if (match) {
-                    setIndexLink(match[0]);
-                }
+                if (match) setIndexLink(match[0]);
             }
         });
 
         return () => unsubscribe();
-    }, []);
+    }, [selectedDate]);
 
     const formatDate = (timestamp: any) => {
         if (!timestamp) return "-";
@@ -62,55 +123,93 @@ export function FeedbackList() {
         return new Date(timestamp.seconds * 1000).toLocaleDateString();
     };
 
+    // Custom render for day to show dots
+    const hasLog = (day: Date) => {
+        return markedDates.some(d => isSameDay(d, day));
+    };
+
     return (
-        <div className="rounded-lg border bg-white shadow-sm">
-            <div className="p-6 border-b">
-                <h3 className="text-lg font-semibold">최근 피드백 목록 (전체)</h3>
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
+            {/* Calendar Section */}
+            <div className="bg-white rounded-lg border shadow-sm p-6 flex flex-col items-center">
+                <h3 className="text-lg font-semibold mb-4 w-full text-left">피드백 캘린더</h3>
+                <style>{`
+                    .rdp { --rdp-cell-size: 40px; margin: 0; }
+                    .rdp-day_selected { background-color: black; color: white; }
+                    .rdp-day_selected:hover { background-color: #333; }
+                    .rdp-button:hover:not([disabled]):not(.rdp-day_selected) { background-color: #f3f4f6; }
+                `}</style>
+                <DayPicker
+                    mode="single"
+                    selected={selectedDate}
+                    onSelect={setSelectedDate}
+                    onMonthChange={setCurrentMonth}
+                    locale={ko}
+                    modifiers={{ hasLog: hasLog }}
+                    modifiersClassNames={{
+                        hasLog: "font-bold text-blue-600 relative after:content-[''] after:absolute after:bottom-1 after:left-1/2 after:-translate-x-1/2 after:w-1 after:h-1 after:bg-blue-600 after:rounded-full"
+                    }}
+                    weekStartsOn={0}
+                    formatters={{
+                        formatCaption: (date, options) => format(date, "yyyy년 MM월", { locale: ko })
+                    }}
+                    className="border rounded-md p-4"
+                />
+
+                {indexLink && (
+                    <div className="mt-4 p-4 border rounded bg-yellow-50 text-center w-full">
+                        <p className="mb-2 font-bold text-red-600 text-sm">⚠ 인덱스 설정 필요</p>
+                        <a
+                            href={indexLink}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="inline-block px-4 py-2 bg-blue-600 text-white rounded text-sm font-bold hover:bg-blue-700"
+                        >
+                            설정하기
+                        </a>
+                    </div>
+                )}
             </div>
 
-            {loading ? (
-                <div className="p-6 text-center text-sm text-muted-foreground">목록을 불러오는 중...</div>
-            ) : indexLink ? (
-                <div className="p-6 border rounded bg-yellow-50 text-center">
-                    <p className="mb-4 font-bold text-red-600">⚠ 데이터베이스 색인(Index) 설정이 필요합니다.</p>
-                    <p className="mb-4">아래 파란색 버튼을 눌러 승인창에서 '색인 만들기'를 진행해 주세요.</p>
-                    <a
-                        href={indexLink}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="inline-block px-6 py-3 bg-blue-600 text-white rounded-lg font-bold hover:bg-blue-700"
-                    >
-                        색인 만들기 (클릭)
-                    </a>
+            {/* List Section */}
+            <div className="bg-white rounded-lg border shadow-sm flex flex-col h-full min-h-[500px]">
+                <div className="p-6 border-b">
+                    <h3 className="text-lg font-semibold">
+                        {selectedDate ? format(selectedDate, "M월 d일 피드백 목록") : "날짜를 선택해주세요"}
+                    </h3>
                 </div>
-            ) : logs.length === 0 ? (
-                <div className="p-6 text-center text-sm text-muted-foreground">
-                    {errorMsg ? `오류가 발생했습니다: ${errorMsg}` : "등록된 피드백이 없습니다."}
-                </div>
-            ) : (
-                <div className="divide-y max-h-[400px] overflow-y-auto">
-                    {logs.map((log) => (
-                        <div
-                            key={log.id}
-                            className="p-4 hover:bg-slate-50 cursor-pointer transition-colors"
-                            onClick={() => setSelectedLog(log)}
-                        >
-                            <div className="flex justify-between items-start mb-1">
-                                <span className="font-medium text-slate-900">{log.studentName || "학생 미상"}</span>
-                                <span className="text-xs text-slate-500">{formatDate(log.createdAt)}</span>
-                            </div>
-                            <div className="flex justify-between items-center text-sm text-muted-foreground mb-2">
-                                <span>To: {log.studentName} / By: {log.authorName || "선생님"}</span>
-                            </div>
-                            <p className="text-sm text-slate-600 line-clamp-2">
-                                {log.feedback || "내용 없음"}
-                            </p>
-                        </div>
-                    ))}
-                </div>
-            )}
 
-            {/* Modal/Overlay for Detail View */}
+                {loadingDaily ? (
+                    <div className="p-6 text-center text-sm text-muted-foreground flex-1">목록을 불러오는 중...</div>
+                ) : dailyLogs.length === 0 ? (
+                    <div className="p-6 text-center text-sm text-muted-foreground flex-1 flex items-center justify-center">
+                        {errorMsg ? `오류가 발생했습니다: ${errorMsg}` : "선택한 날짜에 등록된 피드백이 없습니다."}
+                    </div>
+                ) : (
+                    <div className="divide-y overflow-y-auto flex-1 max-h-[500px]">
+                        {dailyLogs.map((log) => (
+                            <div
+                                key={log.id}
+                                className="p-4 hover:bg-slate-50 cursor-pointer transition-colors"
+                                onClick={() => setSelectedLog(log)}
+                            >
+                                <div className="flex justify-between items-start mb-1">
+                                    <span className="font-medium text-slate-900">{log.studentName || "학생 미상"}</span>
+                                    <span className="text-xs text-slate-500">{format(log.createdAt.toDate ? log.createdAt.toDate() : new Date(log.createdAt.seconds * 1000), "HH:mm")}</span>
+                                </div>
+                                <div className="flex justify-between items-center text-sm text-muted-foreground mb-2">
+                                    <span>To: {log.studentName} / By: {log.authorName || "선생님"}</span>
+                                </div>
+                                <p className="text-sm text-slate-600 line-clamp-2">
+                                    {log.feedback || "내용 없음"}
+                                </p>
+                            </div>
+                        ))}
+                    </div>
+                )}
+            </div>
+
+            {/* Modal/Overlay for Detail View (Same as before) */}
             {selectedLog && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={() => setSelectedLog(null)}>
                     <div className="bg-white rounded-lg shadow-lg w-full max-w-2xl max-h-[80vh] overflow-y-auto" onClick={e => e.stopPropagation()}>

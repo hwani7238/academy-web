@@ -29,12 +29,18 @@ export default function AdminPage() {
                     if (userDoc.exists()) {
                         setUserData(userDoc.data());
                     } else {
-                        // Legacy admin handling or just assume admin
-                        setUserData({ role: 'admin', name: '관리자' });
+                        // User exists in Auth but not in Firestore 'users' collection
+                        console.error("User document not found");
+                        alert("사용자 정보를 찾을 수 없습니다. 관리자에게 문의하세요.");
+                        await signOut(auth);
+                        router.push("/login");
+                        return;
                     }
                 } catch (e) {
                     console.error("Error fetching user data", e);
-                    setUserData({ role: 'admin', name: '관리자' });
+                    alert("사용자 정보를 불러오는 중 오류가 발생했습니다.");
+                    await signOut(auth);
+                    router.push("/login"); // Secure fail state
                 }
             }
             setLoading(false);
