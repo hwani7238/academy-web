@@ -11,6 +11,31 @@ export async function POST(request: Request) {
     const secretKey = process.env.NHN_SECRET_KEY;
     const senderKey = process.env.NHN_SENDER_KEY; // Required for AlimTalk
 
+    // 1. Server-side Authentication Check
+    const authHeader = request.headers.get('Authorization');
+    if (!authHeader?.startsWith('Bearer ')) {
+        return NextResponse.json({ success: false, error: "Unauthorized: Missing or invalid token" }, { status: 401 });
+    }
+
+    const idToken = authHeader.split('Bearer ')[1];
+
+    // Dynamically import adminAuth to avoid build issues if env vars are missing during static generation? 
+    // Actually, route handlers are dynamic if they use headers/request.
+    // We need to handle the case where adminAuth is null (misconfiguration)
+    const { adminAuth } = await import('@/lib/firebase-admin');
+
+    if (!adminAuth) {
+        console.error("Firebase Admin not initialized");
+        return NextResponse.json({ success: false, error: "Server Configuration Error" }, { status: 500 });
+    }
+
+    try {
+        await adminAuth.verifyIdToken(idToken);
+    } catch (error) {
+        console.error("Token verification failed:", error);
+        return NextResponse.json({ success: false, error: "Unauthorized: Invalid token" }, { status: 401 });
+    }
+
     if (!appKey || !secretKey || !senderKey) {
         console.warn("NHN Cloud Keys are missing. Skipping actual send.");
         // In development, we might want to return success to avoid breaking the UI

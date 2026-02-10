@@ -149,12 +149,22 @@ export function StudentDetail({ student, onBack, currentUser }: StudentDetailPro
                 // Remove protocol from link because the template alimtalk button forces a protocol prefix (e.g. https://#{link})
                 const linkForTemplate = reportLink.replace(/^https?:\/\//, '');
 
+                // Get ID token for API authentication
+                const idToken = await import('@/lib/firebase').then(m => m.auth.currentUser?.getIdToken());
+
+                if (!idToken) {
+                    throw new Error("인증 토큰을 가져올 수 없습니다. 다시 로그인해주세요.");
+                }
+
                 await fetch('/api/send-alimtalk', {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${idToken}`
+                    },
                     body: JSON.stringify({
                         phone: student.phone,
-                        templateId: 'FEEDBACK_TEMPLATE',
+                        templateId: 'FEEDBACK_LOG_V2',
                         templateParameter: {
                             student_name: student.name,
                             link: linkForTemplate
@@ -235,9 +245,14 @@ export function StudentDetail({ student, onBack, currentUser }: StudentDetailPro
                 <div className="space-y-6">
                     <div className="rounded-lg border p-6 shadow-sm">
                         <h3 className="mb-4 text-lg font-semibold">새로운 학습 로그 작성</h3>
+                        <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-md text-red-600">
+                            <p className="font-bold text-sm mb-1">📢 피드백 작성 가이드 (필독)</p>
+                            <p className="text-sm">절대 부정적 단어 사용 금지</p>
+                            <p className="text-xs mt-1 opacity-90">예) 태도가 좋지 않아 (X) → ~을 ~하면 더 나은 연주를 할 수 있을 거에요! (O)</p>
+                        </div>
                         <div className="space-y-4">
                             <div className="grid gap-2">
-                                <label className="text-sm font-medium">현재 진도</label>
+                                <label className="text-sm font-medium">교재</label>
                                 <input
                                     className="flex h-10 w-full rounded-md border border-input px-3 py-2 text-sm"
                                     value={progress}
@@ -331,7 +346,7 @@ export function StudentDetail({ student, onBack, currentUser }: StudentDetailPro
                                         </div>
                                     </div>
                                     <div className="space-y-2 text-sm">
-                                        {log.progress && <p><span className="font-semibold">진도:</span> {log.progress}</p>}
+                                        {log.progress && <p><span className="font-semibold">교재:</span> {log.progress}</p>}
                                         {log.level && <p><span className="font-semibold">레벨:</span> {log.level}</p>}
                                         {log.feedback && (
                                             <div className="p-2 bg-white rounded border">
