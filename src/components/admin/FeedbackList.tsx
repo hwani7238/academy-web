@@ -1,14 +1,12 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { collectionGroup, query, orderBy, getDocs, onSnapshot, where, Timestamp } from "firebase/firestore";
+import { collectionGroup, query, orderBy, onSnapshot, where, Timestamp } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { Button } from "@/components/ui/button";
 import { DayPicker } from "react-day-picker";
-import { ComponentProps } from "react";
 import { format, startOfDay, endOfDay, startOfMonth, endOfMonth, isSameDay } from "date-fns";
 import { ko } from "date-fns/locale";
-import { ChevronLeft, ChevronRight } from "lucide-react";
 import "react-day-picker/style.css";
 
 interface FeedbackLog {
@@ -117,27 +115,88 @@ export function FeedbackList() {
     return (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
             <style>{`
-                .rdp {
-                    --rdp-cell-size: 40px !important;
+                .rdp-root {
                     --rdp-accent-color: #f43f5e !important;
-                    --rdp-background-color: #f1f5f9 !important;
+                    --rdp-accent-background-color: #fff1f2 !important;
+                    --rdp-today-color: #f43f5e !important;
+                    --rdp-day-height: 40px !important;
+                    --rdp-day-width: 40px !important;
+                    --rdp-day_button-height: 38px !important;
+                    --rdp-day_button-width: 38px !important;
+                    --rdp-selected-border: 2px solid #f43f5e !important;
                     margin: 0 !important;
                 }
-                .rdp-day_selected:not([disabled]) { 
-                    background-color: var(--rdp-accent-color); 
+                /* Selected day: rose background */
+                .rdp-selected .rdp-day_button {
+                    background-color: #f43f5e !important;
+                    color: white !important;
+                    border-color: #f43f5e !important;
                 }
-                .rdp-button:hover:not([disabled]):not(.rdp-day_selected) {
-                    background-color: var(--rdp-background-color);
+                /* Hover on day button */
+                .rdp-day_button:hover {
+                    background-color: #f1f5f9 !important;
+                    border-radius: 100%;
                 }
-                /* Saturday Blue - header & body cells */
-                .rdp-head_cell:last-child, 
-                .rdp-tbody .rdp-row > .rdp-cell:last-child .rdp-day:not(.rdp-day_outside) {
+                .rdp-selected .rdp-day_button:hover {
+                    background-color: #e11d48 !important;
+                }
+                /* Weekday header: Sunday red, Saturday blue */
+                .rdp-weekdays .rdp-weekday:first-child {
+                    color: #dc2626 !important;
+                }
+                .rdp-weekdays .rdp-weekday:last-child {
                     color: #2563eb !important;
                 }
-                /* Sunday Red - header & body cells */
-                .rdp-head_cell:first-child, 
-                .rdp-tbody .rdp-row > .rdp-cell:first-child .rdp-day:not(.rdp-day_outside) {
-                    color: #dc2626 !important;
+                /* Day cells: Sunday column red, Saturday column blue */
+                .rdp-week > .rdp-day:first-child .rdp-day_button {
+                    color: #dc2626;
+                }
+                .rdp-week > .rdp-day:last-child .rdp-day_button {
+                    color: #2563eb;
+                }
+                .rdp-outside .rdp-day_button {
+                    color: #d1d5db !important;
+                    opacity: 0.5;
+                }
+                /* Selected overrides weekend colors */
+                .rdp-selected .rdp-day_button {
+                    color: white !important;
+                }
+                /* Today styling */
+                .rdp-today:not(.rdp-outside) .rdp-day_button {
+                    color: #f43f5e !important;
+                    font-weight: bold;
+                }
+                .rdp-today.rdp-selected .rdp-day_button {
+                    color: white !important;
+                }
+                /* Month caption styling */
+                .rdp-month_caption {
+                    font-size: 1.125rem !important;
+                    font-weight: 700 !important;
+                    color: #1e293b !important;
+                    justify-content: center !important;
+                    padding-bottom: 0.75rem !important;
+                }
+                /* Weekday header styling */
+                .rdp-weekday {
+                    color: #9ca3af !important;
+                    font-size: 0.8rem !important;
+                    font-weight: 500 !important;
+                }
+                /* Log dot indicator */
+                .log-dot {
+                    position: absolute;
+                    bottom: 2px;
+                    left: 50%;
+                    transform: translateX(-50%);
+                    width: 4px;
+                    height: 4px;
+                    border-radius: 100%;
+                    background-color: #f43f5e;
+                }
+                .rdp-selected .log-dot {
+                    background-color: white;
                 }
             `}</style>
             {/* Calendar Section */}
@@ -153,63 +212,24 @@ export function FeedbackList() {
                         modifiers={{
                             hasLog: hasLog,
                         }}
-                        modifiersClassNames={{
-                            selected: "bg-rose-500 text-white hover:bg-rose-600 font-bold rounded-full",
-                            today: "text-rose-500 font-bold",
-                            hasLog: "relative",
-                            saturday: "text-blue-500",
-                            sunday: "text-red-500"
-                        }}
-                        // @ts-ignore
-                        components={({
-                            DayContent: (props: any) => {
-                                const { date, activeModifiers } = props;
-                                const isSelected = activeModifiers.selected;
-                                const isToday = activeModifiers.today;
+                        components={{
+                            DayButton: (props: any) => {
+                                const { day, modifiers, ...buttonProps } = props;
+                                const date = day.date;
                                 const hasLogForDay = hasLog(date);
 
                                 return (
-                                    <div className={`relative w-full h-full flex items-center justify-center text-sm
-                                        ${isSelected ? 'text-white' : ''}
-                                        ${!isSelected && isToday ? '!text-rose-500 font-bold' : ''}
-                                        ${!isSelected && !isToday && date.getDay() === 0 ? '!text-red-600 font-medium' : ''}
-                                        ${!isSelected && !isToday && date.getDay() === 6 ? '!text-blue-600 font-medium' : ''}
-                                    `}>
+                                    <button {...buttonProps} style={{ position: 'relative' }}>
                                         {date.getDate()}
-                                        {hasLogForDay && !isSelected && (
-                                            <div className="absolute bottom-1 w-1 h-1 bg-rose-500 rounded-full mx-auto" />
+                                        {hasLogForDay && (
+                                            <span className="log-dot" />
                                         )}
-                                        {hasLogForDay && isSelected && (
-                                            <div className="absolute bottom-1 w-1 h-1 bg-white rounded-full mx-auto" />
-                                        )}
-                                    </div>
+                                    </button>
                                 );
                             }
-                        } as any)}
+                        }}
                         showOutsideDays
                         className="p-4 bg-white rounded-2xl border shadow-sm"
-                        classNames={{
-                            months: "rdp-months flex flex-col sm:flex-row space-y-4 sm:space-x-4 sm:space-y-0",
-                            month: "rdp-month space-y-4 w-full",
-                            caption: "rdp-caption flex justify-center pt-1 relative items-center mb-4",
-                            caption_label: "rdp-caption_label text-lg font-bold text-gray-800",
-                            nav: "rdp-nav space-x-1 flex items-center",
-                            nav_button: "rdp-nav_button h-8 w-8 bg-transparent hover:bg-gray-100 p-1 rounded-full text-gray-600 transition-colors flex items-center justify-center",
-                            nav_button_previous: "rdp-nav_button_previous absolute left-1",
-                            nav_button_next: "rdp-nav_button_next absolute right-1",
-                            table: "rdp-table w-full border-collapse",
-                            head_row: "rdp-head_row [&>th]:!font-normal [&>th:first-child]:!text-red-600 [&>th:last-child]:!text-blue-600",
-                            head_cell: "rdp-head_cell text-gray-400 rounded-md w-10 h-10 font-medium text-[0.8rem]",
-                            row: "rdp-row w-full mt-2",
-                            cell: "rdp-cell h-10 w-10 text-center text-sm p-0 relative [&:has([aria-selected].day-range-end)]:rounded-r-md [&:has([aria-selected].day-outside)]:bg-gray-100/50 [&:has([aria-selected])]:bg-gray-100 first:[&:has([aria-selected])]:rounded-l-md last:[&:has([aria-selected])]:rounded-r-md focus-within:relative focus-within:z-20",
-                            day: "rdp-day h-10 w-10 p-0 font-normal aria-selected:opacity-100 hover:bg-gray-100 rounded-full transition-colors",
-                            day_selected: "rdp-day_selected bg-rose-500 text-white hover:bg-rose-600 focus:bg-rose-600 focus:text-white",
-                            day_today: "rdp-day_today text-rose-500 font-bold",
-                            day_outside: "rdp-day_outside text-gray-300 opacity-50",
-                            day_disabled: "rdp-day_disabled text-gray-300 opacity-50",
-                            day_range_middle: "rdp-day_range_middle aria-selected:bg-gray-100 aria-selected:text-gray-900",
-                            day_hidden: "rdp-day_hidden invisible",
-                        }}
                     />
                 </div>
 
