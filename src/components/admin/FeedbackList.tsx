@@ -33,10 +33,74 @@ export function FeedbackList() {
     const [errorMsg, setErrorMsg] = useState<string | null>(null);
     const [indexLink, setIndexLink] = useState<string | null>(null);
 
-    // ... (effects remain valid)
+    // Monthly logs fetching for calendar markers
+    useEffect(() => {
+        const start = startOfMonth(currentMonth);
+        const end = endOfMonth(currentMonth);
 
-    // ... (formatting functions remain valid)
+        const q = query(
+            collectionGroup(db, "logs"),
+            where("createdAt", ">=", Timestamp.fromDate(start)),
+            where("createdAt", "<=", Timestamp.fromDate(end)),
+            orderBy("createdAt", "desc")
+        );
 
+        const unsubscribe = onSnapshot(q, (snapshot) => {
+            const dates = snapshot.docs.map(doc => {
+                const data = doc.data();
+                return data.createdAt?.toDate ? data.createdAt.toDate() : new Date(data.createdAt.seconds * 1000);
+            });
+            // Remove duplicates
+            const uniqueDates = dates.filter((date, i, self) =>
+                self.findIndex(d => isSameDay(d, date)) === i
+            );
+            setMarkedDates(uniqueDates);
+            setIndexLink(null);
+        }, (error) => {
+            console.error("Error fetching monthly logs:", error);
+            if (error.message.includes("indexes")) {
+                const link = error.message.match(/https:\/\/console\.firebase\.google\.com[^\s]*/)?.[0];
+                if (link) setIndexLink(link);
+            }
+        });
+
+        return () => unsubscribe();
+    }, [currentMonth]);
+
+    // Daily logs fetching
+    useEffect(() => {
+        if (!selectedDate) return;
+
+        setLoadingDaily(true);
+        setErrorMsg(null);
+
+        const start = startOfDay(selectedDate);
+        const end = endOfDay(selectedDate);
+
+        const q = query(
+            collectionGroup(db, "logs"),
+            where("createdAt", ">=", Timestamp.fromDate(start)),
+            where("createdAt", "<=", Timestamp.fromDate(end)),
+            orderBy("createdAt", "desc")
+        );
+
+        const unsubscribe = onSnapshot(q, (snapshot) => {
+            const logs: FeedbackLog[] = [];
+            snapshot.forEach((doc) => {
+                logs.push({ id: doc.id, ...doc.data() } as FeedbackLog);
+            });
+            setDailyLogs(logs);
+            setLoadingDaily(false);
+        }, (error) => {
+            console.error("Error fetching daily logs:", error);
+            setErrorMsg("데이터를 불러오는데 실패했습니다.");
+            setLoadingDaily(false);
+        });
+
+        return () => unsubscribe();
+    }, [selectedDate]);
+
+    // Format date helper
     const formatDate = (timestamp: any) => {
         if (!timestamp) return "-";
         if (timestamp.toDate) return timestamp.toDate().toLocaleDateString();
@@ -51,135 +115,102 @@ export function FeedbackList() {
     return (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
             {/* Calendar Section */}
-            <div className="bg-white rounded-xl shadow-sm p-6 flex flex-col w-full">
-                <style>{`
-                    .rdp { 
-                        --rdp-cell-size: 44px; 
-                        margin: 0;
-                        width: 100%;
-                    }
-                    .rdp-month {
-                        width: 100%;
-                    }
-                    .rdp-caption {
-                        display: flex;
-                        justify-content: space-between;
-                        align-items: center;
-                        position: relative;
-                        padding: 0 10px;
-                        margin-bottom: 20px;
-                    }
-                    .rdp-caption_label { 
-                        font-size: 1.25rem; 
-                        font-weight: 800; 
-                        color: #1f2937;
-                        border: none;
-                    }
-                    .rdp-nav {
-                        position: static;
-                        display: flex;
-                        gap: 10px;
-                    }
-                    .rdp-head_row {
-                        display: flex;
-                        justify-content: space-around;
-                        margin-bottom: 10px;
-                    }
-                    .rdp-row {
-                        display: flex;
-                        justify-content: space-around;
-                    }
-                    .rdp-head_cell {
-                        font-size: 0.9rem;
-                        font-weight: 500;
-                        color: #6b7280;
-                        text-transform: uppercase;
-                        padding-bottom: 12px;
-                    }
-                    .rdp-day {
-                        font-size: 1rem;
-                        border-radius: 50%;
-                    }
-                    .rdp-day_selected, .rdp-day_selected:focus-visible, .rdp-day_selected:hover { 
-                        background-color: #ef4444 !important; /* Red-500 */
-                        color: white !important; 
-                        font-weight: bold;
-                        border-radius: 50%;
-                    }
-                    .rdp-button:hover:not([disabled]):not(.rdp-day_selected) { 
-                        background-color: #f3f4f6; 
-                        color: #0f172a;
-                        border-radius: 50%;
-                    }
-                    .rdp-day_today {
-                        font-weight: bold;
-                        color: #ef4444; 
-                    }
-                    /* Markers (Dots) */
-                    .rdp-day_hasLog:not(.rdp-day_selected) {
-                        position: relative;
-                    }
-                    .rdp-day_hasLog:not(.rdp-day_selected)::after {
-                        content: '';
-                        position: absolute;
-                        bottom: 6px;
-                        left: 50%;
-                        transform: translateX(-50%);
-                        width: 4px;
-                        height: 4px;
-                        background-color: #ef4444;
-                        border-radius: 50%;
-                    }
-                    /* Weekend Colors */
-                    .rdp-day_sunday { color: #ef4444; }
-                    .rdp-day_saturday { color: #3b82f6; }
-                `}</style>
-                <DayPicker
-                    mode="single"
-                    selected={selectedDate}
-                    onSelect={setSelectedDate}
-                    onMonthChange={setCurrentMonth}
-                    locale={ko}
-                    modifiers={{
-                        hasLog: hasLog,
-                        holiday: (date) => {
-                            const month = date.getMonth() + 1;
-                            const day = date.getDate();
-                            const monthDay = `${month}-${day}`;
-                            return ["1-1", "3-1", "5-5", "6-6", "8-15", "10-3", "10-9", "12-25"].includes(monthDay);
-                        }
-                    }}
-                    modifiersClassNames={{
-                        hasLog: "rdp-day_hasLog",
-                        holiday: "text-red-500"
-                    }}
-                    weekStartsOn={0}
-                    formatters={{
-                        formatCaption: (date, options) => format(date, "yyyy년 M월", { locale: ko })
-                    }}
-                    className="flex justify-center"
-                />
+            <div className="bg-white rounded-xl shadow-sm p-6 flex flex-col w-full h-[600px]">
+                <div className="flex-1 flex flex-col items-center justify-center">
+                    <DayPicker
+                        mode="single"
+                        selected={selectedDate}
+                        onSelect={setSelectedDate}
+                        onMonthChange={setCurrentMonth}
+                        locale={ko}
+                        month={currentMonth}
+                        modifiers={{
+                            hasLog: hasLog,
+                        }}
+                        modifiersClassNames={{
+                            selected: "bg-rose-500 text-white hover:bg-rose-600 font-bold rounded-full",
+                            today: "text-rose-500 font-bold",
+                            hasLog: "relative"
+                        }}
+                        // @ts-ignore
+                        components={({
+                            DayContent: (props: any) => {
+                                const { date, activeModifiers } = props;
+                                const isSelected = activeModifiers.selected;
+                                const isToday = activeModifiers.today;
+                                const hasLogForDay = hasLog(date);
+
+                                return (
+                                    <div className={`relative w-full h-full flex items-center justify-center text-sm
+                                        ${isSelected ? 'text-white' : ''}
+                                        ${!isSelected && isToday ? 'text-rose-500 font-bold' : ''}
+                                    `}>
+                                        {date.getDate()}
+                                        {hasLogForDay && !isSelected && (
+                                            <div className="absolute bottom-1 w-1 h-1 bg-rose-500 rounded-full mx-auto" />
+                                        )}
+                                        {hasLogForDay && isSelected && (
+                                            <div className="absolute bottom-1 w-1 h-1 bg-white rounded-full mx-auto" />
+                                        )}
+                                    </div>
+                                );
+                            }
+                        } as any)}
+                        showOutsideDays
+                        className="p-4 bg-white rounded-2xl border shadow-sm"
+                        classNames={{
+                            months: "flex flex-col sm:flex-row space-y-4 sm:space-x-4 sm:space-y-0",
+                            month: "space-y-4",
+                            caption: "flex justify-center pt-1 relative items-center mb-4",
+                            caption_label: "text-lg font-bold text-gray-800",
+                            nav: "space-x-1 flex items-center",
+                            nav_button: "h-8 w-8 bg-transparent hover:bg-gray-100 p-1 rounded-full text-gray-600 transition-colors flex items-center justify-center",
+                            nav_button_previous: "absolute left-1",
+                            nav_button_next: "absolute right-1",
+                            table: "w-full border-collapse space-y-1",
+                            head_row: "flex",
+                            head_cell: "text-gray-400 rounded-md w-10 font-medium text-[0.8rem]",
+                            row: "flex w-full mt-2",
+                            cell: "h-10 w-10 text-center text-sm p-0 relative [&:has([aria-selected].day-range-end)]:rounded-r-md [&:has([aria-selected].day-outside)]:bg-gray-100/50 [&:has([aria-selected])]:bg-gray-100 first:[&:has([aria-selected])]:rounded-l-md last:[&:has([aria-selected])]:rounded-r-md focus-within:relative focus-within:z-20",
+                            day: "h-10 w-10 p-0 font-normal aria-selected:opacity-100 hover:bg-gray-100 rounded-full transition-colors",
+                            day_selected: "bg-rose-500 text-white hover:bg-rose-600 focus:bg-rose-600 focus:text-white",
+                            day_today: "text-rose-500 font-bold",
+                            day_outside: "text-gray-300 opacity-50",
+                            day_disabled: "text-gray-300 opacity-50",
+                            day_range_middle: "aria-selected:bg-gray-100 aria-selected:text-gray-900",
+                            day_hidden: "invisible",
+                        }}
+                    />
+                </div>
 
                 {indexLink && (
-                    <div className="mt-6 p-4 border rounded-lg bg-yellow-50 text-center w-full">
-                        <p className="mb-2 font-bold text-red-600 text-sm">⚠ 인덱스 설정 필요</p>
+                    <div className="mt-4 p-4 border rounded-lg bg-amber-50 text-center w-full animate-in fade-in slide-in-from-bottom-2 duration-300">
+                        <p className="mb-2 font-bold text-amber-800 text-sm flex items-center justify-center gap-2">
+                            <span>⚠</span> 데이터베이스 설정이 필요합니다
+                        </p>
+                        <p className="text-xs text-amber-600 mb-3">
+                            전체 학생의 피드백을 날짜별로 모아보려면<br />
+                            Firebase 콘솔에서 인덱스를 추가해야 합니다.
+                        </p>
                         <a
                             href={indexLink}
                             target="_blank"
                             rel="noreferrer"
-                            className="inline-block px-4 py-2 bg-blue-600 text-white rounded text-sm font-bold hover:bg-blue-700 transition-colors"
+                            className="inline-flex items-center justify-center px-4 py-2 bg-amber-600 text-white rounded-md text-sm font-bold hover:bg-amber-700 transition-colors shadow-sm"
                         >
-                            설정하기
+                            자동 설정 링크 열기 &rarr;
                         </a>
                     </div>
                 )}
             </div>
 
+
+
             {/* List Section - Table with Subject Column */}
             <div className="bg-white rounded-xl border shadow-sm flex flex-col h-full min-h-[600px]">
                 <div className="p-6 border-b bg-slate-50/50 rounded-t-xl">
                     <h3 className="text-lg font-bold text-slate-800">
-                        {selectedDate ? format(selectedDate, "M월 d일 피드백 목록") : "날짜를 선택해주세요"}
+                        {selectedDate ? format(selectedDate!, "M월 d일 피드백 목록") : "날짜를 선택해주세요"}
                     </h3>
                 </div>
 
@@ -240,58 +271,60 @@ export function FeedbackList() {
             </div>
 
             {/* Modal/Overlay for Detail View (Same as before) */}
-            {selectedLog && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={() => setSelectedLog(null)}>
-                    <div className="bg-white rounded-lg shadow-lg w-full max-w-2xl max-h-[80vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
-                        <div className="p-6 space-y-4">
-                            <div className="flex justify-between items-start border-b pb-4">
-                                <div>
-                                    <h3 className="text-xl font-bold">{selectedLog.studentName} 학생 피드백</h3>
-                                    <p className="text-sm text-muted-foreground mt-1">
-                                        작성자: {selectedLog.authorName} | 작성일: {formatDate(selectedLog.createdAt)}
-                                    </p>
-                                </div>
-                                <Button variant="ghost" size="sm" onClick={() => setSelectedLog(null)}>&times; 닫기</Button>
-                            </div>
-
-                            <div className="space-y-4">
-                                <div className="grid grid-cols-2 gap-4">
-                                    <div className="p-3 bg-slate-50 rounded-md">
-                                        <span className="text-xs font-medium text-slate-500 block mb-1">현재 진도</span>
-                                        <p className="text-sm font-medium">{selectedLog.progress || "-"}</p>
+            {
+                selectedLog && (
+                    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={() => setSelectedLog(null)}>
+                        <div className="bg-white rounded-lg shadow-lg w-full max-w-2xl max-h-[80vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+                            <div className="p-6 space-y-4">
+                                <div className="flex justify-between items-start border-b pb-4">
+                                    <div>
+                                        <h3 className="text-xl font-bold">{selectedLog.studentName} 학생 피드백</h3>
+                                        <p className="text-sm text-muted-foreground mt-1">
+                                            작성자: {selectedLog.authorName} | 작성일: {formatDate(selectedLog.createdAt)}
+                                        </p>
                                     </div>
-                                    <div className="p-3 bg-slate-50 rounded-md">
-                                        <span className="text-xs font-medium text-slate-500 block mb-1">현재 레벨</span>
-                                        <p className="text-sm font-medium">{selectedLog.level || "-"}</p>
-                                    </div>
+                                    <Button variant="ghost" size="sm" onClick={() => setSelectedLog(null)}>&times; 닫기</Button>
                                 </div>
 
-                                <div className="p-4 border rounded-md min-h-[100px]">
-                                    <span className="text-xs font-medium text-slate-500 block mb-2">피드백 내용</span>
-                                    <p className="whitespace-pre-wrap leading-relaxed">{selectedLog.feedback}</p>
-                                </div>
-
-                                {selectedLog.mediaUrl && (
-                                    <div className="space-y-2">
-                                        <span className="text-xs font-medium text-slate-500">첨부 미디어</span>
-                                        <div className="rounded-md overflow-hidden bg-black flex justify-center">
-                                            {selectedLog.mediaType === 'image' ? (
-                                                <img src={selectedLog.mediaUrl} alt="Feedback Media" className="max-h-[300px] object-contain" />
-                                            ) : (
-                                                <video src={selectedLog.mediaUrl} controls className="max-h-[300px]" />
-                                            )}
+                                <div className="space-y-4">
+                                    <div className="grid grid-cols-2 gap-4">
+                                        <div className="p-3 bg-slate-50 rounded-md">
+                                            <span className="text-xs font-medium text-slate-500 block mb-1">현재 진도</span>
+                                            <p className="text-sm font-medium">{selectedLog.progress || "-"}</p>
+                                        </div>
+                                        <div className="p-3 bg-slate-50 rounded-md">
+                                            <span className="text-xs font-medium text-slate-500 block mb-1">현재 레벨</span>
+                                            <p className="text-sm font-medium">{selectedLog.level || "-"}</p>
                                         </div>
                                     </div>
-                                )}
-                            </div>
 
-                            <div className="pt-4 flex justify-end">
-                                <Button onClick={() => setSelectedLog(null)}>닫기</Button>
+                                    <div className="p-4 border rounded-md min-h-[100px]">
+                                        <span className="text-xs font-medium text-slate-500 block mb-2">피드백 내용</span>
+                                        <p className="whitespace-pre-wrap leading-relaxed">{selectedLog.feedback}</p>
+                                    </div>
+
+                                    {selectedLog.mediaUrl && (
+                                        <div className="space-y-2">
+                                            <span className="text-xs font-medium text-slate-500">첨부 미디어</span>
+                                            <div className="rounded-md overflow-hidden bg-black flex justify-center">
+                                                {selectedLog.mediaType === 'image' ? (
+                                                    <img src={selectedLog.mediaUrl} alt="Feedback Media" className="max-h-[300px] object-contain" />
+                                                ) : (
+                                                    <video src={selectedLog.mediaUrl} controls className="max-h-[300px]" />
+                                                )}
+                                            </div>
+                                        </div>
+                                    )}
+                                </div>
+
+                                <div className="pt-4 flex justify-end">
+                                    <Button onClick={() => setSelectedLog(null)}>닫기</Button>
+                                </div>
                             </div>
                         </div>
                     </div>
-                </div>
-            )}
-        </div>
+                )
+            }
+        </div >
     );
 }
