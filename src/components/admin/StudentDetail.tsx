@@ -165,14 +165,14 @@ export function StudentDetail({ student, onBack, currentUser }: StudentDetailPro
                     throw new Error("인증 토큰을 가져올 수 없습니다. 다시 로그인해주세요.");
                 }
 
-                await fetch('/api/send-alimtalk', {
+                const response = await fetch('/api/send-alimtalk', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
                         'Authorization': `Bearer ${idToken}`
                     },
                     body: JSON.stringify({
-                        phone: student.phone,
+                        phone: student.phone.replace(/-/g, ''), // Remove dashes
                         templateId: 'FEEDBACK_LOG_V2_ldBhHyw6J',
                         templateParameter: {
                             student_name: student.name,
@@ -180,6 +180,11 @@ export function StudentDetail({ student, onBack, currentUser }: StudentDetailPro
                         }
                     })
                 });
+
+                const result = await response.json();
+                if (!result.success) {
+                    throw new Error(result.error || "알림톡 발송 실패");
+                }
             }
 
             setProgress("");
