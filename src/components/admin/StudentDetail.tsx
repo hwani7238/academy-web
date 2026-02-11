@@ -203,6 +203,8 @@ export function StudentDetail({ student, onBack, currentUser }: StudentDetailPro
                 message = "파일 업로드가 취소되었습니다.";
             } else if (error.code === 'storage/unknown') {
                 message = "파일 업로드 중 알 수 없는 오류가 발생했습니다.";
+            } else if (error.message) {
+                message = `저장 실패: ${error.message}`;
             }
             alert(message);
         } finally {
