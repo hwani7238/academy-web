@@ -130,7 +130,9 @@ export function FeedbackList() {
                         modifiersClassNames={{
                             selected: "bg-rose-500 text-white hover:bg-rose-600 font-bold rounded-full",
                             today: "text-rose-500 font-bold",
-                            hasLog: "relative"
+                            hasLog: "relative",
+                            saturday: "text-blue-500",
+                            sunday: "text-red-500"
                         }}
                         // @ts-ignore
                         components={({
@@ -144,6 +146,8 @@ export function FeedbackList() {
                                     <div className={`relative w-full h-full flex items-center justify-center text-sm
                                         ${isSelected ? 'text-white' : ''}
                                         ${!isSelected && isToday ? 'text-rose-500 font-bold' : ''}
+                                        ${!isSelected && !isToday && date.getDay() === 0 ? 'text-red-500' : ''}
+                                        ${!isSelected && !isToday && date.getDay() === 6 ? 'text-blue-500' : ''}
                                     `}>
                                         {date.getDate()}
                                         {hasLogForDay && !isSelected && (
