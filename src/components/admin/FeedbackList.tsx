@@ -145,9 +145,9 @@ export function FeedbackList() {
                                 return (
                                     <div className={`relative w-full h-full flex items-center justify-center text-sm
                                         ${isSelected ? 'text-white' : ''}
-                                        ${!isSelected && isToday ? 'text-rose-500 font-bold' : ''}
-                                        ${!isSelected && !isToday && date.getDay() === 0 ? 'text-red-500' : ''}
-                                        ${!isSelected && !isToday && date.getDay() === 6 ? 'text-blue-500' : ''}
+                                        ${!isSelected && isToday ? '!text-rose-500 font-bold' : ''}
+                                        ${!isSelected && !isToday && date.getDay() === 0 ? '!text-red-600 font-medium' : ''}
+                                        ${!isSelected && !isToday && date.getDay() === 6 ? '!text-blue-600 font-medium' : ''}
                                     `}>
                                         {date.getDate()}
                                         {hasLogForDay && !isSelected && (
@@ -172,7 +172,7 @@ export function FeedbackList() {
                             nav_button_previous: "absolute left-1",
                             nav_button_next: "absolute right-1",
                             table: "w-full border-collapse",
-                            head_row: "[&>th:first-child]:text-red-500 [&>th:last-child]:text-blue-500",
+                            head_row: "[&>th]:!font-normal [&>th:first-child]:!text-red-600 [&>th:last-child]:!text-blue-600",
                             head_cell: "text-gray-400 rounded-md w-10 h-10 font-medium text-[0.8rem]",
                             row: "w-full mt-2",
                             cell: "h-10 w-10 text-center text-sm p-0 relative [&:has([aria-selected].day-range-end)]:rounded-r-md [&:has([aria-selected].day-outside)]:bg-gray-100/50 [&:has([aria-selected])]:bg-gray-100 first:[&:has([aria-selected])]:rounded-l-md last:[&:has([aria-selected])]:rounded-r-md focus-within:relative focus-within:z-20",
