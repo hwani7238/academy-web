@@ -114,6 +114,30 @@ export function FeedbackList() {
 
     return (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
+            <style>{`
+                .rdp {
+                    --rdp-cell-size: 40px !important;
+                    --rdp-accent-color: #f43f5e !important;
+                    --rdp-background-color: #f1f5f9 !important;
+                    margin: 0 !important;
+                }
+                .rdp-day_selected:not([disabled]) { 
+                    background-color: var(--rdp-accent-color); 
+                }
+                .rdp-button:hover:not([disabled]):not(.rdp-day_selected) {
+                    background-color: var(--rdp-background-color);
+                }
+                /* Saturday Blue - header & body cells */
+                .rdp-head_cell:last-child, 
+                .rdp-tbody .rdp-row > .rdp-cell:last-child .rdp-day:not(.rdp-day_outside) {
+                    color: #2563eb !important;
+                }
+                /* Sunday Red - header & body cells */
+                .rdp-head_cell:first-child, 
+                .rdp-tbody .rdp-row > .rdp-cell:first-child .rdp-day:not(.rdp-day_outside) {
+                    color: #dc2626 !important;
+                }
+            `}</style>
             {/* Calendar Section */}
             <div className="bg-white rounded-xl shadow-sm p-6 flex flex-col w-full h-[600px]">
                 <div className="flex-1 flex flex-col items-center justify-center">

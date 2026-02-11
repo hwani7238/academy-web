@@ -173,7 +173,7 @@ export function StudentDetail({ student, onBack, currentUser }: StudentDetailPro
                     },
                     body: JSON.stringify({
                         phone: student.phone.replace(/-/g, ''), // Remove dashes
-                        templateId: 'FEEDBACK_LOG_V2_ldBhHyw6J',
+                        templateId: 'FEEDBACK_LOG_V2',
                         templateParameter: {
                             student_name: student.name,
                             link: linkForTemplate
