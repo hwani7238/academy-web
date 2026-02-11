@@ -183,7 +183,7 @@ export function StudentDetail({ student, onBack, currentUser }: StudentDetailPro
 
                 const result = await response.json();
                 if (!result.success) {
-                    throw new Error(result.error || "알림톡 발송 실패");
+                    throw new Error(result.error || `알림톡 실패 (응답): ${JSON.stringify(result)}`);
                 }
             }
 

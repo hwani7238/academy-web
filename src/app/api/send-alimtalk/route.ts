@@ -39,7 +39,7 @@ export async function POST(request: Request) {
     if (!appKey || !secretKey || !senderKey) {
         console.warn("NHN Cloud Keys are missing. Skipping actual send.");
         // In development, we might want to return success to avoid breaking the UI
-        return NextResponse.json({ success: false, message: "Keys missing, simulated" });
+        return NextResponse.json({ success: false, error: "Keys missing, simulated" });
     }
 
     // Example NHN Cloud AlimTalk API URL (Verify version and region)
