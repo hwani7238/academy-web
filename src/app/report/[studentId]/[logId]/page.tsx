@@ -127,9 +127,15 @@ export default function ReportPage() {
                             {log.mediaType === 'image' ? (
                                 <img src={log.mediaUrl} alt="첨부 이미지" className="w-full rounded" />
                             ) : (
-                                <video controls className="w-full rounded">
-                                    <source src={log.mediaUrl} />
-                                </video>
+                                <div className="flex flex-col gap-2">
+                                    <video src={log.mediaUrl} controls className="w-full rounded" />
+                                    <div className="flex justify-end mt-1">
+                                        <a href={log.mediaUrl} download target="_blank" rel="noreferrer" className="text-xs bg-slate-100 hover:bg-slate-200 text-slate-700 py-1.5 px-3 rounded inline-flex items-center gap-1 transition-colors">
+                                            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+                                            영상 다운로드
+                                        </a>
+                                    </div>
+                                </div>
                             )}
                         </div>
                     </div>
