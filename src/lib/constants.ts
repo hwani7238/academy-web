@@ -8,7 +8,8 @@ export const INSTRUMENTS = [
     "보컬",
     "작곡",
     "시창청음",
-    "댄스"
+    "댄스",
+    "우쿨렐레"
 ] as const;
 
 export const TEACHER_SUBJECTS = [
@@ -20,7 +21,8 @@ export const TEACHER_SUBJECTS = [
     "보컬",
     "작곡",
     "시창청음",
-    "댄스"
+    "댄스",
+    "우쿨렐레"
 ] as const;
 
 export const ADMIN_ROLES = ["admin", "wonjang", "siljang"];
