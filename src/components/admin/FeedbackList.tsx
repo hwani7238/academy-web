@@ -403,15 +403,6 @@ export function FeedbackList() {
                                     </p>
                                 </div>
                                 <div className="flex items-center gap-2">
-                                    {selectedLog.studentId && (
-                                        <a
-                                            href={`/report/${selectedLog.studentId}/${selectedLog.id}?admin=true`}
-                                            target="_blank"
-                                            rel="noreferrer"
-                                        >
-                                            <Button variant="outline" size="sm">리포트 열기</Button>
-                                        </a>
-                                    )}
                                     <Button variant="ghost" size="sm" onClick={() => setSelectedLogPath(null)}>
                                         &times; 닫기
                                     </Button>
@@ -420,8 +411,8 @@ export function FeedbackList() {
 
                             <div
                                 className={`rounded-lg border-2 p-4 ${isViewed(selectedLog)
-                                        ? "border-emerald-200 bg-emerald-50"
-                                        : "border-amber-200 bg-amber-50"
+                                    ? "border-emerald-200 bg-emerald-50"
+                                    : "border-amber-200 bg-amber-50"
                                     }`}
                             >
                                 <div className="flex flex-wrap items-center justify-between gap-3">
