@@ -43,7 +43,7 @@ export async function POST(request: Request) {
     }
 
     // Example NHN Cloud AlimTalk API URL (Verify version and region)
-    const url = `https://api-alimtalk.cloud.toast.com/alimtalk/v2.3/appkeys/${appKey}/messages`;
+    const url = `https://kakaotalk-bizmessage.api.nhncloudservice.com/alimtalk/v2.3/appkeys/${appKey}/messages`;
 
     try {
         const response = await fetch(url, {

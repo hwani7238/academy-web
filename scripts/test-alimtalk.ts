@@ -23,7 +23,7 @@ async function sendAlimTalk() {
     console.log(`Using AppKey: ${appKey}`);
     console.log(`Using SenderKey: ${senderKey}`);
 
-    const url = `https://api-alimtalk.cloud.toast.com/alimtalk/v2.3/appkeys/${appKey}/messages`;
+    const url = `https://kakaotalk-bizmessage.api.nhncloudservice.com/alimtalk/v2.3/appkeys/${appKey}/messages`;
 
     try {
         const response = await fetch(url, {
