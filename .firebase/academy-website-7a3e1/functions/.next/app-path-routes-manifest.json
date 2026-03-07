@@ -1,0 +1,13 @@
+{
+  "/(main)/about/page": "/about",
+  "/(main)/login/page": "/login",
+  "/(main)/page": "/",
+  "/(main)/teacher-signup/page": "/teacher-signup",
+  "/_global-error/page": "/_global-error",
+  "/_not-found/page": "/_not-found",
+  "/admin/page": "/admin",
+  "/api/send-alimtalk/route": "/api/send-alimtalk",
+  "/favicon.ico/route": "/favicon.ico",
+  "/report/[studentId]/[logId]/page": "/report/[studentId]/[logId]",
+  "/setup-admin/page": "/setup-admin"
+}

@@ -1,10 +1,22 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { doc, updateDoc, collection, addDoc, onSnapshot, query, orderBy, deleteDoc } from "firebase/firestore";
+import { doc, collection, addDoc, onSnapshot, query, orderBy, deleteDoc } from "firebase/firestore";
 import { ref, uploadBytesResumable, getDownloadURL, deleteObject } from "firebase/storage";
 import { db, storage } from "@/lib/firebase";
 import { Button } from "@/components/ui/button";
+
+interface TimestampLike {
+    toDate?: () => Date;
+    seconds?: number;
+}
+
+type FirestoreDate = Date | TimestampLike | null | undefined;
+
+interface AppError {
+    code?: string;
+    message?: string;
+}
 
 interface Student {
     id: string;
@@ -13,7 +25,7 @@ interface Student {
     instrument?: string;
     instruments?: string[]; // Multi-subject
     status: string;
-    createdAt: any;
+    createdAt: FirestoreDate;
 }
 
 interface LearningLog {
@@ -21,7 +33,7 @@ interface LearningLog {
     progress: string;
     level: string;
     feedback: string;
-    createdAt: any;
+    createdAt: FirestoreDate;
     authorName?: string;
     authorId?: string;
     studentName?: string;
@@ -30,24 +42,32 @@ interface LearningLog {
     mediaPath?: string;
     mediaTitle?: string;
     instrument?: string; // Subject for this log
-}
-
-// ... existing interfaces ...
-
-interface MediaItem {
-    id: string;
-    title: string;
-    url: string;
-    createdAt: any;
-    storagePath: string;
-    type?: 'video' | 'image';
+    viewed?: boolean;
+    firstViewedAt?: FirestoreDate;
+    lastViewedAt?: FirestoreDate;
+    viewCount?: number;
 }
 
 interface StudentDetailProps {
     student: Student;
     onBack: () => void;
-    currentUser: any;
+    currentUser: {
+        uid: string;
+        name?: string;
+        email?: string;
+    };
 }
+
+const getDateValue = (date: FirestoreDate) => {
+    if (!date) return null;
+    if (date instanceof Date) return date;
+    if (typeof date.toDate === "function") return date.toDate();
+    if (typeof date.seconds === "number") return new Date(date.seconds * 1000);
+    return null;
+};
+
+const isViewed = (log: Pick<LearningLog, "viewed" | "viewCount" | "firstViewedAt" | "lastViewedAt">) =>
+    Boolean(log.viewed) || (log.viewCount ?? 0) > 0 || Boolean(log.firstViewedAt) || Boolean(log.lastViewedAt);
 
 export function StudentDetail({ student, onBack, currentUser }: StudentDetailProps) {
     const studentInstruments = student.instruments && student.instruments.length > 0
@@ -60,7 +80,6 @@ export function StudentDetail({ student, onBack, currentUser }: StudentDetailPro
     const [selectedInstrument, setSelectedInstrument] = useState(studentInstruments[0] || "피아노");
 
     const [logs, setLogs] = useState<LearningLog[]>([]);
-    const [mediaItems, setMediaItems] = useState<MediaItem[]>([]);
     const [uploading, setUploading] = useState(false);
     const [uploadProgress, setUploadProgress] = useState(0);
     const [mediaFile, setMediaFile] = useState<File | null>(null);
@@ -84,6 +103,14 @@ export function StudentDetail({ student, onBack, currentUser }: StudentDetailPro
     }, [student.id]);
 
     const [sendNotification, setSendNotification] = useState(true);
+
+    const getAppError = (error: unknown): AppError => {
+        if (typeof error === "object" && error !== null) {
+            return error as AppError;
+        }
+
+        return {};
+    };
 
     const handleFileUpload = async (file: File): Promise<{ url: string, path: string, type: string }> => {
         return new Promise((resolve, reject) => {
@@ -194,17 +221,18 @@ export function StudentDetail({ student, onBack, currentUser }: StudentDetailPro
             setMediaTitle("");
             setUploadProgress(0);
             alert("학습 로그가 저장되었습니다." + (sendNotification ? " (알림 발송 시도함)" : ""));
-        } catch (error: any) {
+        } catch (error) {
             console.error("Error adding log:", error);
+            const appError = getAppError(error);
             let message = "저장 실패";
-            if (error.code === 'storage/unauthorized') {
+            if (appError.code === 'storage/unauthorized') {
                 message = "파일 업로드 권한이 없습니다. 관리자에게 문의하세요.";
-            } else if (error.code === 'storage/canceled') {
+            } else if (appError.code === 'storage/canceled') {
                 message = "파일 업로드가 취소되었습니다.";
-            } else if (error.code === 'storage/unknown') {
+            } else if (appError.code === 'storage/unknown') {
                 message = "파일 업로드 중 알 수 없는 오류가 발생했습니다.";
-            } else if (error.message) {
-                message = `저장 실패: ${error.message}`;
+            } else if (appError.message) {
+                message = `저장 실패: ${appError.message}`;
             } else {
                 message = `저장 실패 (상세): ${JSON.stringify(error, Object.getOwnPropertyNames(error))}`;
             }
@@ -241,12 +269,28 @@ export function StudentDetail({ student, onBack, currentUser }: StudentDetailPro
         }
     };
 
-    const formatDate = (date: any) => {
-        if (!date) return "";
-        if (date.toDate) return date.toDate().toLocaleDateString();
-        if (date instanceof Date) return date.toLocaleDateString();
-        if (typeof date.seconds === 'number') return new Date(date.seconds * 1000).toLocaleDateString();
-        return "";
+    const formatDate = (date: FirestoreDate) => {
+        return getDateValue(date)?.toLocaleDateString() ?? "";
+    };
+
+    const formatDateTime = (date: FirestoreDate) => {
+        return getDateValue(date)?.toLocaleString("ko-KR") ?? "";
+    };
+
+    const renderViewBadge = (log: LearningLog) => {
+        if (isViewed(log)) {
+            return (
+                <span className="inline-flex items-center rounded-full bg-emerald-100 px-2 py-0.5 text-[11px] font-semibold text-emerald-700">
+                    열람 {log.viewCount ?? 1}회
+                </span>
+            );
+        }
+
+        return (
+            <span className="inline-flex items-center rounded-full bg-slate-200 px-2 py-0.5 text-[11px] font-semibold text-slate-600">
+                미열람
+            </span>
+        );
     };
 
     return (
@@ -366,12 +410,39 @@ export function StudentDetail({ student, onBack, currentUser }: StudentDetailPro
                         <div className="max-h-[600px] overflow-y-auto space-y-4">
                             {logs.map((log) => (
                                 <div key={log.id} className="rounded-md border p-4 bg-slate-50">
-                                    <div className="flex justify-between items-start mb-2">
-                                        <p className="text-sm text-muted-foreground">
-                                            {formatDate(log.createdAt)}
-                                            {log.authorName && <span className="ml-2 text-xs text-blue-600 font-medium">By {log.authorName}</span>}
-                                        </p>
-                                        <div className="flex gap-2">
+                                    <div className="mb-2 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                                        <div className="min-w-0 flex-1">
+                                            <p className="text-sm text-muted-foreground">
+                                                {formatDate(log.createdAt)}
+                                                {log.authorName && <span className="ml-2 text-xs text-blue-600 font-medium">By {log.authorName}</span>}
+                                            </p>
+                                            <div className="mt-2 flex flex-wrap items-center gap-2">
+                                                {renderViewBadge(log)}
+                                                {isViewed(log) && log.lastViewedAt && (
+                                                    <p className="text-xs text-emerald-700">
+                                                        최종 열람 {formatDateTime(log.lastViewedAt)}
+                                                    </p>
+                                                )}
+                                            </div>
+                                            {isViewed(log) && (
+                                                <p className="mt-1 text-xs text-emerald-700">
+                                                    최초 열람: {formatDateTime(log.firstViewedAt) || "-"} · 최종 열람: {formatDateTime(log.lastViewedAt) || "-"}
+                                                </p>
+                                            )}
+                                            {!isViewed(log) && (
+                                                <p className="mt-1 text-xs text-slate-500">
+                                                    학부모가 리포트를 열면 여기 상태가 바뀝니다.
+                                                </p>
+                                            )}
+                                            <div className="mt-2 flex flex-wrap gap-2">
+                                                {log.instrument && (
+                                                    <p className="inline-block rounded bg-yellow-50 px-2 py-1 text-xs font-bold text-yellow-700">
+                                                        {log.instrument}
+                                                    </p>
+                                                )}
+                                            </div>
+                                        </div>
+                                        <div className="flex w-full flex-wrap justify-end gap-2 sm:w-auto">
                                             <Button variant="outline" size="sm" onClick={() => handleCopyLink(log.id)} className="h-7 text-xs">
                                                 링크 복사
                                             </Button>
@@ -381,7 +452,6 @@ export function StudentDetail({ student, onBack, currentUser }: StudentDetailPro
                                         </div>
                                     </div>
                                     <div className="space-y-2 text-sm">
-                                        {log.instrument && <p className="px-2 py-1 bg-yellow-50 inline-block rounded text-xs font-bold text-yellow-700 mb-1">{log.instrument}</p>}
                                         {log.progress && <p><span className="font-semibold">교재:</span> {log.progress}</p>}
                                         {log.level && <p><span className="font-semibold">레벨:</span> {log.level}</p>}
                                         {log.feedback && (

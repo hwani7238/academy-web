@@ -2,23 +2,93 @@ rules_version = '2';
 
 service cloud.firestore {
   match /databases/{database}/documents {
+    function userDoc(userId) {
+      return /databases/$(database)/documents/users/$(userId);
+    }
+
     // Helper function to check if user is authenticated
     function isAuthenticated() {
       return request.auth != null;
     }
 
-    // Helper function to check if user is admin or teacher
-    // Note: This requires an extra read verification which costs money. 
-    // For now, we trust authenticated users for simple read/write on students app-wide, 
-    // but ideally we should check role.
+    function isAdmin() {
+      return isAuthenticated() &&
+        exists(userDoc(request.auth.uid)) &&
+        get(userDoc(request.auth.uid)).data.role in ['admin', 'wonjang', 'siljang'];
+    }
+
+    function isApprovedTeacher() {
+      return isAuthenticated() &&
+        exists(userDoc(request.auth.uid)) &&
+        get(userDoc(request.auth.uid)).data.role == 'teacher' &&
+        (
+          !('status' in get(userDoc(request.auth.uid)).data) ||
+          get(userDoc(request.auth.uid)).data.status == 'approved'
+        );
+    }
+
     function isStaff() {
-      return isAuthenticated() && 
-        exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
-        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['admin', 'teacher', 'wonjang', 'siljang'];
+      return isAdmin() || isApprovedTeacher();
+    }
+
+    function isValidTeacherSignup(userId) {
+      return isAuthenticated() &&
+        request.auth.uid == userId &&
+        !exists(userDoc(userId)) &&
+        request.resource.data.keys().hasOnly([
+          'email',
+          'name',
+          'phone',
+          'role',
+          'status',
+          'subject',
+          'createdAt',
+          'requestedAt'
+        ]) &&
+        request.resource.data.email is string &&
+        request.resource.data.email == request.auth.token.email &&
+        request.resource.data.name is string &&
+        request.resource.data.name.size() > 0 &&
+        request.resource.data.name.size() <= 50 &&
+        request.resource.data.phone is string &&
+        request.resource.data.phone.size() <= 30 &&
+        request.resource.data.role == 'teacher' &&
+        request.resource.data.status == 'pending' &&
+        request.resource.data.subject is string &&
+        request.resource.data.subject.size() > 0 &&
+        request.resource.data.subject.size() <= 30 &&
+        request.resource.data.createdAt is timestamp &&
+        request.resource.data.requestedAt is timestamp;
+    }
+
+    function isAllowedReportViewUpdate() {
+      return request.auth == null &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'viewed',
+          'firstViewedAt',
+          'lastViewedAt',
+          'lastViewedUserAgent',
+          'viewCount'
+        ]) &&
+        request.resource.data.viewed == true &&
+        request.resource.data.lastViewedAt is timestamp &&
+        request.resource.data.lastViewedUserAgent is string &&
+        request.resource.data.lastViewedUserAgent.size() <= 300 &&
+        request.resource.data.viewCount is int &&
+        (
+          !('firstViewedAt' in request.resource.data) ||
+          request.resource.data.firstViewedAt is timestamp
+        );
     }
 
     // Allow public read for reports (specific path)
     match /students/{studentId}/logs/{logId} {
+      allow read: if true;
+      allow update: if isAllowedReportViewUpdate();
+    }
+
+    // Collection group queries for "logs" need an explicit recursive match.
+    match /{path=**}/logs/{logId} {
       allow read: if true;
     }
 
@@ -33,10 +103,10 @@ service cloud.firestore {
     }
 
     // Users collection - Users can read their own profile, Staff can read all?
-    // Let's allow users to read/write their own data.
     match /users/{userId} {
-      allow read, write: if isAuthenticated() && request.auth.uid == userId;
-      allow read: if isStaff(); // Staff might need to read other users to check permissions?
+      allow read: if isAuthenticated() && request.auth.uid == userId;
+      allow read, create, update, delete: if isAdmin();
+      allow create: if isValidTeacherSignup(userId);
     }
     
     // Default deny for everything else (removed the wildcard match)

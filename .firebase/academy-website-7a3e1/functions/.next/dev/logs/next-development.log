@@ -1,0 +1,9 @@
+[00:00:01.129] Server  LOG     ✓ Ready in 1030ms
+[00:00:13.597] Browser INFO    %cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold
+[00:00:13.935] Browser ERROR   Error incrementing visitor count: {"code":"permission-denied","name":"FirebaseError"}
+[00:00:13.935] Browser ERROR   Error listening to visitor count: {"code":"permission-denied","name":"FirebaseError"}
+[00:00:26.590] Browser WARN    Image with src "/director.jpg" has "fill" but is missing "sizes" prop. Please add it to improve page performance. Read more: https://nextjs.org/docs/api-reference/next/image#sizes
+[00:00:33.086] Browser INFO    %cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold
+[00:00:33.397] Browser ERROR   Error incrementing visitor count: {"code":"permission-denied","name":"FirebaseError"}
+[00:00:33.397] Browser ERROR   Error listening to visitor count: {"code":"permission-denied","name":"FirebaseError"}
+[00:17:05.935] Browser INFO    %cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold

@@ -1,0 +1,13 @@
+{
+  "/(main)/about/page": "app/(main)/about/page.js",
+  "/(main)/login/page": "app/(main)/login/page.js",
+  "/(main)/page": "app/(main)/page.js",
+  "/(main)/teacher-signup/page": "app/(main)/teacher-signup/page.js",
+  "/_global-error/page": "app/_global-error/page.js",
+  "/_not-found/page": "app/_not-found/page.js",
+  "/admin/page": "app/admin/page.js",
+  "/api/send-alimtalk/route": "app/api/send-alimtalk/route.js",
+  "/favicon.ico/route": "app/favicon.ico/route.js",
+  "/report/[studentId]/[logId]/page": "app/report/[studentId]/[logId]/page.js",
+  "/setup-admin/page": "app/setup-admin/page.js"
+}

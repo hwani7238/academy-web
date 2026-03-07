@@ -1,21 +1,48 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { initializeApp, getApp, deleteApp } from "firebase/app";
-import { getAuth, createUserWithEmailAndPassword, signOut } from "firebase/auth";
-import { collection, doc, setDoc, onSnapshot, query, where, deleteDoc, updateDoc } from "firebase/firestore";
+import { useEffect, useState } from "react";
+import { deleteApp, getApp, initializeApp } from "firebase/app";
+import { createUserWithEmailAndPassword, getAuth, signOut } from "firebase/auth";
+import { collection, deleteDoc, doc, onSnapshot, setDoc, updateDoc } from "firebase/firestore";
 import { db, firebaseConfig } from "@/lib/firebase";
 import { Button } from "@/components/ui/button";
 import { TEACHER_SUBJECTS } from "@/lib/constants";
+
+interface TimestampLike {
+    toDate?: () => Date;
+    seconds?: number;
+}
+
+type FirestoreDate = Date | TimestampLike | null | undefined;
 
 interface User {
     id: string;
     email: string;
     name: string;
     role: string;
+    status?: string;
     phone?: string;
     subject?: string;
+    requestedAt?: FirestoreDate;
+    approvedAt?: FirestoreDate;
 }
+
+interface ErrorShape {
+    message?: string;
+}
+
+const getDateValue = (timestamp: FirestoreDate) => {
+    if (!timestamp) return null;
+    if (timestamp instanceof Date) return timestamp;
+    if (typeof timestamp.toDate === "function") return timestamp.toDate();
+    if (typeof timestamp.seconds === "number") return new Date(timestamp.seconds * 1000);
+    return null;
+};
+
+const formatDateTime = (timestamp: FirestoreDate) => {
+    const date = getDateValue(timestamp);
+    return date ? date.toLocaleString("ko-KR") : "-";
+};
 
 export function TeacherManager() {
     const [teachers, setTeachers] = useState<User[]>([]);
@@ -25,37 +52,36 @@ export function TeacherManager() {
     const [phone, setPhone] = useState("");
     const [subject, setSubject] = useState<string>(TEACHER_SUBJECTS[0]);
     const [loading, setLoading] = useState(false);
+    const [actionLoadingId, setActionLoadingId] = useState<string | null>(null);
 
-    // Edit state
     const [editingId, setEditingId] = useState<string | null>(null);
     const [editName, setEditName] = useState("");
     const [editPhone, setEditPhone] = useState("");
     const [editSubject, setEditSubject] = useState("");
 
     useEffect(() => {
-        // Query users where role is 'teacher' (or list all and filter)
-        // Since we might not have set indexes, let's just listen to 'users' collection 
-        // We'll need to create the 'users' collection first.
-        const q = query(collection(db, "users"));
-        const unsubscribe = onSnapshot(q, (snapshot) => {
+        const unsubscribe = onSnapshot(collection(db, "users"), (snapshot) => {
             const users: User[] = [];
-            snapshot.forEach((doc) => {
-                users.push({ id: doc.id, ...doc.data() } as User);
+            snapshot.forEach((docSnapshot) => {
+                users.push({ id: docSnapshot.id, ...docSnapshot.data() } as User);
             });
-            // Filter client side or update query later
-            setTeachers(users.filter(u => u.role === 'teacher'));
+            setTeachers(users.filter((user) => user.role === "teacher"));
         });
 
         return () => unsubscribe();
     }, []);
 
-    const handleCreateTeacher = async (e: React.FormEvent) => {
-        e.preventDefault();
+    const pendingTeachers = teachers.filter((teacher) => teacher.status === "pending");
+    const approvedTeachers = teachers.filter((teacher) => teacher.status !== "pending" && teacher.status !== "rejected");
+    const rejectedTeachers = teachers.filter((teacher) => teacher.status === "rejected");
+
+    const handleCreateTeacher = async (event: React.FormEvent) => {
+        event.preventDefault();
         setLoading(true);
 
-        // Use a secondary app to create user without logging out the current admin
         const secondaryAppName = "secondaryApp";
         let secondaryApp;
+
         try {
             try {
                 secondaryApp = getApp(secondaryAppName);
@@ -67,21 +93,19 @@ export function TeacherManager() {
             const userCredential = await createUserWithEmailAndPassword(secondaryAuth, email, password);
             const user = userCredential.user;
 
-            // Create user doc in Firestore
             await setDoc(doc(db, "users", user.uid), {
                 email: user.email,
-                name: name,
+                name,
                 role: "teacher",
-                phone: phone,
-                subject: subject,
-                createdAt: new Date()
+                status: "approved",
+                phone,
+                subject,
+                createdAt: new Date(),
+                requestedAt: new Date(),
+                approvedAt: new Date(),
             });
 
-            // Sign out from secondary app to be safe (though it shouldn't affect main auth)
             await signOut(secondaryAuth);
-
-            // Allow the secondary app to be properly cleaned up? 
-            // Actually deleteApp is better to free resources.
             await deleteApp(secondaryApp);
 
             setEmail("");
@@ -90,12 +114,46 @@ export function TeacherManager() {
             setPhone("");
             setSubject(TEACHER_SUBJECTS[0]);
             alert("강사 계정이 생성되었습니다.");
-
-        } catch (error: any) {
+        } catch (error: unknown) {
             console.error("Error creating teacher:", error);
-            alert("강사 생성 실패: " + error.message);
+            const message =
+                typeof error === "object" && error !== null && "message" in error
+                    ? String((error as ErrorShape).message)
+                    : "알 수 없는 오류";
+            alert("강사 생성 실패: " + message);
         } finally {
             setLoading(false);
+        }
+    };
+
+    const handleApprove = async (teacher: User) => {
+        setActionLoadingId(teacher.id);
+
+        try {
+            await updateDoc(doc(db, "users", teacher.id), {
+                status: "approved",
+                approvedAt: new Date(),
+            });
+        } catch (error) {
+            console.error("Error approving teacher:", error);
+            alert("승인 실패");
+        } finally {
+            setActionLoadingId(null);
+        }
+    };
+
+    const handleReject = async (teacher: User) => {
+        setActionLoadingId(teacher.id);
+
+        try {
+            await updateDoc(doc(db, "users", teacher.id), {
+                status: "rejected",
+            });
+        } catch (error) {
+            console.error("Error rejecting teacher:", error);
+            alert("반려 실패");
+        } finally {
+            setActionLoadingId(null);
         }
     };
 
@@ -115,7 +173,7 @@ export function TeacherManager() {
             await updateDoc(doc(db, "users", id), {
                 name: editName,
                 phone: editPhone,
-                subject: editSubject
+                subject: editSubject,
             });
             setEditingId(null);
         } catch (error) {
@@ -125,7 +183,8 @@ export function TeacherManager() {
     };
 
     const handleDelete = async (id: string) => {
-        if (!confirm("강사를 삭제하시겠습니까? 계정 삭제는 Firebase Console에서 별도로 해야 합니다.")) return;
+        if (!confirm("강사 프로필을 삭제하시겠습니까? Auth 계정은 별도로 남을 수 있습니다.")) return;
+
         try {
             await deleteDoc(doc(db, "users", id));
         } catch (error) {
@@ -138,76 +197,158 @@ export function TeacherManager() {
         <div className="rounded-lg border p-6 shadow-sm">
             <h3 className="mb-4 text-lg font-semibold">강사 관리</h3>
 
-            <form onSubmit={handleCreateTeacher} className="space-y-4 mb-6 border-b pb-6">
+            <form onSubmit={handleCreateTeacher} className="mb-6 space-y-4 border-b pb-6">
+                <p className="text-sm font-medium text-slate-700">관리자가 직접 강사 계정 생성</p>
                 <div className="grid gap-2">
                     <label className="text-sm font-medium">강사 이름</label>
-                    <input className="flex h-10 w-full rounded-md border border-input px-3 py-2 text-sm"
-                        value={name} onChange={e => setName(e.target.value)} required placeholder="김선생" />
+                    <input
+                        className="flex h-10 w-full rounded-md border border-input px-3 py-2 text-sm"
+                        value={name}
+                        onChange={(event) => setName(event.target.value)}
+                        required
+                        placeholder="김선생"
+                    />
                 </div>
                 <div className="grid gap-2">
                     <label className="text-sm font-medium">연락처</label>
-                    <input className="flex h-10 w-full rounded-md border border-input px-3 py-2 text-sm"
-                        value={phone} onChange={e => setPhone(e.target.value)} placeholder="010-0000-0000" />
+                    <input
+                        className="flex h-10 w-full rounded-md border border-input px-3 py-2 text-sm"
+                        value={phone}
+                        onChange={(event) => setPhone(event.target.value)}
+                        placeholder="010-0000-0000"
+                    />
                 </div>
                 <div className="grid gap-2">
                     <label className="text-sm font-medium">담당 과목</label>
                     <select
                         className="flex h-10 w-full rounded-md border border-input px-3 py-2 text-sm"
                         value={subject}
-                        onChange={e => setSubject(e.target.value)}
+                        onChange={(event) => setSubject(event.target.value)}
                     >
-                        {TEACHER_SUBJECTS.map((sub) => (
-                            <option key={sub} value={sub}>{sub}</option>
+                        {TEACHER_SUBJECTS.map((item) => (
+                            <option key={item} value={item}>
+                                {item}
+                            </option>
                         ))}
                     </select>
                 </div>
                 <div className="grid gap-2">
                     <label className="text-sm font-medium">이메일 (ID)</label>
-                    <input className="flex h-10 w-full rounded-md border border-input px-3 py-2 text-sm"
-                        type="email" value={email} onChange={e => setEmail(e.target.value)} required placeholder="teacher@example.com" />
+                    <input
+                        className="flex h-10 w-full rounded-md border border-input px-3 py-2 text-sm"
+                        type="email"
+                        value={email}
+                        onChange={(event) => setEmail(event.target.value)}
+                        required
+                        placeholder="teacher@example.com"
+                    />
                 </div>
                 <div className="grid gap-2">
                     <label className="text-sm font-medium">비밀번호</label>
-                    <input className="flex h-10 w-full rounded-md border border-input px-3 py-2 text-sm"
-                        type="password" value={password} onChange={e => setPassword(e.target.value)} required placeholder="******" />
+                    <input
+                        className="flex h-10 w-full rounded-md border border-input px-3 py-2 text-sm"
+                        type="password"
+                        value={password}
+                        onChange={(event) => setPassword(event.target.value)}
+                        required
+                        placeholder="******"
+                    />
                 </div>
-                <Button type="submit" disabled={loading}>{loading ? "생성 중..." : "강사 계정 생성"}</Button>
+                <Button type="submit" disabled={loading}>
+                    {loading ? "생성 중..." : "강사 계정 생성"}
+                </Button>
             </form>
 
+            <div className="mb-6 space-y-3 border-b pb-6">
+                <div className="flex items-center justify-between">
+                    <h4 className="font-medium">승인 대기 신청</h4>
+                    <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-700">
+                        {pendingTeachers.length}건
+                    </span>
+                </div>
+
+                {pendingTeachers.length === 0 ? (
+                    <p className="text-sm text-muted-foreground">승인 대기 중인 강사 신청이 없습니다.</p>
+                ) : (
+                    <ul className="space-y-2">
+                        {pendingTeachers.map((teacher) => (
+                            <li key={teacher.id} className="rounded-lg border bg-amber-50/60 p-4 text-sm">
+                                <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                                    <div className="space-y-1">
+                                        <p className="font-semibold text-slate-900">{teacher.name}</p>
+                                        <p className="text-slate-600">{teacher.email}</p>
+                                        <p className="text-slate-600">
+                                            {teacher.subject || "과목 미지정"}
+                                            {teacher.phone ? ` · ${teacher.phone}` : ""}
+                                        </p>
+                                        <p className="text-xs text-slate-500">
+                                            신청 일시: {formatDateTime(teacher.requestedAt)}
+                                        </p>
+                                    </div>
+                                    <div className="flex gap-2">
+                                        <Button
+                                            size="sm"
+                                            onClick={() => handleApprove(teacher)}
+                                            disabled={actionLoadingId === teacher.id}
+                                        >
+                                            승인
+                                        </Button>
+                                        <Button
+                                            size="sm"
+                                            variant="outline"
+                                            onClick={() => handleReject(teacher)}
+                                            disabled={actionLoadingId === teacher.id}
+                                        >
+                                            반려
+                                        </Button>
+                                    </div>
+                                </div>
+                            </li>
+                        ))}
+                    </ul>
+                )}
+            </div>
+
             <div>
-                <h4 className="font-medium mb-2">등록된 강사 목록</h4>
+                <h4 className="mb-2 font-medium">승인된 강사 목록</h4>
                 <ul className="space-y-2">
-                    {teachers.map(teacher => (
-                        <li key={teacher.id} className="flex justify-between items-center bg-slate-50 p-3 rounded text-sm">
+                    {approvedTeachers.map((teacher) => (
+                        <li key={teacher.id} className="flex items-center justify-between rounded bg-slate-50 p-3 text-sm">
                             {editingId === teacher.id ? (
-                                <div className="flex-1 grid gap-2 sm:grid-cols-3 mr-2 items-center">
+                                <div className="mr-2 grid flex-1 items-center gap-2 sm:grid-cols-3">
                                     <input
                                         className="h-8 rounded-md border px-2 text-sm"
                                         value={editName}
-                                        onChange={e => setEditName(e.target.value)}
+                                        onChange={(event) => setEditName(event.target.value)}
                                         placeholder="이름"
                                     />
                                     <input
                                         className="h-8 rounded-md border px-2 text-sm"
                                         value={editPhone}
-                                        onChange={e => setEditPhone(e.target.value)}
+                                        onChange={(event) => setEditPhone(event.target.value)}
                                         placeholder="연락처"
                                     />
                                     <select
                                         className="h-8 rounded-md border px-2 text-sm"
                                         value={editSubject}
-                                        onChange={e => setEditSubject(e.target.value)}
+                                        onChange={(event) => setEditSubject(event.target.value)}
                                     >
-                                        {TEACHER_SUBJECTS.map((sub) => (
-                                            <option key={sub} value={sub}>{sub}</option>
+                                        {TEACHER_SUBJECTS.map((item) => (
+                                            <option key={item} value={item}>
+                                                {item}
+                                            </option>
                                         ))}
                                     </select>
                                 </div>
                             ) : (
                                 <div>
                                     <span className="font-bold">{teacher.name}</span>
-                                    <span className="ml-2 text-sm text-slate-600">({teacher.subject || "과목 미지정"})</span>
-                                    <span className="ml-2 text-slate-500">{teacher.phone ? ` ${teacher.phone}` : ""}</span>
+                                    <span className="ml-2 text-sm text-slate-600">
+                                        ({teacher.subject || "과목 미지정"})
+                                    </span>
+                                    <span className="ml-2 text-slate-500">
+                                        {teacher.phone ? ` ${teacher.phone}` : ""}
+                                    </span>
                                     <span className="ml-2 text-xs text-slate-400">{teacher.email}</span>
                                 </div>
                             )}
@@ -215,19 +356,39 @@ export function TeacherManager() {
                             <div className="flex items-center gap-1">
                                 {editingId === teacher.id ? (
                                     <>
-                                        <Button variant="ghost" size="sm" onClick={() => saveEdit(teacher.id)} className="text-green-600 font-medium">
+                                        <Button
+                                            variant="ghost"
+                                            size="sm"
+                                            onClick={() => saveEdit(teacher.id)}
+                                            className="font-medium text-green-600"
+                                        >
                                             저장
                                         </Button>
-                                        <Button variant="ghost" size="sm" onClick={cancelEdit} className="text-slate-500 font-medium">
+                                        <Button
+                                            variant="ghost"
+                                            size="sm"
+                                            onClick={cancelEdit}
+                                            className="font-medium text-slate-500"
+                                        >
                                             취소
                                         </Button>
                                     </>
                                 ) : (
                                     <>
-                                        <Button variant="ghost" size="sm" onClick={() => startEdit(teacher)} className="text-blue-500 font-medium h-8">
+                                        <Button
+                                            variant="ghost"
+                                            size="sm"
+                                            onClick={() => startEdit(teacher)}
+                                            className="h-8 font-medium text-blue-500"
+                                        >
                                             수정
                                         </Button>
-                                        <Button variant="ghost" size="sm" onClick={() => handleDelete(teacher.id)} className="text-red-500 font-medium h-8">
+                                        <Button
+                                            variant="ghost"
+                                            size="sm"
+                                            onClick={() => handleDelete(teacher.id)}
+                                            className="h-8 font-medium text-red-500"
+                                        >
                                             삭제
                                         </Button>
                                     </>
@@ -235,9 +396,25 @@ export function TeacherManager() {
                             </div>
                         </li>
                     ))}
-                    {teachers.length === 0 && <p className="text-muted-foreground text-sm">등록된 강사가 없습니다.</p>}
+
+                    {approvedTeachers.length === 0 && (
+                        <p className="text-sm text-muted-foreground">승인된 강사가 없습니다.</p>
+                    )}
                 </ul>
             </div>
+
+            {rejectedTeachers.length > 0 && (
+                <div className="mt-6 border-t pt-6">
+                    <h4 className="mb-2 font-medium">반려된 신청</h4>
+                    <ul className="space-y-2">
+                        {rejectedTeachers.map((teacher) => (
+                            <li key={teacher.id} className="rounded bg-rose-50 p-3 text-sm text-rose-700">
+                                {teacher.name} · {teacher.email}
+                            </li>
+                        ))}
+                    </ul>
+                </div>
+            )}
         </div>
     );
 }

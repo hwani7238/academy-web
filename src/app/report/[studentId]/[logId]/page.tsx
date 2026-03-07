@@ -1,9 +1,24 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { doc, getDoc } from "firebase/firestore";
+import { doc, getDoc, runTransaction, serverTimestamp } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { useParams } from "next/navigation";
+
+interface TimestampLike {
+    toDate?: () => Date;
+    seconds?: number;
+}
+
+type FirestoreDate = Date | TimestampLike | null | undefined;
+
+const getDateValue = (timestamp: FirestoreDate) => {
+    if (!timestamp) return null;
+    if (timestamp instanceof Date) return timestamp;
+    if (typeof timestamp.toDate === "function") return timestamp.toDate();
+    if (typeof timestamp.seconds === "number") return new Date(timestamp.seconds * 1000);
+    return null;
+};
 
 interface Student {
     name: string;
@@ -14,7 +29,10 @@ interface LearningLog {
     progress: string;
     level: string;
     feedback: string;
-    createdAt: any;
+    createdAt: FirestoreDate;
+    firstViewedAt?: FirestoreDate;
+    lastViewedAt?: FirestoreDate;
+    viewCount?: number;
     studentName?: string;
     mediaUrl?: string;
     mediaType?: string;
@@ -34,9 +52,6 @@ export default function ReportPage() {
     useEffect(() => {
         const fetchData = async () => {
             try {
-                // Fetch log info first
-                const logPath = `students/${studentId}/logs/${logId}`;
-
                 const logDoc = await getDoc(doc(db, "students", studentId, "logs", logId));
                 if (logDoc.exists()) {
                     const logData = logDoc.data() as LearningLog;
@@ -55,7 +70,7 @@ export default function ReportPage() {
                                 // Student exists but maybe deleted? Or permission error caught below
                                 setStudent({ name: "학생", instrument: "" });
                             }
-                        } catch (studentErr: any) {
+                        } catch (studentErr) {
                             console.warn("Could not fetch student profile (likely permission issue), using fallback.", studentErr);
                             setStudent({ name: "학생", instrument: "" });
                         }
@@ -63,7 +78,7 @@ export default function ReportPage() {
                 } else {
                     setError(true);
                 }
-            } catch (err: any) {
+            } catch (err) {
                 console.error("Error fetching report data:", err);
                 setError(true);
             } finally {
@@ -76,10 +91,73 @@ export default function ReportPage() {
         }
     }, [studentId, logId]);
 
+    useEffect(() => {
+        if (!studentId || !logId || !log) return;
+        if (typeof window === "undefined") return;
+
+        const sessionKey = `report-view:${studentId}:${logId}`;
+
+        const trackView = async () => {
+            if (document.visibilityState !== "visible") return;
+            if (window.sessionStorage.getItem(sessionKey)) return;
+
+            window.sessionStorage.setItem(sessionKey, "pending");
+
+            try {
+                const logRef = doc(db, "students", studentId, "logs", logId);
+
+                await runTransaction(db, async (transaction) => {
+                    const snapshot = await transaction.get(logRef);
+
+                    if (!snapshot.exists()) {
+                        throw new Error("REPORT_NOT_FOUND");
+                    }
+
+                    const data = snapshot.data() as LearningLog;
+                    const nextViewCount = typeof data.viewCount === "number" ? data.viewCount + 1 : 1;
+                    const updates: Record<string, unknown> = {
+                        viewed: true,
+                        lastViewedAt: serverTimestamp(),
+                        lastViewedUserAgent: navigator.userAgent.slice(0, 300),
+                        viewCount: nextViewCount,
+                    };
+
+                    if (!data.firstViewedAt) {
+                        updates.firstViewedAt = serverTimestamp();
+                    }
+
+                    transaction.update(logRef, updates);
+                });
+
+                window.sessionStorage.setItem(sessionKey, "done");
+            } catch (error) {
+                window.sessionStorage.removeItem(sessionKey);
+                console.error("Error tracking report view:", error);
+            }
+        };
+
+        const timeoutId = window.setTimeout(() => {
+            void trackView();
+        }, 800);
+
+        const handleVisibilityChange = () => {
+            if (document.visibilityState === "visible") {
+                void trackView();
+            }
+        };
+
+        document.addEventListener("visibilitychange", handleVisibilityChange);
+
+        return () => {
+            window.clearTimeout(timeoutId);
+            document.removeEventListener("visibilitychange", handleVisibilityChange);
+        };
+    }, [studentId, logId, log]);
+
     if (loading) return <div className="flex h-screen items-center justify-center">Loading...</div>;
     if (error || !student || !log) return <div className="flex h-screen items-center justify-center">리포트를 찾을 수 없습니다.</div>;
 
-    const date = log.createdAt.toDate ? log.createdAt.toDate().toLocaleDateString() : new Date(log.createdAt.seconds * 1000).toLocaleDateString();
+    const date = getDateValue(log.createdAt)?.toLocaleDateString() ?? "-";
 
     return (
         <div className="min-h-screen bg-slate-50 py-10 px-4">

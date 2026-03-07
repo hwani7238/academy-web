@@ -2,17 +2,24 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { onAuthStateChanged, signOut } from "firebase/auth";
+import { onAuthStateChanged, signOut, type User as FirebaseUser } from "firebase/auth";
 import { doc, getDoc } from "firebase/firestore";
 import { auth, db } from "@/lib/firebase";
 import { Button } from "@/components/ui/button";
 import { StudentManager } from "@/components/admin/StudentManager";
 import { TeacherManager } from "@/components/admin/TeacherManager";
 import { FeedbackList } from "@/components/admin/FeedbackList";
+import { ADMIN_ROLES } from "@/lib/constants";
+
+interface UserProfile {
+    role?: string;
+    status?: string;
+    name?: string;
+}
 
 export default function AdminPage() {
-    const [user, setUser] = useState<any>(null);
-    const [userData, setUserData] = useState<any>(null);
+    const [user, setUser] = useState<FirebaseUser | null>(null);
+    const [userData, setUserData] = useState<UserProfile | null>(null);
     const [loading, setLoading] = useState(true);
     const [isDetailView, setIsDetailView] = useState(false);
     const router = useRouter();
@@ -27,10 +34,8 @@ export default function AdminPage() {
                 try {
                     const userDoc = await getDoc(doc(db, "users", currentUser.uid));
                     if (userDoc.exists()) {
-                        setUserData(userDoc.data());
+                        setUserData(userDoc.data() as UserProfile);
                     } else {
-                        // User exists in Auth but not in Firestore 'users' collection
-                        console.log("User document not found, redirecting to setup");
                         router.push("/setup-admin");
                         return;
                     }
@@ -60,7 +65,71 @@ export default function AdminPage() {
         return null; // 리다이렉트 중
     }
 
-    const isTeacher = userData?.role === 'teacher';
+    const isTeacher = userData?.role === "teacher";
+    const isApprovedTeacher = isTeacher && (userData?.status ?? "approved") === "approved";
+    const isPendingTeacher = isTeacher && userData?.status === "pending";
+    const isRejectedTeacher = isTeacher && userData?.status === "rejected";
+    const isAdmin = typeof userData?.role === "string" && ADMIN_ROLES.includes(userData.role);
+
+    if (isPendingTeacher) {
+        return (
+            <div className="flex min-h-screen items-center justify-center bg-slate-50 p-6">
+                <div className="w-full max-w-md rounded-xl border bg-white p-8 shadow-sm">
+                    <h1 className="text-2xl font-bold text-slate-900">승인 대기 중</h1>
+                    <p className="mt-3 text-sm leading-6 text-slate-600">
+                        강사 계정 신청이 접수되었습니다. 관리자가 승인하면 이 계정으로 로그인해 바로 사용할 수 있습니다.
+                    </p>
+                    <div className="mt-6 rounded-lg bg-amber-50 p-4 text-sm text-amber-800">
+                        현재 상태: 승인 대기
+                    </div>
+                    <div className="mt-6 flex justify-end">
+                        <Button variant="outline" onClick={handleLogout}>
+                            로그아웃
+                        </Button>
+                    </div>
+                </div>
+            </div>
+        );
+    }
+
+    if (isRejectedTeacher) {
+        return (
+            <div className="flex min-h-screen items-center justify-center bg-slate-50 p-6">
+                <div className="w-full max-w-md rounded-xl border bg-white p-8 shadow-sm">
+                    <h1 className="text-2xl font-bold text-slate-900">가입 신청 반려됨</h1>
+                    <p className="mt-3 text-sm leading-6 text-slate-600">
+                        현재 강사 계정 신청이 반려된 상태입니다. 관리자에게 다시 승인 요청을 해주세요.
+                    </p>
+                    <div className="mt-6 rounded-lg bg-rose-50 p-4 text-sm text-rose-700">
+                        현재 상태: 반려
+                    </div>
+                    <div className="mt-6 flex justify-end">
+                        <Button variant="outline" onClick={handleLogout}>
+                            로그아웃
+                        </Button>
+                    </div>
+                </div>
+            </div>
+        );
+    }
+
+    if (!isAdmin && !isApprovedTeacher) {
+        return (
+            <div className="flex min-h-screen items-center justify-center bg-slate-50 p-6">
+                <div className="w-full max-w-md rounded-xl border bg-white p-8 shadow-sm">
+                    <h1 className="text-2xl font-bold text-slate-900">접근 권한 없음</h1>
+                    <p className="mt-3 text-sm leading-6 text-slate-600">
+                        이 계정은 아직 관리자 또는 승인된 강사 계정으로 설정되지 않았습니다.
+                    </p>
+                    <div className="mt-6 flex justify-end">
+                        <Button variant="outline" onClick={handleLogout}>
+                            로그아웃
+                        </Button>
+                    </div>
+                </div>
+            </div>
+        );
+    }
 
     return (
         <div className="flex min-h-screen flex-col">
@@ -77,15 +146,14 @@ export default function AdminPage() {
             </header>
             <main className="flex-1 p-6">
                 <div className="mx-auto max-w-6xl space-y-8">
-                    {!isTeacher && !isDetailView && (
+                    {isAdmin && !isDetailView && (
                         <section>
                             <h2 className="mb-4 text-2xl font-bold">강사 관리</h2>
                             <TeacherManager />
                         </section>
                     )}
 
-                    {/* Add Feedback List for Admins */}
-                    {!isTeacher && !isDetailView && (
+                    {isAdmin && !isDetailView && (
                         <section>
                             <FeedbackList />
                         </section>

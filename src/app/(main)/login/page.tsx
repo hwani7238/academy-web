@@ -6,6 +6,10 @@ import { auth } from "@/lib/firebase";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 
+interface AuthErrorShape {
+    code?: string;
+}
+
 export default function LoginPage() {
     const [email, setEmail] = useState("");
     const [password, setPassword] = useState("");
@@ -21,16 +25,20 @@ export default function LoginPage() {
         try {
             await signInWithEmailAndPassword(auth, email, password);
             router.push("/admin"); // 관리자 페이지로 이동
-        } catch (err: any) {
+        } catch (err: unknown) {
             console.error("Login error:", err);
+            const errorCode =
+                typeof err === "object" && err !== null && "code" in err
+                    ? String((err as AuthErrorShape).code)
+                    : "";
             let message = "로그인에 실패했습니다.";
-            if (err.code === "auth/wrong-password") message = "비밀번호가 올바르지 않습니다.";
-            else if (err.code === "auth/user-not-found") message = "등록되지 않은 사용자입니다.";
-            else if (err.code === "auth/invalid-email") message = "유효하지 않은 이메일 형식입니다.";
-            else if (err.code === "auth/too-many-requests") message = "잠시 후 다시 시도해주세요.";
-            else if (err.code === "auth/invalid-credential") message = "이메일이 존재하지 않거나 비밀번호가 틀렸습니다.";
+            if (errorCode === "auth/wrong-password") message = "비밀번호가 올바르지 않습니다.";
+            else if (errorCode === "auth/user-not-found") message = "등록되지 않은 사용자입니다.";
+            else if (errorCode === "auth/invalid-email") message = "유효하지 않은 이메일 형식입니다.";
+            else if (errorCode === "auth/too-many-requests") message = "잠시 후 다시 시도해주세요.";
+            else if (errorCode === "auth/invalid-credential") message = "이메일이 존재하지 않거나 비밀번호가 틀렸습니다.";
 
-            setError(message + " (" + err.code + ")");
+            setError(message + (errorCode ? ` (${errorCode})` : ""));
         } finally {
             setLoading(false);
         }
@@ -42,7 +50,7 @@ export default function LoginPage() {
                 <div className="grid gap-2 text-center">
                     <h1 className="text-3xl font-bold">로그인</h1>
                     <p className="text-balance text-muted-foreground">
-                        관리자 계정으로 로그인하세요
+                        관리자 또는 승인된 강사 계정으로 로그인하세요
                     </p>
                 </div>
                 <form onSubmit={handleLogin} className="grid gap-4">
@@ -74,6 +82,9 @@ export default function LoginPage() {
                     {error && <p className="text-sm text-red-500">{error}</p>}
                     <Button type="submit" className="w-full" disabled={loading}>
                         {loading ? "로그인 중..." : "로그인"}
+                    </Button>
+                    <Button type="button" variant="outline" className="w-full" onClick={() => router.push("/teacher-signup")}>
+                        강사 계정 신청
                     </Button>
                 </form>
             </div>
