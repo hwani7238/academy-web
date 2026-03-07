@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { doc, getDoc, runTransaction, serverTimestamp } from "firebase/firestore";
-import { db } from "@/lib/firebase";
+import { db, auth } from "@/lib/firebase";
 import { useParams } from "next/navigation";
 
 interface TimestampLike {
@@ -100,6 +100,15 @@ export default function ReportPage() {
         const trackView = async () => {
             if (document.visibilityState !== "visible") return;
             if (window.sessionStorage.getItem(sessionKey)) return;
+
+            // 관리자나 선생님이 조회하는 경우 열람 기록(조회수)을 증가시키지 않음
+            const searchParams = new URLSearchParams(window.location.search);
+            if (searchParams.get("admin") === "true") {
+                return; // URL로 관리자 접속 확인됨
+            }
+            if (auth.currentUser) {
+                return; // Firebase 인증상태로 로그인된 사용자(관리자/선생님)임이 확인됨
+            }
 
             window.sessionStorage.setItem(sessionKey, "pending");
 

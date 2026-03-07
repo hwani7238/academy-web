@@ -405,7 +405,7 @@ export function FeedbackList() {
                                 <div className="flex items-center gap-2">
                                     {selectedLog.studentId && (
                                         <a
-                                            href={`/report/${selectedLog.studentId}/${selectedLog.id}`}
+                                            href={`/report/${selectedLog.studentId}/${selectedLog.id}?admin=true`}
                                             target="_blank"
                                             rel="noreferrer"
                                         >
@@ -419,11 +419,10 @@ export function FeedbackList() {
                             </div>
 
                             <div
-                                className={`rounded-lg border-2 p-4 ${
-                                    isViewed(selectedLog)
+                                className={`rounded-lg border-2 p-4 ${isViewed(selectedLog)
                                         ? "border-emerald-200 bg-emerald-50"
                                         : "border-amber-200 bg-amber-50"
-                                }`}
+                                    }`}
                             >
                                 <div className="flex flex-wrap items-center justify-between gap-3">
                                     <div>
