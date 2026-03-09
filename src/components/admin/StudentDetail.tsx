@@ -46,6 +46,8 @@ interface LearningLog {
     firstViewedAt?: FirestoreDate;
     lastViewedAt?: FirestoreDate;
     viewCount?: number;
+    textbookImageUrl?: string;
+    textbookImagePath?: string;
 }
 
 interface StudentDetailProps {
@@ -84,6 +86,11 @@ export function StudentDetail({ student, onBack, currentUser }: StudentDetailPro
     const [uploadProgress, setUploadProgress] = useState(0);
     const [mediaFile, setMediaFile] = useState<File | null>(null);
     const [mediaTitle, setMediaTitle] = useState("");
+
+    const [textbookUploading, setTextbookUploading] = useState(false);
+    const [textbookUploadProgress, setTextbookUploadProgress] = useState(0);
+    const [textbookImageFile, setTextbookImageFile] = useState<File | null>(null);
+
     const [saving, setSaving] = useState(false);
 
     useEffect(() => {
@@ -112,37 +119,42 @@ export function StudentDetail({ student, onBack, currentUser }: StudentDetailPro
         return {};
     };
 
-    const handleFileUpload = async (file: File): Promise<{ url: string, path: string, type: string }> => {
+    const handleFileUpload = async (
+        file: File,
+        setUploadingState: (state: boolean) => void,
+        setProgressState: (progress: number) => void,
+        prefix: string = ""
+    ): Promise<{ url: string, path: string, type: string }> => {
         return new Promise((resolve, reject) => {
             const fileType = file.type.startsWith('image/') ? 'image' : 'video';
-            const storagePath = `logs/${student.id}/${Date.now()}_${file.name}`;
+            const storagePath = `logs/${student.id}/${Date.now()}_${prefix}${file.name}`;
             const storageRef = ref(storage, storagePath);
             const uploadTask = uploadBytesResumable(storageRef, file);
 
-            setUploading(true);
+            setUploadingState(true);
 
             uploadTask.on(
                 "state_changed",
                 (snapshot) => {
                     const progress = (snapshot.bytesTransferred / snapshot.totalBytes) * 100;
-                    setUploadProgress(progress);
+                    setProgressState(progress);
                 },
                 (error) => {
                     console.error("Upload error details:", error);
-                    setUploading(false);
+                    setUploadingState(false);
                     reject(error);
                 },
                 async () => {
                     try {
                         const downloadURL = await getDownloadURL(uploadTask.snapshot.ref);
-                        setUploading(false);
+                        setUploadingState(false);
                         resolve({
                             url: downloadURL,
                             path: storagePath,
                             type: fileType
                         });
                     } catch (e) {
-                        setUploading(false);
+                        setUploadingState(false);
                         reject(e);
                     }
                 }
@@ -151,7 +163,7 @@ export function StudentDetail({ student, onBack, currentUser }: StudentDetailPro
     };
 
     const handleAddLog = async () => {
-        if (!progress && !level && !feedback && !mediaFile) {
+        if (!progress && !level && !feedback && !mediaFile && !textbookImageFile) {
             alert("정보를 입력해주세요.");
             return;
         }
@@ -159,9 +171,14 @@ export function StudentDetail({ student, onBack, currentUser }: StudentDetailPro
         setSaving(true);
         try {
             let mediaData = { url: "", path: "", type: "" };
+            let textbookData = { url: "", path: "", type: "" };
+
+            if (textbookImageFile) {
+                textbookData = await handleFileUpload(textbookImageFile, setTextbookUploading, setTextbookUploadProgress, "textbook_");
+            }
 
             if (mediaFile) {
-                mediaData = await handleFileUpload(mediaFile);
+                mediaData = await handleFileUpload(mediaFile, setUploading, setUploadProgress, "media_");
             }
 
             const docRef = await addDoc(collection(db, "students", student.id, "logs"), {
@@ -176,7 +193,9 @@ export function StudentDetail({ student, onBack, currentUser }: StudentDetailPro
                 mediaUrl: mediaData.url,
                 mediaType: mediaData.type,
                 mediaPath: mediaData.path,
-                mediaTitle: mediaTitle
+                mediaTitle: mediaTitle,
+                textbookImageUrl: textbookData.url,
+                textbookImagePath: textbookData.path
             });
 
             if (sendNotification) {
@@ -220,6 +239,8 @@ export function StudentDetail({ student, onBack, currentUser }: StudentDetailPro
             setMediaFile(null);
             setMediaTitle("");
             setUploadProgress(0);
+            setTextbookImageFile(null);
+            setTextbookUploadProgress(0);
             alert("학습 로그가 저장되었습니다." + (sendNotification ? " (알림 발송 시도함)" : ""));
         } catch (error) {
             console.error("Error adding log:", error);
@@ -260,6 +281,14 @@ export function StudentDetail({ student, onBack, currentUser }: StudentDetailPro
                     await deleteObject(mediaRef);
                 } catch (e) {
                     console.error("Error deleting media file:", e);
+                }
+            }
+            if (log.textbookImagePath) {
+                try {
+                    const textbookRef = ref(storage, log.textbookImagePath);
+                    await deleteObject(textbookRef);
+                } catch (e) {
+                    console.error("Error deleting textbook media file:", e);
                 }
             }
             await deleteDoc(doc(db, "students", student.id, "logs", log.id));
@@ -339,6 +368,28 @@ export function StudentDetail({ student, onBack, currentUser }: StudentDetailPro
                                     placeholder="예: 바이엘 3권"
                                 />
                             </div>
+                            <div className="grid gap-2 ml-4">
+                                <label className="text-sm font-medium text-slate-600">↳ 교재 사진 첨부 (선택)</label>
+                                <div className="flex flex-col gap-2">
+                                    <input
+                                        type="file"
+                                        accept="image/*"
+                                        className="flex w-full rounded-md border border-input px-3 py-2 text-sm text-slate-600"
+                                        onChange={(e) => {
+                                            if (e.target.files && e.target.files.length > 0) {
+                                                setTextbookImageFile(e.target.files[0]);
+                                            } else {
+                                                setTextbookImageFile(null);
+                                            }
+                                        }}
+                                    />
+                                    {textbookUploading && (
+                                        <div className="h-2 w-full overflow-hidden rounded-full bg-secondary mt-1">
+                                            <div className="h-full bg-primary transition-all duration-300" style={{ width: `${textbookUploadProgress}%` }} />
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
                             <div className="grid gap-2">
                                 <label className="text-sm font-medium">현재 레벨</label>
                                 <input
@@ -396,8 +447,8 @@ export function StudentDetail({ student, onBack, currentUser }: StudentDetailPro
                                 />
                                 <label htmlFor="notify" className="text-sm font-medium">학부모님께 알림톡 발송</label>
                             </div>
-                            <Button onClick={handleAddLog} disabled={saving || uploading} className="w-full">
-                                {saving || uploading ? "저장/업로드 중..." : "학습 로그 저장"}
+                            <Button onClick={handleAddLog} disabled={saving || uploading || textbookUploading} className="w-full">
+                                {saving || uploading || textbookUploading ? "저장/업로드 중..." : "학습 로그 저장"}
                             </Button>
                         </div>
                     </div>
@@ -452,7 +503,16 @@ export function StudentDetail({ student, onBack, currentUser }: StudentDetailPro
                                         </div>
                                     </div>
                                     <div className="space-y-2 text-sm">
-                                        {log.progress && <p><span className="font-semibold">교재:</span> {log.progress}</p>}
+                                        {(log.progress || log.textbookImageUrl) && (
+                                            <div className="mb-2">
+                                                {log.progress && <p><span className="font-semibold">교재:</span> {log.progress}</p>}
+                                                {log.textbookImageUrl && (
+                                                    <div className="mt-2 text-sm">
+                                                        <img src={log.textbookImageUrl} alt="교재 사진" className="max-w-[200px] rounded border bg-white" />
+                                                    </div>
+                                                )}
+                                            </div>
+                                        )}
                                         {log.level && <p><span className="font-semibold">레벨:</span> {log.level}</p>}
                                         {log.feedback && (
                                             <div className="p-2 bg-white rounded border">
