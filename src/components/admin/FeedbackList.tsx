@@ -43,6 +43,7 @@ interface FeedbackLog {
     firstViewedAt?: FirestoreDate;
     lastViewedAt?: FirestoreDate;
     viewCount?: number;
+    textbookImageUrl?: string;
 }
 
 const getDateValue = (timestamp: FirestoreDate) => {
@@ -447,6 +448,15 @@ export function FeedbackList() {
                                 <div className="rounded-md bg-slate-50 p-3">
                                     <span className="mb-1 block text-xs font-medium text-slate-500">현재 진도</span>
                                     <p className="text-sm font-medium">{selectedLog.progress || "-"}</p>
+                                    {selectedLog.textbookImageUrl && (
+                                        <div className="mt-3">
+                                            <img
+                                                src={selectedLog.textbookImageUrl}
+                                                alt="교재 사진"
+                                                className="w-full rounded border bg-white object-contain"
+                                            />
+                                        </div>
+                                    )}
                                 </div>
                                 <div className="rounded-md bg-slate-50 p-3">
                                     <span className="mb-1 block text-xs font-medium text-slate-500">현재 레벨</span>
