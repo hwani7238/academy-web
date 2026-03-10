@@ -39,6 +39,8 @@ interface LearningLog {
     mediaTitle?: string;
     textbookImageUrl?: string;
     additionalTextbookImageUrl?: string;
+    textbookImages?: { url: string; path: string }[];
+    mediaFiles?: { url: string; type: string; path: string; title?: string }[];
 }
 
 export default function ReportPage() {
@@ -199,7 +201,7 @@ export default function ReportPage() {
                         <div className="rounded-lg bg-slate-50 p-4">
                             <h3 className="mb-2 text-sm font-semibold text-slate-500">현재 진도</h3>
                             <p className="text-lg font-medium">{log.progress || "미입력"}</p>
-                            {(log.textbookImageUrl || log.additionalTextbookImageUrl) && (
+                            {(log.textbookImageUrl || log.additionalTextbookImageUrl || (log.textbookImages && log.textbookImages.length > 0)) && (
                                 <div className="mt-4 flex flex-col gap-2">
                                     {log.textbookImageUrl && (
                                         <img src={log.textbookImageUrl} alt="교재 사진" className="w-full rounded border bg-white object-contain" />
@@ -207,6 +209,9 @@ export default function ReportPage() {
                                     {log.additionalTextbookImageUrl && (
                                         <img src={log.additionalTextbookImageUrl} alt="추가 교재 사진" className="w-full rounded border bg-white object-contain" />
                                     )}
+                                    {log.textbookImages && log.textbookImages.map((img, idx) => (
+                                        <img key={idx} src={img.url} alt={`교재 사진 ${idx + 1}`} className="w-full rounded border bg-white object-contain" />
+                                    ))}
                                 </div>
                             )}
                         </div>
@@ -218,25 +223,47 @@ export default function ReportPage() {
                     </div>
                 </div>
 
-                {log.mediaUrl && (
-                    <div className="px-6">
-                        <h3 className="mb-3 text-lg font-semibold">첨부 미디어</h3>
-                        <div className="rounded-lg border bg-white p-2">
-                            {log.mediaTitle && <p className="mb-2 font-medium px-1">{log.mediaTitle}</p>}
-                            {log.mediaType === 'image' ? (
-                                <img src={log.mediaUrl} alt="첨부 이미지" className="w-full rounded" />
-                            ) : (
-                                <div className="flex flex-col gap-2">
-                                    <video src={log.mediaUrl} controls className="w-full rounded" />
-                                    <div className="flex justify-end mt-1">
-                                        <a href={log.mediaUrl} download target="_blank" rel="noreferrer" className="text-xs bg-slate-100 hover:bg-slate-200 text-slate-700 py-1.5 px-3 rounded inline-flex items-center gap-1 transition-colors">
-                                            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
-                                            영상 다운로드
-                                        </a>
+                {(log.mediaUrl || (log.mediaFiles && log.mediaFiles.length > 0)) && (
+                    <div className="px-6 space-y-4">
+                        <h3 className="text-lg font-semibold -mb-1">첨부 미디어</h3>
+
+                        {log.mediaUrl && (
+                            <div className="rounded-lg border bg-white p-2">
+                                {log.mediaTitle && <p className="mb-2 font-medium px-1">{log.mediaTitle}</p>}
+                                {log.mediaType === 'image' ? (
+                                    <img src={log.mediaUrl} alt="첨부 이미지" className="w-full rounded" />
+                                ) : (
+                                    <div className="flex flex-col gap-2">
+                                        <video src={log.mediaUrl} controls className="w-full rounded" />
+                                        <div className="flex justify-end mt-1">
+                                            <a href={log.mediaUrl} download target="_blank" rel="noreferrer" className="text-xs bg-slate-100 hover:bg-slate-200 text-slate-700 py-1.5 px-3 rounded inline-flex items-center gap-1 transition-colors">
+                                                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+                                                영상 다운로드
+                                            </a>
+                                        </div>
                                     </div>
-                                </div>
-                            )}
-                        </div>
+                                )}
+                            </div>
+                        )}
+
+                        {log.mediaFiles && log.mediaFiles.map((media, idx) => (
+                            <div key={idx} className="rounded-lg border bg-white p-2">
+                                {media.title && <p className="mb-2 font-medium px-1">{media.title}</p>}
+                                {media.type === 'image' ? (
+                                    <img src={media.url} alt={`첨부 이미지 ${idx + 1}`} className="w-full rounded" />
+                                ) : (
+                                    <div className="flex flex-col gap-2">
+                                        <video src={media.url} controls className="w-full rounded" />
+                                        <div className="flex justify-end mt-1">
+                                            <a href={media.url} download target="_blank" rel="noreferrer" className="text-xs bg-slate-100 hover:bg-slate-200 text-slate-700 py-1.5 px-3 rounded inline-flex items-center gap-1 transition-colors">
+                                                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+                                                영상 다운로드
+                                            </a>
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
+                        ))}
                     </div>
                 )}
 

@@ -37,19 +37,21 @@ interface LearningLog {
     authorName?: string;
     authorId?: string;
     studentName?: string;
-    mediaUrl?: string;
-    mediaType?: string;
-    mediaPath?: string;
-    mediaTitle?: string;
+    mediaUrl?: string; // legacy
+    mediaType?: string; // legacy
+    mediaPath?: string; // legacy
+    mediaTitle?: string; // legacy
+    mediaFiles?: { url: string; type: string; path: string; title?: string }[];
     instrument?: string; // Subject for this log
     viewed?: boolean;
     firstViewedAt?: FirestoreDate;
     lastViewedAt?: FirestoreDate;
     viewCount?: number;
-    textbookImageUrl?: string;
-    textbookImagePath?: string;
-    additionalTextbookImageUrl?: string;
-    additionalTextbookImagePath?: string;
+    textbookImageUrl?: string; // legacy
+    textbookImagePath?: string; // legacy
+    additionalTextbookImageUrl?: string; // legacy
+    additionalTextbookImagePath?: string; // legacy
+    textbookImages?: { url: string; path: string }[];
 }
 
 interface StudentDetailProps {
@@ -86,17 +88,11 @@ export function StudentDetail({ student, onBack, currentUser }: StudentDetailPro
     const [logs, setLogs] = useState<LearningLog[]>([]);
     const [uploading, setUploading] = useState(false);
     const [uploadProgress, setUploadProgress] = useState(0);
-    const [mediaFile, setMediaFile] = useState<File | null>(null);
-    const [mediaTitle, setMediaTitle] = useState("");
+    const [mediaFiles, setMediaFiles] = useState<{ file: File; title: string }[]>([]);
 
     const [textbookUploading, setTextbookUploading] = useState(false);
     const [textbookUploadProgress, setTextbookUploadProgress] = useState(0);
-    const [textbookImageFile, setTextbookImageFile] = useState<File | null>(null);
-
-    const [showAdditionalTextbook, setShowAdditionalTextbook] = useState(false);
-    const [additionalTextbookUploading, setAdditionalTextbookUploading] = useState(false);
-    const [additionalTextbookUploadProgress, setAdditionalTextbookUploadProgress] = useState(0);
-    const [additionalTextbookImageFile, setAdditionalTextbookImageFile] = useState<File | null>(null);
+    const [textbookImages, setTextbookImages] = useState<File[]>([]);
 
     const [saving, setSaving] = useState(false);
 
@@ -170,30 +166,30 @@ export function StudentDetail({ student, onBack, currentUser }: StudentDetailPro
     };
 
     const handleAddLog = async () => {
-        if (!progress && !level && !feedback && !mediaFile && !textbookImageFile && !additionalTextbookImageFile) {
+        if (!progress && !level && !feedback && mediaFiles.length === 0 && textbookImages.length === 0) {
             alert("정보를 입력해주세요.");
             return;
         }
 
         setSaving(true);
         try {
-            let mediaData = { url: "", path: "", type: "" };
-            let textbookData = { url: "", path: "", type: "" };
-            let additionalTextbookData = { url: "", path: "", type: "" };
-
-            if (textbookImageFile) {
-                textbookData = await handleFileUpload(textbookImageFile, setTextbookUploading, setTextbookUploadProgress, "textbook_");
+            const uploadedTextbookImages: { url: string, path: string }[] = [];
+            if (textbookImages.length > 0) {
+                for (let i = 0; i < textbookImages.length; i++) {
+                    const data = await handleFileUpload(textbookImages[i], setTextbookUploading, setTextbookUploadProgress, `textbook_${i}_`);
+                    uploadedTextbookImages.push({ url: data.url, path: data.path });
+                }
             }
 
-            if (additionalTextbookImageFile) {
-                additionalTextbookData = await handleFileUpload(additionalTextbookImageFile, setAdditionalTextbookUploading, setAdditionalTextbookUploadProgress, "additional_textbook_");
+            const uploadedMediaFiles: { url: string, type: string, path: string, title?: string }[] = [];
+            if (mediaFiles.length > 0) {
+                for (let i = 0; i < mediaFiles.length; i++) {
+                    const data = await handleFileUpload(mediaFiles[i].file, setUploading, setUploadProgress, `media_${i}_`);
+                    uploadedMediaFiles.push({ url: data.url, type: data.type, path: data.path, title: mediaFiles[i].title });
+                }
             }
 
-            if (mediaFile) {
-                mediaData = await handleFileUpload(mediaFile, setUploading, setUploadProgress, "media_");
-            }
-
-            const docRef = await addDoc(collection(db, "students", student.id, "logs"), {
+            const docData: any = {
                 instrument: selectedInstrument, // Save selected instrument
                 progress,
                 level,
@@ -202,15 +198,11 @@ export function StudentDetail({ student, onBack, currentUser }: StudentDetailPro
                 authorName: currentUser.name || currentUser.email,
                 studentName: student.name,
                 createdAt: new Date(),
-                mediaUrl: mediaData.url,
-                mediaType: mediaData.type,
-                mediaPath: mediaData.path,
-                mediaTitle: mediaTitle,
-                textbookImageUrl: textbookData.url,
-                textbookImagePath: textbookData.path,
-                additionalTextbookImageUrl: additionalTextbookData.url,
-                additionalTextbookImagePath: additionalTextbookData.path
-            });
+                textbookImages: uploadedTextbookImages,
+                mediaFiles: uploadedMediaFiles
+            };
+
+            const docRef = await addDoc(collection(db, "students", student.id, "logs"), docData);
 
             if (sendNotification) {
                 const reportLink = `${window.location.origin}/report/${student.id}/${docRef.id}`;
@@ -250,14 +242,10 @@ export function StudentDetail({ student, onBack, currentUser }: StudentDetailPro
             setProgress("");
             setLevel("");
             setFeedback("");
-            setMediaFile(null);
-            setMediaTitle("");
+            setMediaFiles([]);
             setUploadProgress(0);
-            setTextbookImageFile(null);
+            setTextbookImages([]);
             setTextbookUploadProgress(0);
-            setAdditionalTextbookImageFile(null);
-            setAdditionalTextbookUploadProgress(0);
-            setShowAdditionalTextbook(false);
             alert("학습 로그가 저장되었습니다." + (sendNotification ? " (알림 발송 시도함)" : ""));
         } catch (error) {
             console.error("Error adding log:", error);
@@ -291,31 +279,26 @@ export function StudentDetail({ student, onBack, currentUser }: StudentDetailPro
     const handleDeleteLog = async (log: LearningLog) => {
         if (!confirm("정말 삭제하시겠습니까?")) return;
         try {
-            // Delete media if exists
-            if (log.mediaPath) {
-                try {
-                    const mediaRef = ref(storage, log.mediaPath);
-                    await deleteObject(mediaRef);
-                } catch (e) {
-                    console.error("Error deleting media file:", e);
-                }
+            const deletePromises: Promise<void>[] = [];
+
+            // Legacy properties
+            if (log.mediaPath) deletePromises.push(deleteObject(ref(storage, log.mediaPath)).catch(e => console.error(e)));
+            if (log.textbookImagePath) deletePromises.push(deleteObject(ref(storage, log.textbookImagePath)).catch(e => console.error(e)));
+            if (log.additionalTextbookImagePath) deletePromises.push(deleteObject(ref(storage, log.additionalTextbookImagePath)).catch(e => console.error(e)));
+
+            // Array properties
+            if (log.mediaFiles) {
+                log.mediaFiles.forEach(media => {
+                    if (media.path) deletePromises.push(deleteObject(ref(storage, media.path)).catch(e => console.error(e)));
+                });
             }
-            if (log.textbookImagePath) {
-                try {
-                    const textbookRef = ref(storage, log.textbookImagePath);
-                    await deleteObject(textbookRef);
-                } catch (e) {
-                    console.error("Error deleting textbook media file:", e);
-                }
+            if (log.textbookImages) {
+                log.textbookImages.forEach(image => {
+                    if (image.path) deletePromises.push(deleteObject(ref(storage, image.path)).catch(e => console.error(e)));
+                });
             }
-            if (log.additionalTextbookImagePath) {
-                try {
-                    const additionalTextbookRef = ref(storage, log.additionalTextbookImagePath);
-                    await deleteObject(additionalTextbookRef);
-                } catch (e) {
-                    console.error("Error deleting additional textbook media file:", e);
-                }
-            }
+
+            await Promise.all(deletePromises);
             await deleteDoc(doc(db, "students", student.id, "logs", log.id));
         } catch (error) {
             console.error("Error deleting log:", error);
@@ -395,75 +378,53 @@ export function StudentDetail({ student, onBack, currentUser }: StudentDetailPro
                             </div>
                             <div className="grid gap-2 ml-4">
                                 <div className="flex items-center justify-between">
-                                    <label className="text-sm font-medium text-slate-600">↳ 교재 사진 첨부 (선택)</label>
-                                    {!showAdditionalTextbook && (
-                                        <Button
-                                            type="button"
-                                            variant="ghost"
-                                            size="sm"
-                                            onClick={() => setShowAdditionalTextbook(true)}
-                                            className="h-6 px-2 text-blue-500 hover:text-blue-700 hover:bg-blue-50"
-                                        >
-                                            + 사진 추가
-                                        </Button>
-                                    )}
-                                </div>
-                                <div className="flex flex-col gap-2">
+                                    <label className="text-sm font-medium text-slate-600">↳ 교재 사진 첨부 (최대 6장)</label>
+                                    <Button
+                                        type="button"
+                                        variant="ghost"
+                                        size="sm"
+                                        onClick={() => {
+                                            const fileInput = document.getElementById("textbook-upload");
+                                            if (fileInput) fileInput.click();
+                                        }}
+                                        disabled={textbookImages.length >= 6}
+                                        className="h-6 px-2 text-blue-500 hover:text-blue-700 hover:bg-blue-50"
+                                    >
+                                        + 사진 추가
+                                    </Button>
                                     <input
+                                        id="textbook-upload"
                                         type="file"
                                         accept="image/*"
-                                        className="flex w-full rounded-md border border-input px-3 py-2 text-sm text-slate-600"
+                                        className="hidden"
+                                        multiple
                                         onChange={(e) => {
                                             if (e.target.files && e.target.files.length > 0) {
-                                                setTextbookImageFile(e.target.files[0]);
-                                            } else {
-                                                setTextbookImageFile(null);
+                                                const newFiles = Array.from(e.target.files);
+                                                setTextbookImages(prev => {
+                                                    const combined = [...prev, ...newFiles];
+                                                    return combined.slice(0, 6);
+                                                });
                                             }
+                                            e.target.value = "";
                                         }}
                                     />
-                                    {textbookUploading && (
-                                        <div className="h-2 w-full overflow-hidden rounded-full bg-secondary mt-1">
-                                            <div className="h-full bg-primary transition-all duration-300" style={{ width: `${textbookUploadProgress}%` }} />
-                                        </div>
-                                    )}
-
-                                    {showAdditionalTextbook && (
-                                        <>
-                                            <div className="flex items-center justify-between mt-2">
-                                                <label className="text-sm font-medium text-slate-600">↳ 추가 교재 사진 (선택)</label>
-                                                <Button
-                                                    type="button"
-                                                    variant="ghost"
-                                                    size="sm"
-                                                    onClick={() => {
-                                                        setShowAdditionalTextbook(false);
-                                                        setAdditionalTextbookImageFile(null);
-                                                    }}
-                                                    className="h-6 px-2 text-red-500 hover:text-red-700 hover:bg-red-50"
-                                                >
-                                                    - 삭제
-                                                </Button>
-                                            </div>
-                                            <input
-                                                type="file"
-                                                accept="image/*"
-                                                className="flex w-full rounded-md border border-input px-3 py-2 text-sm text-slate-600"
-                                                onChange={(e) => {
-                                                    if (e.target.files && e.target.files.length > 0) {
-                                                        setAdditionalTextbookImageFile(e.target.files[0]);
-                                                    } else {
-                                                        setAdditionalTextbookImageFile(null);
-                                                    }
-                                                }}
-                                            />
-                                            {additionalTextbookUploading && (
-                                                <div className="h-2 w-full overflow-hidden rounded-full bg-secondary mt-1">
-                                                    <div className="h-full bg-primary transition-all duration-300" style={{ width: `${additionalTextbookUploadProgress}%` }} />
-                                                </div>
-                                            )}
-                                        </>
-                                    )}
                                 </div>
+                                {textbookImages.length > 0 && (
+                                    <div className="flex flex-col gap-2 mt-2">
+                                        {textbookImages.map((file, idx) => (
+                                            <div key={idx} className="flex items-center justify-between text-sm bg-slate-50 border rounded px-2 py-1">
+                                                <span className="truncate text-slate-600 max-w-[200px]">{file.name}</span>
+                                                <button type="button" onClick={() => setTextbookImages(prev => prev.filter((_, i) => i !== idx))} className="text-red-500 hover:text-red-700 font-bold px-2">&times;</button>
+                                            </div>
+                                        ))}
+                                    </div>
+                                )}
+                                {textbookUploading && (
+                                    <div className="h-2 w-full overflow-hidden rounded-full bg-secondary mt-1">
+                                        <div className="h-full bg-primary transition-all duration-300" style={{ width: `${textbookUploadProgress}%` }} />
+                                    </div>
+                                )}
                             </div>
                             <div className="grid gap-2">
                                 <label className="text-sm font-medium">현재 레벨</label>
@@ -487,24 +448,62 @@ export function StudentDetail({ student, onBack, currentUser }: StudentDetailPro
                             <hr className="my-4 border-t" />
 
                             <div className="space-y-4">
-                                <p className="text-sm font-medium">영상/사진 첨부 (선택)</p>
-                                <div className="grid gap-2">
-                                    <label className="text-xs text-muted-foreground">제목 (선택)</label>
+                                <div className="flex items-center justify-between">
+                                    <p className="text-sm font-medium">영상/사진 첨부 (최대 6개)</p>
+                                    <Button
+                                        type="button"
+                                        variant="ghost"
+                                        size="sm"
+                                        onClick={() => {
+                                            const fileInput = document.getElementById("media-upload");
+                                            if (fileInput) fileInput.click();
+                                        }}
+                                        disabled={mediaFiles.length >= 6}
+                                        className="h-6 px-2 text-blue-500 hover:text-blue-700 hover:bg-blue-50"
+                                    >
+                                        + 미디어 추가
+                                    </Button>
                                     <input
-                                        className="flex h-10 w-full rounded-md border border-input px-3 py-2 text-sm"
-                                        value={mediaTitle}
-                                        onChange={(e) => setMediaTitle(e.target.value)}
-                                        placeholder="예: 2024 봄 연주회"
-                                    />
-                                </div>
-                                <div className="grid gap-2">
-                                    <input
+                                        id="media-upload"
                                         type="file"
                                         accept="video/*,image/*"
-                                        className="flex w-full rounded-md border border-input px-3 py-2 text-sm"
-                                        onChange={(e) => setMediaFile(e.target.files ? e.target.files[0] : null)}
+                                        className="hidden"
+                                        multiple
+                                        onChange={(e) => {
+                                            if (e.target.files && e.target.files.length > 0) {
+                                                const newFiles = Array.from(e.target.files).map(file => ({ file, title: "" }));
+                                                setMediaFiles(prev => {
+                                                    const combined = [...prev, ...newFiles];
+                                                    return combined.slice(0, 6);
+                                                });
+                                            }
+                                            e.target.value = "";
+                                        }}
                                     />
                                 </div>
+
+                                {mediaFiles.length > 0 && (
+                                    <div className="flex flex-col gap-2 mt-2">
+                                        {mediaFiles.map((item, idx) => (
+                                            <div key={idx} className="flex flex-col gap-2 p-2 bg-slate-50 border rounded text-sm">
+                                                <div className="flex items-center justify-between">
+                                                    <span className="truncate text-slate-600 font-medium max-w-[200px]">{item.file.name}</span>
+                                                    <button type="button" onClick={() => setMediaFiles(prev => prev.filter((_, i) => i !== idx))} className="text-red-500 hover:text-red-700 font-bold">&times;</button>
+                                                </div>
+                                                <input
+                                                    className="flex h-8 w-full rounded-md border border-input px-2 py-1 text-xs"
+                                                    value={item.title}
+                                                    onChange={(e) => {
+                                                        const newTitle = e.target.value;
+                                                        setMediaFiles(prev => prev.map((mf, i) => i === idx ? { ...mf, title: newTitle } : mf));
+                                                    }}
+                                                    placeholder="제목 (선택, 예: 2024 봄 연주회)"
+                                                />
+                                            </div>
+                                        ))}
+                                    </div>
+                                )}
+
                                 {uploading && (
                                     <div className="h-2 w-full overflow-hidden rounded-full bg-secondary">
                                         <div className="h-full bg-primary transition-all duration-300" style={{ width: `${uploadProgress}%` }} />
@@ -522,8 +521,8 @@ export function StudentDetail({ student, onBack, currentUser }: StudentDetailPro
                                 />
                                 <label htmlFor="notify" className="text-sm font-medium">학부모님께 알림톡 발송</label>
                             </div>
-                            <Button onClick={handleAddLog} disabled={saving || uploading || textbookUploading || additionalTextbookUploading} className="w-full">
-                                {saving || uploading || textbookUploading || additionalTextbookUploading ? "저장/업로드 중..." : "학습 로그 저장"}
+                            <Button onClick={handleAddLog} disabled={saving || uploading || textbookUploading} className="w-full">
+                                {saving || uploading || textbookUploading ? "저장/업로드 중..." : "학습 로그 저장"}
                             </Button>
                         </div>
                     </div>
@@ -578,10 +577,10 @@ export function StudentDetail({ student, onBack, currentUser }: StudentDetailPro
                                         </div>
                                     </div>
                                     <div className="space-y-2 text-sm">
-                                        {(log.progress || log.textbookImageUrl || log.additionalTextbookImageUrl) && (
+                                        {(log.progress || log.textbookImageUrl || log.additionalTextbookImageUrl || (log.textbookImages && log.textbookImages.length > 0)) && (
                                             <div className="mb-2">
                                                 {log.progress && <p><span className="font-semibold">교재:</span> {log.progress}</p>}
-                                                {(log.textbookImageUrl || log.additionalTextbookImageUrl) && (
+                                                {(log.textbookImageUrl || log.additionalTextbookImageUrl || (log.textbookImages && log.textbookImages.length > 0)) && (
                                                     <div className="mt-2 flex flex-wrap gap-2 text-sm">
                                                         {log.textbookImageUrl && (
                                                             <img src={log.textbookImageUrl} alt="교재 사진" className="max-w-[200px] rounded border bg-white object-contain" />
@@ -589,6 +588,9 @@ export function StudentDetail({ student, onBack, currentUser }: StudentDetailPro
                                                         {log.additionalTextbookImageUrl && (
                                                             <img src={log.additionalTextbookImageUrl} alt="추가 교재 사진" className="max-w-[200px] rounded border bg-white object-contain" />
                                                         )}
+                                                        {log.textbookImages && log.textbookImages.map((img, idx) => (
+                                                            <img key={idx} src={img.url} alt={`교재 사진 ${idx + 1}`} className="max-w-[200px] rounded border bg-white object-contain" />
+                                                        ))}
                                                     </div>
                                                 )}
                                             </div>
@@ -599,16 +601,32 @@ export function StudentDetail({ student, onBack, currentUser }: StudentDetailPro
                                                 <p className="whitespace-pre-wrap">{log.feedback}</p>
                                             </div>
                                         )}
-                                        {log.mediaUrl && (
-                                            <div className="mt-3">
-                                                {log.mediaTitle && <p className="font-medium mb-1">{log.mediaTitle}</p>}
-                                                {log.mediaType === 'image' ? (
-                                                    <img src={log.mediaUrl} alt="첨부 이미지" className="w-full rounded bg-black object-contain max-h-[300px]" />
-                                                ) : (
-                                                    <video controls className="w-full rounded bg-black max-h-[300px]">
-                                                        <source src={log.mediaUrl} />
-                                                    </video>
+                                        {(log.mediaUrl || (log.mediaFiles && log.mediaFiles.length > 0)) && (
+                                            <div className="mt-3 flex flex-col gap-4">
+                                                {log.mediaUrl && (
+                                                    <div className="w-full">
+                                                        {log.mediaTitle && <p className="font-medium mb-1">{log.mediaTitle}</p>}
+                                                        {log.mediaType === 'image' ? (
+                                                            <img src={log.mediaUrl} alt="첨부 이미지" className="w-full rounded bg-black object-contain max-h-[300px]" />
+                                                        ) : (
+                                                            <video controls className="w-full rounded bg-black max-h-[300px]">
+                                                                <source src={log.mediaUrl} />
+                                                            </video>
+                                                        )}
+                                                    </div>
                                                 )}
+                                                {log.mediaFiles && log.mediaFiles.map((media, idx) => (
+                                                    <div key={idx} className="w-full">
+                                                        {media.title && <p className="font-medium mb-1">{media.title}</p>}
+                                                        {media.type === 'image' ? (
+                                                            <img src={media.url} alt={`첨부 이미지 ${idx + 1}`} className="w-full rounded bg-black object-contain max-h-[300px]" />
+                                                        ) : (
+                                                            <video controls className="w-full rounded bg-black max-h-[300px]">
+                                                                <source src={media.url} />
+                                                            </video>
+                                                        )}
+                                                    </div>
+                                                ))}
                                             </div>
                                         )}
                                     </div>
