@@ -48,6 +48,8 @@ interface LearningLog {
     viewCount?: number;
     textbookImageUrl?: string;
     textbookImagePath?: string;
+    additionalTextbookImageUrl?: string;
+    additionalTextbookImagePath?: string;
 }
 
 interface StudentDetailProps {
@@ -90,6 +92,11 @@ export function StudentDetail({ student, onBack, currentUser }: StudentDetailPro
     const [textbookUploading, setTextbookUploading] = useState(false);
     const [textbookUploadProgress, setTextbookUploadProgress] = useState(0);
     const [textbookImageFile, setTextbookImageFile] = useState<File | null>(null);
+
+    const [showAdditionalTextbook, setShowAdditionalTextbook] = useState(false);
+    const [additionalTextbookUploading, setAdditionalTextbookUploading] = useState(false);
+    const [additionalTextbookUploadProgress, setAdditionalTextbookUploadProgress] = useState(0);
+    const [additionalTextbookImageFile, setAdditionalTextbookImageFile] = useState<File | null>(null);
 
     const [saving, setSaving] = useState(false);
 
@@ -163,7 +170,7 @@ export function StudentDetail({ student, onBack, currentUser }: StudentDetailPro
     };
 
     const handleAddLog = async () => {
-        if (!progress && !level && !feedback && !mediaFile && !textbookImageFile) {
+        if (!progress && !level && !feedback && !mediaFile && !textbookImageFile && !additionalTextbookImageFile) {
             alert("정보를 입력해주세요.");
             return;
         }
@@ -172,9 +179,14 @@ export function StudentDetail({ student, onBack, currentUser }: StudentDetailPro
         try {
             let mediaData = { url: "", path: "", type: "" };
             let textbookData = { url: "", path: "", type: "" };
+            let additionalTextbookData = { url: "", path: "", type: "" };
 
             if (textbookImageFile) {
                 textbookData = await handleFileUpload(textbookImageFile, setTextbookUploading, setTextbookUploadProgress, "textbook_");
+            }
+
+            if (additionalTextbookImageFile) {
+                additionalTextbookData = await handleFileUpload(additionalTextbookImageFile, setAdditionalTextbookUploading, setAdditionalTextbookUploadProgress, "additional_textbook_");
             }
 
             if (mediaFile) {
@@ -195,7 +207,9 @@ export function StudentDetail({ student, onBack, currentUser }: StudentDetailPro
                 mediaPath: mediaData.path,
                 mediaTitle: mediaTitle,
                 textbookImageUrl: textbookData.url,
-                textbookImagePath: textbookData.path
+                textbookImagePath: textbookData.path,
+                additionalTextbookImageUrl: additionalTextbookData.url,
+                additionalTextbookImagePath: additionalTextbookData.path
             });
 
             if (sendNotification) {
@@ -241,6 +255,9 @@ export function StudentDetail({ student, onBack, currentUser }: StudentDetailPro
             setUploadProgress(0);
             setTextbookImageFile(null);
             setTextbookUploadProgress(0);
+            setAdditionalTextbookImageFile(null);
+            setAdditionalTextbookUploadProgress(0);
+            setShowAdditionalTextbook(false);
             alert("학습 로그가 저장되었습니다." + (sendNotification ? " (알림 발송 시도함)" : ""));
         } catch (error) {
             console.error("Error adding log:", error);
@@ -289,6 +306,14 @@ export function StudentDetail({ student, onBack, currentUser }: StudentDetailPro
                     await deleteObject(textbookRef);
                 } catch (e) {
                     console.error("Error deleting textbook media file:", e);
+                }
+            }
+            if (log.additionalTextbookImagePath) {
+                try {
+                    const additionalTextbookRef = ref(storage, log.additionalTextbookImagePath);
+                    await deleteObject(additionalTextbookRef);
+                } catch (e) {
+                    console.error("Error deleting additional textbook media file:", e);
                 }
             }
             await deleteDoc(doc(db, "students", student.id, "logs", log.id));
@@ -369,7 +394,20 @@ export function StudentDetail({ student, onBack, currentUser }: StudentDetailPro
                                 />
                             </div>
                             <div className="grid gap-2 ml-4">
-                                <label className="text-sm font-medium text-slate-600">↳ 교재 사진 첨부 (선택)</label>
+                                <div className="flex items-center justify-between">
+                                    <label className="text-sm font-medium text-slate-600">↳ 교재 사진 첨부 (선택)</label>
+                                    {!showAdditionalTextbook && (
+                                        <Button
+                                            type="button"
+                                            variant="ghost"
+                                            size="sm"
+                                            onClick={() => setShowAdditionalTextbook(true)}
+                                            className="h-6 px-2 text-blue-500 hover:text-blue-700 hover:bg-blue-50"
+                                        >
+                                            + 사진 추가
+                                        </Button>
+                                    )}
+                                </div>
                                 <div className="flex flex-col gap-2">
                                     <input
                                         type="file"
@@ -387,6 +425,43 @@ export function StudentDetail({ student, onBack, currentUser }: StudentDetailPro
                                         <div className="h-2 w-full overflow-hidden rounded-full bg-secondary mt-1">
                                             <div className="h-full bg-primary transition-all duration-300" style={{ width: `${textbookUploadProgress}%` }} />
                                         </div>
+                                    )}
+
+                                    {showAdditionalTextbook && (
+                                        <>
+                                            <div className="flex items-center justify-between mt-2">
+                                                <label className="text-sm font-medium text-slate-600">↳ 추가 교재 사진 (선택)</label>
+                                                <Button
+                                                    type="button"
+                                                    variant="ghost"
+                                                    size="sm"
+                                                    onClick={() => {
+                                                        setShowAdditionalTextbook(false);
+                                                        setAdditionalTextbookImageFile(null);
+                                                    }}
+                                                    className="h-6 px-2 text-red-500 hover:text-red-700 hover:bg-red-50"
+                                                >
+                                                    - 삭제
+                                                </Button>
+                                            </div>
+                                            <input
+                                                type="file"
+                                                accept="image/*"
+                                                className="flex w-full rounded-md border border-input px-3 py-2 text-sm text-slate-600"
+                                                onChange={(e) => {
+                                                    if (e.target.files && e.target.files.length > 0) {
+                                                        setAdditionalTextbookImageFile(e.target.files[0]);
+                                                    } else {
+                                                        setAdditionalTextbookImageFile(null);
+                                                    }
+                                                }}
+                                            />
+                                            {additionalTextbookUploading && (
+                                                <div className="h-2 w-full overflow-hidden rounded-full bg-secondary mt-1">
+                                                    <div className="h-full bg-primary transition-all duration-300" style={{ width: `${additionalTextbookUploadProgress}%` }} />
+                                                </div>
+                                            )}
+                                        </>
                                     )}
                                 </div>
                             </div>
@@ -447,8 +522,8 @@ export function StudentDetail({ student, onBack, currentUser }: StudentDetailPro
                                 />
                                 <label htmlFor="notify" className="text-sm font-medium">학부모님께 알림톡 발송</label>
                             </div>
-                            <Button onClick={handleAddLog} disabled={saving || uploading || textbookUploading} className="w-full">
-                                {saving || uploading || textbookUploading ? "저장/업로드 중..." : "학습 로그 저장"}
+                            <Button onClick={handleAddLog} disabled={saving || uploading || textbookUploading || additionalTextbookUploading} className="w-full">
+                                {saving || uploading || textbookUploading || additionalTextbookUploading ? "저장/업로드 중..." : "학습 로그 저장"}
                             </Button>
                         </div>
                     </div>
@@ -503,12 +578,17 @@ export function StudentDetail({ student, onBack, currentUser }: StudentDetailPro
                                         </div>
                                     </div>
                                     <div className="space-y-2 text-sm">
-                                        {(log.progress || log.textbookImageUrl) && (
+                                        {(log.progress || log.textbookImageUrl || log.additionalTextbookImageUrl) && (
                                             <div className="mb-2">
                                                 {log.progress && <p><span className="font-semibold">교재:</span> {log.progress}</p>}
-                                                {log.textbookImageUrl && (
-                                                    <div className="mt-2 text-sm">
-                                                        <img src={log.textbookImageUrl} alt="교재 사진" className="max-w-[200px] rounded border bg-white" />
+                                                {(log.textbookImageUrl || log.additionalTextbookImageUrl) && (
+                                                    <div className="mt-2 flex flex-wrap gap-2 text-sm">
+                                                        {log.textbookImageUrl && (
+                                                            <img src={log.textbookImageUrl} alt="교재 사진" className="max-w-[200px] rounded border bg-white object-contain" />
+                                                        )}
+                                                        {log.additionalTextbookImageUrl && (
+                                                            <img src={log.additionalTextbookImageUrl} alt="추가 교재 사진" className="max-w-[200px] rounded border bg-white object-contain" />
+                                                        )}
                                                     </div>
                                                 )}
                                             </div>

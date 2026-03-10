@@ -38,6 +38,7 @@ interface LearningLog {
     mediaType?: string;
     mediaTitle?: string;
     textbookImageUrl?: string;
+    additionalTextbookImageUrl?: string;
 }
 
 export default function ReportPage() {
@@ -198,9 +199,14 @@ export default function ReportPage() {
                         <div className="rounded-lg bg-slate-50 p-4">
                             <h3 className="mb-2 text-sm font-semibold text-slate-500">현재 진도</h3>
                             <p className="text-lg font-medium">{log.progress || "미입력"}</p>
-                            {log.textbookImageUrl && (
-                                <div className="mt-4">
-                                    <img src={log.textbookImageUrl} alt="교재 사진" className="w-full rounded border bg-white object-contain" />
+                            {(log.textbookImageUrl || log.additionalTextbookImageUrl) && (
+                                <div className="mt-4 flex flex-col gap-2">
+                                    {log.textbookImageUrl && (
+                                        <img src={log.textbookImageUrl} alt="교재 사진" className="w-full rounded border bg-white object-contain" />
+                                    )}
+                                    {log.additionalTextbookImageUrl && (
+                                        <img src={log.additionalTextbookImageUrl} alt="추가 교재 사진" className="w-full rounded border bg-white object-contain" />
+                                    )}
                                 </div>
                             )}
                         </div>
