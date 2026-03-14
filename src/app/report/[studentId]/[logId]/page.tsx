@@ -27,7 +27,6 @@ interface Student {
 
 interface LearningLog {
     progress: string;
-    level: string;
     feedback: string;
     createdAt: FirestoreDate;
     firstViewedAt?: FirestoreDate;
@@ -193,11 +192,6 @@ export default function ReportPage() {
                     </div>
 
                     <div className="space-y-4">
-                        <div className="rounded-lg bg-slate-50 p-4">
-                            <h3 className="mb-2 text-sm font-semibold text-slate-500">현재 레벨</h3>
-                            <p className="text-lg font-medium">{log.level || "미입력"}</p>
-                        </div>
-
                         <div className="rounded-lg bg-slate-50 p-4">
                             <h3 className="mb-2 text-sm font-semibold text-slate-500">현재 진도</h3>
                             <p className="text-lg font-medium">{log.progress || "미입력"}</p>

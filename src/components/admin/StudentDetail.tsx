@@ -31,7 +31,6 @@ interface Student {
 interface LearningLog {
     id: string;
     progress: string;
-    level: string;
     feedback: string;
     createdAt: FirestoreDate;
     authorName?: string;
@@ -81,7 +80,6 @@ export function StudentDetail({ student, onBack, currentUser }: StudentDetailPro
         : (student.instrument ? [student.instrument] : []);
 
     const [progress, setProgress] = useState("");
-    const [level, setLevel] = useState("");
     const [feedback, setFeedback] = useState("");
     const [selectedInstrument, setSelectedInstrument] = useState(studentInstruments[0] || "피아노");
 
@@ -166,7 +164,7 @@ export function StudentDetail({ student, onBack, currentUser }: StudentDetailPro
     };
 
     const handleAddLog = async () => {
-        if (!progress && !level && !feedback && mediaFiles.length === 0 && textbookImages.length === 0) {
+        if (!progress && !feedback && mediaFiles.length === 0 && textbookImages.length === 0) {
             alert("정보를 입력해주세요.");
             return;
         }
@@ -192,7 +190,6 @@ export function StudentDetail({ student, onBack, currentUser }: StudentDetailPro
             const docData: any = {
                 instrument: selectedInstrument, // Save selected instrument
                 progress,
-                level,
                 feedback,
                 authorId: currentUser.uid,
                 authorName: currentUser.name || currentUser.email,
@@ -240,7 +237,6 @@ export function StudentDetail({ student, onBack, currentUser }: StudentDetailPro
             }
 
             setProgress("");
-            setLevel("");
             setFeedback("");
             setMediaFiles([]);
             setUploadProgress(0);
@@ -427,15 +423,6 @@ export function StudentDetail({ student, onBack, currentUser }: StudentDetailPro
                                 )}
                             </div>
                             <div className="grid gap-2">
-                                <label className="text-sm font-medium">현재 레벨</label>
-                                <input
-                                    className="flex h-10 w-full rounded-md border border-input px-3 py-2 text-sm"
-                                    value={level}
-                                    onChange={(e) => setLevel(e.target.value)}
-                                    placeholder="예: 초급"
-                                />
-                            </div>
-                            <div className="grid gap-2">
                                 <label className="text-sm font-medium">피드백</label>
                                 <textarea
                                     className="flex min-h-[100px] w-full rounded-md border border-input px-3 py-2 text-sm"
@@ -595,7 +582,6 @@ export function StudentDetail({ student, onBack, currentUser }: StudentDetailPro
                                                 )}
                                             </div>
                                         )}
-                                        {log.level && <p><span className="font-semibold">레벨:</span> {log.level}</p>}
                                         {log.feedback && (
                                             <div className="p-2 bg-white rounded border">
                                                 <p className="whitespace-pre-wrap">{log.feedback}</p>

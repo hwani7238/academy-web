@@ -15,7 +15,6 @@ export interface Student {
     instruments?: string[]; // New multi-subject support
     status: string;
     progress?: string;
-    level?: string;
     feedback?: string;
     createdAt: any;
 }

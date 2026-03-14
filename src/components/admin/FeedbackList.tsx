@@ -34,7 +34,6 @@ interface FeedbackLog {
     feedback: string;
     createdAt: FirestoreDate;
     progress?: string;
-    level?: string;
     mediaUrl?: string;
     mediaType?: string;
     mediaTitle?: string;
@@ -444,7 +443,7 @@ export function FeedbackList() {
                                 )}
                             </div>
 
-                            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                            <div className="grid grid-cols-1 gap-4">
                                 <div className="rounded-md bg-slate-50 p-3">
                                     <span className="mb-1 block text-xs font-medium text-slate-500">현재 진도</span>
                                     <p className="text-sm font-medium">{selectedLog.progress || "-"}</p>
@@ -457,10 +456,6 @@ export function FeedbackList() {
                                             />
                                         </div>
                                     )}
-                                </div>
-                                <div className="rounded-md bg-slate-50 p-3">
-                                    <span className="mb-1 block text-xs font-medium text-slate-500">현재 레벨</span>
-                                    <p className="text-sm font-medium">{selectedLog.level || "-"}</p>
                                 </div>
                             </div>
 
