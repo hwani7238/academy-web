@@ -22,7 +22,8 @@ interface User {
     role: string;
     status?: string;
     phone?: string;
-    subject?: string;
+    subject?: string; // Legacy field
+    subjects?: string[]; // Multi-subject support
     requestedAt?: FirestoreDate;
     approvedAt?: FirestoreDate;
 }
@@ -50,14 +51,14 @@ export function TeacherManager() {
     const [password, setPassword] = useState("");
     const [name, setName] = useState("");
     const [phone, setPhone] = useState("");
-    const [subject, setSubject] = useState<string>(TEACHER_SUBJECTS[0]);
+    const [subjects, setSubjects] = useState<string[]>([TEACHER_SUBJECTS[0]]);
     const [loading, setLoading] = useState(false);
     const [actionLoadingId, setActionLoadingId] = useState<string | null>(null);
 
     const [editingId, setEditingId] = useState<string | null>(null);
     const [editName, setEditName] = useState("");
     const [editPhone, setEditPhone] = useState("");
-    const [editSubject, setEditSubject] = useState("");
+    const [editSubjects, setEditSubjects] = useState<string[]>([]);
 
     useEffect(() => {
         const unsubscribe = onSnapshot(collection(db, "users"), (snapshot) => {
@@ -77,6 +78,12 @@ export function TeacherManager() {
 
     const handleCreateTeacher = async (event: React.FormEvent) => {
         event.preventDefault();
+        
+        if (subjects.length === 0) {
+            alert("최소 하나의 과목을 선택해주세요.");
+            return;
+        }
+        
         setLoading(true);
 
         const secondaryAppName = "secondaryApp";
@@ -99,7 +106,8 @@ export function TeacherManager() {
                 role: "teacher",
                 status: "approved",
                 phone,
-                subject,
+                subject: subjects[0], // Keep legacy for simplicity if needed
+                subjects,
                 createdAt: new Date(),
                 requestedAt: new Date(),
                 approvedAt: new Date(),
@@ -112,7 +120,7 @@ export function TeacherManager() {
             setPassword("");
             setName("");
             setPhone("");
-            setSubject(TEACHER_SUBJECTS[0]);
+            setSubjects([TEACHER_SUBJECTS[0]]);
             alert("강사 계정이 생성되었습니다.");
         } catch (error: unknown) {
             console.error("Error creating teacher:", error);
@@ -161,7 +169,10 @@ export function TeacherManager() {
         setEditingId(teacher.id);
         setEditName(teacher.name);
         setEditPhone(teacher.phone || "");
-        setEditSubject(teacher.subject || TEACHER_SUBJECTS[0]);
+        const currentSubjects = teacher.subjects && teacher.subjects.length > 0
+            ? teacher.subjects
+            : (teacher.subject ? [teacher.subject] : []);
+        setEditSubjects(currentSubjects);
     };
 
     const cancelEdit = () => {
@@ -169,11 +180,17 @@ export function TeacherManager() {
     };
 
     const saveEdit = async (id: string) => {
+        if (editSubjects.length === 0) {
+            alert("최소 하나의 과목을 선택해야 합니다.");
+            return;
+        }
+
         try {
             await updateDoc(doc(db, "users", id), {
                 name: editName,
                 phone: editPhone,
-                subject: editSubject,
+                subject: editSubjects[0], // legacy
+                subjects: editSubjects,
             });
             setEditingId(null);
         } catch (error) {
@@ -219,18 +236,29 @@ export function TeacherManager() {
                     />
                 </div>
                 <div className="grid gap-2">
-                    <label className="text-sm font-medium">담당 과목</label>
-                    <select
-                        className="flex h-10 w-full rounded-md border border-input px-3 py-2 text-sm"
-                        value={subject}
-                        onChange={(event) => setSubject(event.target.value)}
-                    >
+                    <label className="text-sm font-medium">담당 과목 (다중 선택 가능)</label>
+                    <div className="grid grid-cols-2 gap-2 rounded-md border p-3">
                         {TEACHER_SUBJECTS.map((item) => (
-                            <option key={item} value={item}>
-                                {item}
-                            </option>
+                            <div key={item} className="flex items-center space-x-2">
+                                <input
+                                    type="checkbox"
+                                    id={`subject-${item}`}
+                                    checked={subjects.includes(item)}
+                                    onChange={(e) => {
+                                        setSubjects(prev => 
+                                            e.target.checked 
+                                                ? [...prev, item] 
+                                                : prev.filter(s => s !== item)
+                                        );
+                                    }}
+                                    className="rounded border-gray-300"
+                                />
+                                <label htmlFor={`subject-${item}`} className="cursor-pointer text-sm select-none">
+                                    {item}
+                                </label>
+                            </div>
                         ))}
-                    </select>
+                    </div>
                 </div>
                 <div className="grid gap-2">
                     <label className="text-sm font-medium">이메일 (ID)</label>
@@ -278,7 +306,9 @@ export function TeacherManager() {
                                         <p className="font-semibold text-slate-900">{teacher.name}</p>
                                         <p className="text-slate-600">{teacher.email}</p>
                                         <p className="text-slate-600">
-                                            {teacher.subject || "과목 미지정"}
+                                            {teacher.subjects && teacher.subjects.length > 0 
+                                                ? teacher.subjects.join(", ") 
+                                                : (teacher.subject || "과목 미지정")}
                                             {teacher.phone ? ` · ${teacher.phone}` : ""}
                                         </p>
                                         <p className="text-xs text-slate-500">
@@ -328,23 +358,36 @@ export function TeacherManager() {
                                         onChange={(event) => setEditPhone(event.target.value)}
                                         placeholder="연락처"
                                     />
-                                    <select
-                                        className="h-8 rounded-md border px-2 text-sm"
-                                        value={editSubject}
-                                        onChange={(event) => setEditSubject(event.target.value)}
-                                    >
-                                        {TEACHER_SUBJECTS.map((item) => (
-                                            <option key={item} value={item}>
-                                                {item}
-                                            </option>
-                                        ))}
-                                    </select>
+                                    <div className="col-span-1 sm:col-span-3">
+                                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs border rounded p-2 bg-white">
+                                            {TEACHER_SUBJECTS.map((item) => (
+                                                <div key={item} className="flex items-center space-x-1">
+                                                    <input
+                                                        type="checkbox"
+                                                        id={`edit-subject-${item}`}
+                                                        checked={editSubjects.includes(item)}
+                                                        onChange={(e) => {
+                                                            setEditSubjects(prev => 
+                                                                e.target.checked 
+                                                                    ? [...prev, item] 
+                                                                    : prev.filter(s => s !== item)
+                                                            );
+                                                        }}
+                                                        className="rounded border-gray-300 h-3 w-3"
+                                                    />
+                                                    <label htmlFor={`edit-subject-${item}`} className="cursor-pointer select-none truncate">
+                                                        {item}
+                                                    </label>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
                                 </div>
                             ) : (
                                 <div>
                                     <span className="font-bold">{teacher.name}</span>
                                     <span className="ml-2 text-sm text-slate-600">
-                                        ({teacher.subject || "과목 미지정"})
+                                        ({teacher.subjects && teacher.subjects.length > 0 ? teacher.subjects.join(", ") : (teacher.subject || "과목 미지정")})
                                     </span>
                                     <span className="ml-2 text-slate-500">
                                         {teacher.phone ? ` ${teacher.phone}` : ""}

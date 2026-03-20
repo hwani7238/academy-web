@@ -189,21 +189,18 @@ export function StudentManager({ currentUser, onViewModeChange }: StudentManager
 
         // 1. Role-based filtering (Teacher)
         if (currentUser?.role === 'teacher') {
-            const teacherSubject = currentUser.subject;
-            if (!teacherSubject) return false;
+            const hasMultipleSubjects = Array.isArray(currentUser.subjects) && currentUser.subjects.length > 0;
+            const teacherSubjects = hasMultipleSubjects 
+                ? currentUser.subjects 
+                : (currentUser.subject ? [currentUser.subject] : []);
+            
+            if (teacherSubjects.length === 0) return false;
 
-            // Special handling for Piano
-            if (teacherSubject === '피아노') {
-                // Check if student has piano
-                if (!studentInstruments.includes('피아노')) return false;
-                // If specific filter applies
-                if (filterInstrument !== "전체" && !studentInstruments.includes(filterInstrument)) return false;
-            } else {
-                if (!studentInstruments.includes(teacherSubject)) return false;
-            }
+            const hasMatchingInstrument = teacherSubjects.some((subj: string) => studentInstruments.includes(subj));
+            if (!hasMatchingInstrument) return false;
         }
 
-        // 2. Admin filtering (Instrument)
+        // 2. Filter by selected instrument (for both Admin and Teacher)
         if (filterInstrument !== "전체") {
             if (!studentInstruments.includes(filterInstrument)) return false;
         }

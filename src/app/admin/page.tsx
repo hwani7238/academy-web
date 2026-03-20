@@ -15,6 +15,8 @@ interface UserProfile {
     role?: string;
     status?: string;
     name?: string;
+    subject?: string;
+    subjects?: string[];
 }
 
 export default function AdminPage() {
