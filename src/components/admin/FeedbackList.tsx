@@ -37,12 +37,14 @@ interface FeedbackLog {
     mediaUrl?: string;
     mediaType?: string;
     mediaTitle?: string;
+    mediaFiles?: { url: string; type: string; path: string; title?: string }[];
     instrument?: string;
     viewed?: boolean;
     firstViewedAt?: FirestoreDate;
     lastViewedAt?: FirestoreDate;
     viewCount?: number;
     textbookImageUrl?: string;
+    textbookImages?: { url: string; path: string }[];
 }
 
 const getDateValue = (timestamp: FirestoreDate) => {
@@ -447,13 +449,23 @@ export function FeedbackList() {
                                 <div className="rounded-md bg-slate-50 p-3">
                                     <span className="mb-1 block text-xs font-medium text-slate-500">현재 진도</span>
                                     <p className="text-sm font-medium">{selectedLog.progress || "-"}</p>
-                                    {selectedLog.textbookImageUrl && (
-                                        <div className="mt-3">
-                                            <img
-                                                src={selectedLog.textbookImageUrl}
-                                                alt="교재 사진"
-                                                className="w-full rounded border bg-white object-contain"
-                                            />
+                                    {(selectedLog.textbookImageUrl || (selectedLog.textbookImages && selectedLog.textbookImages.length > 0)) && (
+                                        <div className="mt-3 flex flex-wrap gap-2 text-sm">
+                                            {selectedLog.textbookImageUrl && (
+                                                <img
+                                                    src={selectedLog.textbookImageUrl}
+                                                    alt="교재 사진"
+                                                    className="max-w-[200px] rounded border bg-white object-contain"
+                                                />
+                                            )}
+                                            {selectedLog.textbookImages && selectedLog.textbookImages.map((img, idx) => (
+                                                <img 
+                                                    key={idx} 
+                                                    src={img.url} 
+                                                    alt={`교재 사진 ${idx + 1}`} 
+                                                    className="max-w-[200px] rounded border bg-white object-contain" 
+                                                />
+                                            ))}
                                         </div>
                                     )}
                                 </div>
@@ -464,23 +476,49 @@ export function FeedbackList() {
                                 <p className="whitespace-pre-wrap leading-relaxed">{selectedLog.feedback}</p>
                             </div>
 
-                            {selectedLog.mediaUrl && (
-                                <div className="space-y-2">
+                            {(selectedLog.mediaUrl || (selectedLog.mediaFiles && selectedLog.mediaFiles.length > 0)) && (
+                                <div className="space-y-4">
                                     <span className="text-xs font-medium text-slate-500">첨부 미디어</span>
-                                    <div className="flex justify-center overflow-hidden rounded-md bg-black">
-                                        {selectedLog.mediaType === "image" ? (
-                                            <Image
-                                                src={selectedLog.mediaUrl}
-                                                alt={selectedLog.mediaTitle || "Feedback Media"}
-                                                width={1200}
-                                                height={900}
-                                                className="max-h-[300px] w-auto object-contain"
-                                                unoptimized
-                                            />
-                                        ) : (
-                                            <video src={selectedLog.mediaUrl} controls className="max-h-[300px]" />
-                                        )}
-                                    </div>
+                                    
+                                    {selectedLog.mediaUrl && (
+                                        <div className="flex flex-col overflow-hidden rounded-md bg-black">
+                                            {selectedLog.mediaTitle && <p className="p-2 text-sm text-white bg-slate-800">{selectedLog.mediaTitle}</p>}
+                                            <div className="flex justify-center flex-1">
+                                                {selectedLog.mediaType === "image" ? (
+                                                    <Image
+                                                        src={selectedLog.mediaUrl}
+                                                        alt={selectedLog.mediaTitle || "Feedback Media"}
+                                                        width={1200}
+                                                        height={900}
+                                                        className="max-h-[300px] w-auto object-contain"
+                                                        unoptimized
+                                                    />
+                                                ) : (
+                                                    <video src={selectedLog.mediaUrl} controls className="max-h-[300px]" />
+                                                )}
+                                            </div>
+                                        </div>
+                                    )}
+
+                                    {selectedLog.mediaFiles && selectedLog.mediaFiles.map((media, idx) => (
+                                        <div key={idx} className="flex flex-col overflow-hidden rounded-md bg-black">
+                                            {media.title && <p className="p-2 text-sm text-white bg-slate-800">{media.title}</p>}
+                                            <div className="flex justify-center flex-1">
+                                                {media.type === "image" ? (
+                                                    <Image
+                                                        src={media.url}
+                                                        alt={media.title || `Feedback Media ${idx + 1}`}
+                                                        width={1200}
+                                                        height={900}
+                                                        className="max-h-[300px] w-auto object-contain"
+                                                        unoptimized
+                                                    />
+                                                ) : (
+                                                    <video src={media.url} controls className="max-h-[300px]" />
+                                                )}
+                                            </div>
+                                        </div>
+                                    ))}
                                 </div>
                             )}
 
