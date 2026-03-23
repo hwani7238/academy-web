@@ -6,7 +6,6 @@ service cloud.firestore {
       return /databases/$(database)/documents/users/$(userId);
     }
 
-    // Helper function to check if user is authenticated
     function isAuthenticated() {
       return request.auth != null;
     }
@@ -61,54 +60,18 @@ service cloud.firestore {
         request.resource.data.requestedAt is timestamp;
     }
 
-    function isAllowedReportViewUpdate() {
-      return request.auth == null &&
-        request.resource.data.diff(resource.data).affectedKeys().hasOnly([
-          'viewed',
-          'firstViewedAt',
-          'lastViewedAt',
-          'lastViewedUserAgent',
-          'viewCount'
-        ]) &&
-        request.resource.data.viewed == true &&
-        request.resource.data.lastViewedAt is timestamp &&
-        request.resource.data.lastViewedUserAgent is string &&
-        request.resource.data.lastViewedUserAgent.size() <= 300 &&
-        request.resource.data.viewCount is int &&
-        (
-          !('firstViewedAt' in request.resource.data) ||
-          request.resource.data.firstViewedAt is timestamp
-        );
-    }
-
-    // Allow public read for reports (specific path)
-    match /students/{studentId}/logs/{logId} {
-      allow read: if true;
-      allow update: if isAllowedReportViewUpdate();
-    }
-
-    // Collection group queries for "logs" need an explicit recursive match.
-    match /{path=**}/logs/{logId} {
-      allow read: if true;
-    }
-
-    // Students collection - strictly for staff
     match /students/{studentId} {
       allow read, write: if isStaff();
-      
-      // Allow access to subcollections as well
+
       match /{allChildren=**} {
         allow read, write: if isStaff();
       }
     }
 
-    // Users collection - Users can read their own profile, Staff can read all?
     match /users/{userId} {
       allow read: if isAuthenticated() && request.auth.uid == userId;
       allow read, create, update, delete: if isAdmin();
       allow create: if isValidTeacherSignup(userId);
     }
-    
-    // Default deny for everything else (removed the wildcard match)
   }
 }

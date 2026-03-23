@@ -41,6 +41,7 @@ interface LearningLog {
     mediaPath?: string; // legacy
     mediaTitle?: string; // legacy
     mediaFiles?: { url: string; type: string; path: string; title?: string }[];
+    reportToken?: string;
     instrument?: string; // Subject for this log
     viewed?: boolean;
     firstViewedAt?: FirestoreDate;
@@ -187,6 +188,7 @@ export function StudentDetail({ student, onBack, currentUser }: StudentDetailPro
                 }
             }
 
+            const reportToken = crypto.randomUUID();
             const docData: any = {
                 instrument: selectedInstrument, // Save selected instrument
                 progress,
@@ -196,13 +198,14 @@ export function StudentDetail({ student, onBack, currentUser }: StudentDetailPro
                 studentName: student.name,
                 createdAt: new Date(),
                 textbookImages: uploadedTextbookImages,
-                mediaFiles: uploadedMediaFiles
+                mediaFiles: uploadedMediaFiles,
+                reportToken,
             };
 
             const docRef = await addDoc(collection(db, "students", student.id, "logs"), docData);
 
             if (sendNotification) {
-                const reportLink = `${window.location.origin}/report/${student.id}/${docRef.id}`;
+                const reportLink = `${window.location.origin}/report/${student.id}/${docRef.id}?t=${encodeURIComponent(reportToken)}`;
 
                 // Remove protocol from link because the template alimtalk button forces a protocol prefix (e.g. https://#{link})
                 const linkForTemplate = reportLink.replace(/^https?:\/\//, '');
@@ -265,8 +268,13 @@ export function StudentDetail({ student, onBack, currentUser }: StudentDetailPro
         }
     };
 
-    const handleCopyLink = (logId: string) => {
-        const link = `${window.location.origin}/report/${student.id}/${logId}`;
+    const handleCopyLink = (logId: string, reportToken?: string) => {
+        if (!reportToken) {
+            alert("이 리포트는 보안 토큰이 없어 링크를 복사할 수 없습니다. 새 리포트를 다시 생성해주세요.");
+            return;
+        }
+
+        const link = `${window.location.origin}/report/${student.id}/${logId}?t=${encodeURIComponent(reportToken)}`;
         navigator.clipboard.writeText(link).then(() => {
             alert("리포트 링크가 복사되었습니다. 학부모님께 전달해주세요!");
         });
@@ -555,7 +563,7 @@ export function StudentDetail({ student, onBack, currentUser }: StudentDetailPro
                                             </div>
                                         </div>
                                         <div className="flex w-full flex-wrap justify-end gap-2 sm:w-auto">
-                                            <Button variant="outline" size="sm" onClick={() => handleCopyLink(log.id)} className="h-7 text-xs">
+                                            <Button variant="outline" size="sm" onClick={() => handleCopyLink(log.id, (log as LearningLog & { reportToken?: string }).reportToken)} className="h-7 text-xs">
                                                 링크 복사
                                             </Button>
                                             <Button variant="ghost" size="sm" onClick={() => handleDeleteLog(log)} className="h-7 w-7 p-0 text-red-500 hover:text-red-700">
