@@ -73,7 +73,11 @@ const formatTime = (timestamp: FirestoreDate) => {
 const isViewed = (log: Pick<FeedbackLog, "viewCount" | "lastViewedAt" | "viewed">) =>
     Boolean(log.viewed) || (log.viewCount ?? 0) > 0 || Boolean(log.lastViewedAt);
 
-export function FeedbackList() {
+export interface FeedbackListProps {
+    filterSubjects?: string[] | null;
+}
+
+export function FeedbackList({ filterSubjects }: FeedbackListProps) {
     const [selectedDate, setSelectedDate] = useState<Date>(new Date());
     const [currentMonth, setCurrentMonth] = useState<Date>(new Date());
     const [dailyLogs, setDailyLogs] = useState<FeedbackLog[]>([]);
@@ -100,7 +104,17 @@ export function FeedbackList() {
             monthlyQuery,
             (snapshot) => {
                 const dates = snapshot.docs
-                    .map((docSnapshot) => getDateValue(docSnapshot.data().createdAt))
+                    .map((docSnapshot) => {
+                        const data = docSnapshot.data();
+                        
+                        if (filterSubjects && filterSubjects.length > 0) {
+                            if (!data.instrument || !filterSubjects.includes(data.instrument)) {
+                                return null;
+                            }
+                        }
+
+                        return getDateValue(data.createdAt);
+                    })
                     .filter((date): date is Date => date instanceof Date);
 
                 const uniqueDates = dates.filter(
@@ -138,7 +152,7 @@ export function FeedbackList() {
         const unsubscribe = onSnapshot(
             dailyQuery,
             (snapshot) => {
-                const logs = snapshot.docs.map((docSnapshot) => {
+                let logs = snapshot.docs.map((docSnapshot) => {
                     const data = docSnapshot.data();
 
                     return {
@@ -148,6 +162,10 @@ export function FeedbackList() {
                         ...data,
                     } as FeedbackLog;
                 });
+
+                if (filterSubjects && filterSubjects.length > 0) {
+                    logs = logs.filter(log => log.instrument && filterSubjects.includes(log.instrument));
+                }
 
                 setDailyLogs(logs);
                 setLoadingDaily(false);

@@ -155,14 +155,17 @@ export default function AdminPage() {
                         </section>
                     )}
 
-                    {isAdmin && !isDetailView && (
+                    {(isAdmin || isApprovedTeacher) && !isDetailView && (
                         <section>
-                            <FeedbackList />
+                            {!isDetailView && <h2 className="mb-4 text-2xl font-bold">피드백 목록 ({isTeacher ? '내 과목' : '전체'})</h2>}
+                            <FeedbackList 
+                                filterSubjects={isAdmin ? null : (userData?.subjects || (userData?.subject ? [userData.subject] : []))} 
+                            />
                         </section>
                     )}
 
                     <section>
-                        {!isDetailView && <h2 className="mb-4 text-2xl font-bold">학생 관리 ({isTeacher ? '피드백 작성' : '전체 관리'})</h2>}
+                        {!isDetailView && <h2 className="mb-4 text-2xl font-bold">학생 관리 ({isTeacher ? '피드백 작성/수정' : '전체 관리'})</h2>}
                         {/* We will need to pass userData to StudentManager for attribution */}
                         <StudentManager
                             currentUser={{ uid: user.uid, ...userData }}
