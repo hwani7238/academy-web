@@ -186,7 +186,7 @@ export default function WorldPage() {
                     100% { transform: translate3d(-50%, 0, 0); }
                 }
                 .animate-scroll-bg {
-                    background-image: url('/pixel_hill_background.png');
+                    background-image: url('/pixel_modern_stage_background.png');
                     background-repeat: repeat-x;
                     background-size: auto 100%;
                     width: 4000px;
