@@ -14,6 +14,9 @@ export function Header() {
                     <Link href="/about" className="text-xs sm:text-sm font-medium transition-colors hover:text-primary whitespace-nowrap shrink-0">
                         학원 소개
                     </Link>
+                    <Link href="/world" className="text-xs sm:text-sm font-medium transition-colors hover:text-primary whitespace-nowrap shrink-0">
+                        위뮤직월드
+                    </Link>
                     <Link href="#classes" className="text-xs sm:text-sm font-medium transition-colors hover:text-primary whitespace-nowrap shrink-0">
                         수업 안내
                     </Link>
