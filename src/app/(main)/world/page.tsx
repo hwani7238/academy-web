@@ -181,19 +181,27 @@ export default function WorldPage() {
             <style jsx global>{`
                 @import url('https://cdn.jsdelivr.net/gh/projectnoonnu/noonfonts_six@1.2/DungGeunMo.css');
                 
-                @keyframes gentleBreath {
-                    0% { transform: scale(1.05) translate3d(0, 0, 0) rotate(0deg); }
-                    50% { transform: scale(1.12) translate3d(-1.5%, -1%, 0) rotate(0.6deg); }
-                    100% { transform: scale(1.05) translate3d(0, 0, 0) rotate(0deg); }
+                @keyframes rotate360 {
+                    0% { transform: translate3d(0, 0, 0); }
+                    100% { transform: translate3d(-100vw, 0, 0); }
                 }
                 .animate-scroll-bg {
+                    display: flex;
+                    width: 200vw;
+                    height: 100%;
+                    position: absolute;
+                    top: 0;
+                    left: 0;
+                    z-index: -20;
+                    animation: rotate360 80s linear infinite;
+                }
+                .bg-slide {
+                    width: 100vw;
+                    height: 100%;
                     background-image: url('/pixel_modern_stage_background.png');
                     background-size: cover;
                     background-position: center;
-                    position: absolute;
-                    inset: -5%;
-                    z-index: -20;
-                    animation: gentleBreath 30s ease-in-out infinite;
+                    flex-shrink: 0;
                 }
                 
                 @keyframes bounceSplash {
@@ -261,7 +269,10 @@ export default function WorldPage() {
             `}</style>
 
             {/* Seamless Voxel Grassy Hill Scrolling Background */}
-            <div className="animate-scroll-bg" />
+            <div className="animate-scroll-bg">
+                <div className="bg-slide" />
+                <div className="bg-slide" />
+            </div>
             <div className="absolute inset-0 bg-black/15 -z-10" />
 
             {/* Main Content Area */}
