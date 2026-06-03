@@ -181,21 +181,19 @@ export default function WorldPage() {
             <style jsx global>{`
                 @import url('https://cdn.jsdelivr.net/gh/projectnoonnu/noonfonts_six@1.2/DungGeunMo.css');
                 
-                @keyframes scrollBg {
-                    0% { transform: translate3d(0, 0, 0); }
-                    100% { transform: translate3d(-50%, 0, 0); }
+                @keyframes gentleBreath {
+                    0% { transform: scale(1.05) translate3d(0, 0, 0) rotate(0deg); }
+                    50% { transform: scale(1.12) translate3d(-1.5%, -1%, 0) rotate(0.6deg); }
+                    100% { transform: scale(1.05) translate3d(0, 0, 0) rotate(0deg); }
                 }
                 .animate-scroll-bg {
                     background-image: url('/pixel_modern_stage_background.png');
-                    background-repeat: repeat-x;
-                    background-size: auto 100%;
-                    width: 4000px;
-                    height: 100%;
+                    background-size: cover;
+                    background-position: center;
                     position: absolute;
-                    top: 0;
-                    left: 0;
+                    inset: -5%;
                     z-index: -20;
-                    animation: scrollBg 140s linear infinite;
+                    animation: gentleBreath 30s ease-in-out infinite;
                 }
                 
                 @keyframes bounceSplash {
