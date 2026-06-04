@@ -60,6 +60,35 @@ service cloud.firestore {
         request.resource.data.requestedAt is timestamp;
     }
 
+    function isAllowedReportViewUpdate() {
+      return request.auth == null &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'viewed',
+          'firstViewedAt',
+          'lastViewedAt',
+          'lastViewedUserAgent',
+          'viewCount'
+        ]) &&
+        request.resource.data.viewed == true &&
+        request.resource.data.lastViewedAt is timestamp &&
+        request.resource.data.lastViewedUserAgent is string &&
+        request.resource.data.lastViewedUserAgent.size() <= 300 &&
+        request.resource.data.viewCount is int &&
+        (
+          !('firstViewedAt' in request.resource.data) ||
+          request.resource.data.firstViewedAt is timestamp
+        );
+    }
+
+    match /students/{studentId}/logs/{logId} {
+      allow read: if true;
+      allow update: if isAllowedReportViewUpdate();
+    }
+
+    match /{path=**}/logs/{logId} {
+      allow read: if isStaff();
+    }
+
     match /students/{studentId} {
       allow read, write: if isStaff();
 
