@@ -45,6 +45,13 @@ export default function ReportPage() {
   const [report, setReport] = useState<PublicReport | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
+  const [isKakaoTalk, setIsKakaoTalk] = useState(false);
+
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      setIsKakaoTalk(/KAKAOTALK/i.test(navigator.userAgent));
+    }
+  }, []);
 
   useEffect(() => {
     const fetchData = async () => {
@@ -182,6 +189,18 @@ export default function ReportPage() {
           <div className="px-6 space-y-4">
             <h3 className="text-lg font-semibold -mb-1">첨부 미디어</h3>
 
+            {isKakaoTalk && (
+              <div className="rounded-lg bg-amber-50 border border-amber-200 p-4 text-xs text-amber-800 space-y-1">
+                <p className="font-semibold flex items-center gap-1">
+                  ⚠️ 카카오톡 다운로드 제한 안내
+                </p>
+                <p className="leading-relaxed">
+                  카카오톡 앱 내부에서는 파일 다운로드가 차단될 수 있습니다. 
+                  우측 하단 메뉴 버튼(점 3개 또는 나침반 아이콘)을 누른 후 <strong>{"'다른 브라우저로 열기'"}</strong> 또는 <strong>{"'Safari로 열기'"}</strong>를 선택하여 접속하신 후 다운로드해 주세요.
+                </p>
+              </div>
+            )}
+
             {report.mediaUrl && (
               <div className="rounded-lg border bg-white p-2">
                 {report.mediaTitle && <p className="mb-2 font-medium px-1">{report.mediaTitle}</p>}
@@ -191,7 +210,13 @@ export default function ReportPage() {
                   <div className="flex flex-col gap-2">
                     <video src={report.mediaUrl} controls className="w-full rounded" />
                     <div className="flex justify-end mt-1">
-                      <a href={report.mediaUrl} download target="_blank" rel="noreferrer" className="text-xs bg-slate-100 hover:bg-slate-200 text-slate-700 py-1.5 px-3 rounded inline-flex items-center gap-1 transition-colors">
+                      <a
+                        href={`/api/download?url=${encodeURIComponent(report.mediaUrl)}&filename=${encodeURIComponent(`${report.studentName || "학생"}_피드백_영상_${report.mediaTitle || "피아노연습"}.mp4`)}`}
+                        download
+                        target="_blank"
+                        rel="noreferrer"
+                        className="text-xs bg-slate-100 hover:bg-slate-200 text-slate-700 py-1.5 px-3 rounded inline-flex items-center gap-1 transition-colors"
+                      >
                         영상 다운로드
                       </a>
                     </div>
@@ -209,7 +234,13 @@ export default function ReportPage() {
                   <div className="flex flex-col gap-2">
                     <video src={media.url} controls className="w-full rounded" />
                     <div className="flex justify-end mt-1">
-                      <a href={media.url} download target="_blank" rel="noreferrer" className="text-xs bg-slate-100 hover:bg-slate-200 text-slate-700 py-1.5 px-3 rounded inline-flex items-center gap-1 transition-colors">
+                      <a
+                        href={`/api/download?url=${encodeURIComponent(media.url)}&filename=${encodeURIComponent(`${report.studentName || "학생"}_피드백_영상_${media.title || `연습영상_${idx + 1}`}.mp4`)}`}
+                        download
+                        target="_blank"
+                        rel="noreferrer"
+                        className="text-xs bg-slate-100 hover:bg-slate-200 text-slate-700 py-1.5 px-3 rounded inline-flex items-center gap-1 transition-colors"
+                      >
                         영상 다운로드
                       </a>
                     </div>
