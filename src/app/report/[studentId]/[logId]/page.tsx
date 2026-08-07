@@ -189,6 +189,15 @@ export default function ReportPage() {
           <div className="px-6 space-y-4">
             <h3 className="text-lg font-semibold -mb-1">첨부 미디어</h3>
 
+            <div className="rounded-lg bg-blue-50 border border-blue-200 p-4 text-xs text-blue-800 space-y-1">
+              <p className="font-semibold flex items-center gap-1">
+                ℹ️ 피드백 영상 보관 기간 안내
+              </p>
+              <p className="leading-relaxed text-blue-700">
+                피드백 영상은 개인정보 보호 및 서버 용량 관리를 위해 <strong>업로드 후 30일 동안만</strong> 시청 및 다운로드가 가능합니다. 중요한 영상은 기간 내에 다운로드하여 보관해 주세요.
+              </p>
+            </div>
+
             {isKakaoTalk && (
               <div className="rounded-lg bg-amber-50 border border-amber-200 p-4 text-xs text-amber-800 space-y-1">
                 <p className="font-semibold flex items-center gap-1">
@@ -211,8 +220,7 @@ export default function ReportPage() {
                     <video src={report.mediaUrl} controls className="w-full rounded" />
                     <div className="flex justify-end mt-1">
                       <a
-                        href={`/api/download?url=${encodeURIComponent(report.mediaUrl)}&filename=${encodeURIComponent(`${report.studentName || "학생"}_피드백_영상_${report.mediaTitle || "피아노연습"}.mp4`)}`}
-                        download
+                        href={report.mediaUrl}
                         target="_blank"
                         rel="noreferrer"
                         className="text-xs bg-slate-100 hover:bg-slate-200 text-slate-700 py-1.5 px-3 rounded inline-flex items-center gap-1 transition-colors"
@@ -235,8 +243,7 @@ export default function ReportPage() {
                     <video src={media.url} controls className="w-full rounded" />
                     <div className="flex justify-end mt-1">
                       <a
-                        href={`/api/download?url=${encodeURIComponent(media.url)}&filename=${encodeURIComponent(`${report.studentName || "학생"}_피드백_영상_${media.title || `연습영상_${idx + 1}`}.mp4`)}`}
-                        download
+                        href={media.url}
                         target="_blank"
                         rel="noreferrer"
                         className="text-xs bg-slate-100 hover:bg-slate-200 text-slate-700 py-1.5 px-3 rounded inline-flex items-center gap-1 transition-colors"
