@@ -94,14 +94,31 @@ export function TeacherManager() {
 
     const getAssignedStudentsWithSubjects = (teacherId: string) => {
         const list: { student: any; subject: string }[] = [];
+        const teacher = approvedTeachers.find(t => t.id === teacherId);
+        if (!teacher) return list;
+
+        const teacherSubjects = teacher.subjects || (teacher.subject ? [teacher.subject] : []);
+
         students.forEach(student => {
-            if (student.teachers) {
-                Object.entries(student.teachers).forEach(([subject, assignedId]) => {
+            const studentInstruments = student.instruments && student.instruments.length > 0
+                ? student.instruments
+                : (student.instrument ? [student.instrument] : []);
+
+            studentInstruments.forEach((subj: string) => {
+                // 피아노는 배정/이관에서 제외
+                if (subj === "피아노") return;
+
+                if (teacherSubjects.includes(subj)) {
+                    const assignedId = student.teachers?.[subj];
                     if (assignedId === teacherId) {
-                        list.push({ student, subject });
+                        // 명시적으로 본인에게 배정된 학생
+                        list.push({ student, subject: subj });
+                    } else if (!assignedId) {
+                        // 배정 정보가 없는 기존 레거시 학생인 경우 임시로 해당 과목 강사들에게 모두 노출
+                        list.push({ student, subject: subj });
                     }
-                });
-            }
+                }
+            });
         });
         return list;
     };
