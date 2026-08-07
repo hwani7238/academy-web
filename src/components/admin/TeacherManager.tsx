@@ -60,6 +60,12 @@ export function TeacherManager() {
     const [editPhone, setEditPhone] = useState("");
     const [editSubjects, setEditSubjects] = useState<string[]>([]);
 
+    // Students state for assignment view and transfer
+    const [students, setStudents] = useState<any[]>([]);
+    const [selectedTeacherForStudents, setSelectedTeacherForStudents] = useState<string | null>(null);
+    const [transferTargetId, setTransferTargetId] = useState<string>("");
+    const [transferLoading, setTransferLoading] = useState(false);
+
     useEffect(() => {
         const unsubscribe = onSnapshot(collection(db, "users"), (snapshot) => {
             const users: User[] = [];
@@ -71,6 +77,78 @@ export function TeacherManager() {
 
         return () => unsubscribe();
     }, []);
+
+    // Subscribe to students data
+    useEffect(() => {
+        const unsubscribe = onSnapshot(collection(db, "students"), (snapshot) => {
+            const studentsData: any[] = [];
+            snapshot.forEach((docSnapshot) => {
+                studentsData.push({ id: docSnapshot.id, ...docSnapshot.data() });
+            });
+            setStudents(studentsData);
+        }, (error) => {
+            console.error("Error fetching students for transfer:", error);
+        });
+        return () => unsubscribe();
+    }, []);
+
+    const getAssignedStudentsWithSubjects = (teacherId: string) => {
+        const list: { student: any; subject: string }[] = [];
+        students.forEach(student => {
+            if (student.teachers) {
+                Object.entries(student.teachers).forEach(([subject, assignedId]) => {
+                    if (assignedId === teacherId) {
+                        list.push({ student, subject });
+                    }
+                });
+            }
+        });
+        return list;
+    };
+
+    const handleTransferStudents = async (sourceTeacherId: string, subject: string) => {
+        if (!transferTargetId) {
+            alert("이관받을 강사를 선택해주세요.");
+            return;
+        }
+        const targetTeacher = approvedTeachers.find(t => t.id === transferTargetId);
+        if (!targetTeacher) return;
+
+        const targetSubjects = targetTeacher.subjects || (targetTeacher.subject ? [targetTeacher.subject] : []);
+        if (!targetSubjects.includes(subject)) {
+            if (!confirm(`선택한 강사(${targetTeacher.name})는 "${subject}" 과목 담당이 아닙니다. 그래도 이관하시겠습니까?`)) {
+                return;
+            }
+        }
+
+        if (!confirm(`이 강사의 모든 "${subject}" 학생들을 ${targetTeacher.name} 선생님에게 이관하시겠습니까?`)) {
+            return;
+        }
+
+        setTransferLoading(true);
+        try {
+            const assigned = getAssignedStudentsWithSubjects(sourceTeacherId).filter(item => item.subject === subject);
+            
+            const promises = assigned.map(item => {
+                const studentRef = doc(db, "students", item.student.id);
+                const updatedTeachers = {
+                    ...item.student.teachers,
+                    [subject]: transferTargetId
+                };
+                return updateDoc(studentRef, { teachers: updatedTeachers });
+            });
+
+            await Promise.all(promises);
+            alert(`총 ${assigned.length}명의 "${subject}" 학생들이 ${targetTeacher.name} 선생님에게 이관되었습니다.`);
+            setTransferTargetId("");
+            setSelectedTeacherForStudents(null);
+        } catch (error) {
+            console.error("Error transferring students:", error);
+            alert("이관 실패");
+        } finally {
+            setTransferLoading(false);
+        }
+    };
 
     const pendingTeachers = teachers.filter((teacher) => teacher.status === "pending");
     const approvedTeachers = teachers.filter((teacher) => teacher.status !== "pending" && teacher.status !== "rejected");
@@ -343,100 +421,190 @@ export function TeacherManager() {
                 <h4 className="mb-2 font-medium">승인된 강사 목록</h4>
                 <ul className="space-y-2">
                     {approvedTeachers.map((teacher) => (
-                        <li key={teacher.id} className="flex items-center justify-between rounded bg-slate-50 p-3 text-sm">
-                            {editingId === teacher.id ? (
-                                <div className="mr-2 grid flex-1 items-center gap-2 sm:grid-cols-3">
-                                    <input
-                                        className="h-8 rounded-md border px-2 text-sm"
-                                        value={editName}
-                                        onChange={(event) => setEditName(event.target.value)}
-                                        placeholder="이름"
-                                    />
-                                    <input
-                                        className="h-8 rounded-md border px-2 text-sm"
-                                        value={editPhone}
-                                        onChange={(event) => setEditPhone(event.target.value)}
-                                        placeholder="연락처"
-                                    />
-                                    <div className="col-span-1 sm:col-span-3">
-                                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs border rounded p-2 bg-white">
-                                            {TEACHER_SUBJECTS.map((item) => (
-                                                <div key={item} className="flex items-center space-x-1">
-                                                    <input
-                                                        type="checkbox"
-                                                        id={`edit-subject-${item}`}
-                                                        checked={editSubjects.includes(item)}
-                                                        onChange={(e) => {
-                                                            setEditSubjects(prev => 
-                                                                e.target.checked 
-                                                                    ? [...prev, item] 
-                                                                    : prev.filter(s => s !== item)
-                                                            );
-                                                        }}
-                                                        className="rounded border-gray-300 h-3 w-3"
-                                                    />
-                                                    <label htmlFor={`edit-subject-${item}`} className="cursor-pointer select-none truncate">
-                                                        {item}
-                                                    </label>
-                                                </div>
-                                            ))}
+                        <li key={teacher.id} className="flex flex-col rounded bg-slate-50 p-3 text-sm">
+                            <div className="flex items-center justify-between w-full">
+                                {editingId === teacher.id ? (
+                                    <div className="mr-2 grid flex-1 items-center gap-2 sm:grid-cols-3">
+                                        <input
+                                            className="h-8 rounded-md border px-2 text-sm"
+                                            value={editName}
+                                            onChange={(event) => setEditName(event.target.value)}
+                                            placeholder="이름"
+                                        />
+                                        <input
+                                            className="h-8 rounded-md border px-2 text-sm"
+                                            value={editPhone}
+                                            onChange={(event) => setEditPhone(event.target.value)}
+                                            placeholder="연락처"
+                                        />
+                                        <div className="col-span-1 sm:col-span-3">
+                                            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs border rounded p-2 bg-white">
+                                                {TEACHER_SUBJECTS.map((item) => (
+                                                    <div key={item} className="flex items-center space-x-1">
+                                                        <input
+                                                            type="checkbox"
+                                                            id={`edit-subject-${item}`}
+                                                            checked={editSubjects.includes(item)}
+                                                            onChange={(e) => {
+                                                                setEditSubjects(prev => 
+                                                                    e.target.checked 
+                                                                        ? [...prev, item] 
+                                                                        : prev.filter(s => s !== item)
+                                                                );
+                                                            }}
+                                                            className="rounded border-gray-300 h-3 w-3"
+                                                        />
+                                                        <label htmlFor={`edit-subject-${item}`} className="cursor-pointer select-none truncate">
+                                                            {item}
+                                                        </label>
+                                                    </div>
+                                                ))}
+                                            </div>
                                         </div>
                                     </div>
+                                ) : (
+                                    <div>
+                                        <span className="font-bold">{teacher.name}</span>
+                                        <span className="ml-2 text-sm text-slate-600">
+                                            ({teacher.subjects && teacher.subjects.length > 0 ? teacher.subjects.join(", ") : (teacher.subject || "과목 미지정")})
+                                        </span>
+                                        <span className="ml-2 text-slate-500">
+                                            {teacher.phone ? ` ${teacher.phone}` : ""}
+                                        </span>
+                                        <span className="ml-2 text-xs text-slate-400">{teacher.email}</span>
+                                    </div>
+                                )}
+
+                                <div className="flex items-center gap-1">
+                                    {editingId === teacher.id ? (
+                                        <>
+                                            <Button
+                                                variant="ghost"
+                                                size="sm"
+                                                onClick={() => saveEdit(teacher.id)}
+                                                className="font-medium text-green-600"
+                                            >
+                                                저장
+                                            </Button>
+                                            <Button
+                                                variant="ghost"
+                                                size="sm"
+                                                onClick={cancelEdit}
+                                                className="font-medium text-slate-500"
+                                            >
+                                                취소
+                                            </Button>
+                                        </>
+                                    ) : (
+                                        <>
+                                            <Button
+                                                variant="ghost"
+                                                size="sm"
+                                                onClick={() => {
+                                                    setSelectedTeacherForStudents(
+                                                        selectedTeacherForStudents === teacher.id ? null : teacher.id
+                                                    );
+                                                    setTransferTargetId("");
+                                                }}
+                                                className={`h-8 font-medium ${
+                                                    selectedTeacherForStudents === teacher.id 
+                                                        ? "text-indigo-600 bg-indigo-50 font-bold px-2 rounded" 
+                                                        : "text-slate-600"
+                                                }`}
+                                            >
+                                                {selectedTeacherForStudents === teacher.id ? "닫기" : "학생 조회"}
+                                            </Button>
+                                            <Button
+                                                variant="ghost"
+                                                size="sm"
+                                                onClick={() => startEdit(teacher)}
+                                                className="h-8 font-medium text-blue-500"
+                                            >
+                                                수정
+                                            </Button>
+                                            <Button
+                                                variant="ghost"
+                                                size="sm"
+                                                onClick={() => handleDelete(teacher.id)}
+                                                className="h-8 font-medium text-red-500"
+                                            >
+                                                삭제
+                                            </Button>
+                                        </>
+                                    )}
                                 </div>
-                            ) : (
-                                <div>
-                                    <span className="font-bold">{teacher.name}</span>
-                                    <span className="ml-2 text-sm text-slate-600">
-                                        ({teacher.subjects && teacher.subjects.length > 0 ? teacher.subjects.join(", ") : (teacher.subject || "과목 미지정")})
-                                    </span>
-                                    <span className="ml-2 text-slate-500">
-                                        {teacher.phone ? ` ${teacher.phone}` : ""}
-                                    </span>
-                                    <span className="ml-2 text-xs text-slate-400">{teacher.email}</span>
+                            </div>
+
+                            {/* 담당 학생 및 일괄 이관 UI */}
+                            {selectedTeacherForStudents === teacher.id && (
+                                <div className="mt-3 border-t pt-3 w-full bg-white p-3 rounded border text-left">
+                                    <h5 className="font-semibold text-xs text-slate-700 mb-2">담당 학생 목록 및 이관</h5>
+                                    {(() => {
+                                        const assignedList = getAssignedStudentsWithSubjects(teacher.id);
+                                        const subjectsMap: { [sub: string]: any[] } = {};
+                                        assignedList.forEach(item => {
+                                            if (!subjectsMap[item.subject]) {
+                                                subjectsMap[item.subject] = [];
+                                            }
+                                            subjectsMap[item.subject].push(item.student);
+                                        });
+
+                                        const subjectKeys = Object.keys(subjectsMap);
+
+                                        if (subjectKeys.length === 0) {
+                                            return <p className="text-xs text-slate-500 py-2">담당하고 있는 학생이 없습니다.</p>;
+                                        }
+
+                                        return (
+                                            <div className="space-y-4">
+                                                {subjectKeys.map(subj => {
+                                                    const list = subjectsMap[subj];
+                                                    const candidateTeachers = approvedTeachers.filter(t => 
+                                                        t.id !== teacher.id && 
+                                                        (t.subjects?.includes(subj) || t.subject === subj)
+                                                    );
+
+                                                    return (
+                                                        <div key={subj} className="border rounded p-2 bg-slate-50/50">
+                                                            <div className="flex items-center justify-between border-b pb-1 mb-2">
+                                                                <span className="font-bold text-xs text-blue-600">[{subj}] 수강생 ({list.length}명)</span>
+                                                            </div>
+                                                            <ul className="space-y-1 max-h-32 overflow-y-auto mb-2 pr-1">
+                                                                {list.map(std => (
+                                                                    <li key={std.id} className="text-xs text-slate-600 flex justify-between bg-white px-2 py-0.5 rounded border">
+                                                                        <span>{std.name}</span>
+                                                                        <span className="text-[10px] text-slate-400">{std.phone}</span>
+                                                                    </li>
+                                                                ))}
+                                                            </ul>
+                                                            <div className="flex items-center gap-2 mt-2">
+                                                                <select
+                                                                    className="h-8 rounded border text-xs px-2 bg-white flex-1"
+                                                                    value={transferTargetId}
+                                                                    onChange={(e) => setTransferTargetId(e.target.value)}
+                                                                >
+                                                                    <option value="">이관받을 새 선생님 선택</option>
+                                                                    {candidateTeachers.map(t => (
+                                                                        <option key={t.id} value={t.id}>{t.name} ({t.email})</option>
+                                                                    ))}
+                                                                </select>
+                                                                <Button
+                                                                    size="sm"
+                                                                    disabled={transferLoading || !transferTargetId}
+                                                                    onClick={() => handleTransferStudents(teacher.id, subj)}
+                                                                    className="h-8 text-xs font-semibold px-3 bg-indigo-600 hover:bg-indigo-700 text-white"
+                                                                >
+                                                                    {transferLoading ? "이관 중..." : "일괄 이관"}
+                                                                </Button>
+                                                            </div>
+                                                        </div>
+                                                    );
+                                                })}
+                                            </div>
+                                        );
+                                    })()}
                                 </div>
                             )}
-
-                            <div className="flex items-center gap-1">
-                                {editingId === teacher.id ? (
-                                    <>
-                                        <Button
-                                            variant="ghost"
-                                            size="sm"
-                                            onClick={() => saveEdit(teacher.id)}
-                                            className="font-medium text-green-600"
-                                        >
-                                            저장
-                                        </Button>
-                                        <Button
-                                            variant="ghost"
-                                            size="sm"
-                                            onClick={cancelEdit}
-                                            className="font-medium text-slate-500"
-                                        >
-                                            취소
-                                        </Button>
-                                    </>
-                                ) : (
-                                    <>
-                                        <Button
-                                            variant="ghost"
-                                            size="sm"
-                                            onClick={() => startEdit(teacher)}
-                                            className="h-8 font-medium text-blue-500"
-                                        >
-                                            수정
-                                        </Button>
-                                        <Button
-                                            variant="ghost"
-                                            size="sm"
-                                            onClick={() => handleDelete(teacher.id)}
-                                            className="h-8 font-medium text-red-500"
-                                        >
-                                            삭제
-                                        </Button>
-                                    </>
-                                )}
-                            </div>
                         </li>
                     ))}
 

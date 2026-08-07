@@ -13,6 +13,7 @@ export interface Student {
     phone: string;
     instrument?: string; // Legacy support
     instruments?: string[]; // New multi-subject support
+    teachers?: { [subject: string]: string }; // Subject-to-teacher ID mapping
     status: string;
     progress?: string;
     feedback?: string;
@@ -30,9 +31,30 @@ export function StudentManager({ currentUser, onViewModeChange }: StudentManager
     const [phone, setPhone] = useState("");
     // New state for multi-selection
     const [selectedInstruments, setSelectedInstruments] = useState<string[]>([]);
+    const [teachers, setTeachers] = useState<any[]>([]);
+    const [selectedTeachers, setSelectedTeachers] = useState<{ [subject: string]: string }>({});
+    const [editTeachers, setEditTeachers] = useState<{ [subject: string]: string }>({});
 
     const [loading, setLoading] = useState(false);
     const [selectedStudent, setSelectedStudent] = useState<Student | null>(null);
+
+    // Fetch teachers for assignment
+    useEffect(() => {
+        const q = query(collection(db, "users"), where("role", "==", "teacher"));
+        const unsubscribe = onSnapshot(q, (snapshot) => {
+            const teachersData: any[] = [];
+            snapshot.forEach((doc) => {
+                const data = doc.data();
+                if (data.status === "approved" || !data.status) {
+                    teachersData.push({ id: doc.id, ...data });
+                }
+            });
+            setTeachers(teachersData);
+        }, (error) => {
+            console.error("Error fetching teachers:", error);
+        });
+        return () => unsubscribe();
+    }, []);
 
     // Edit state
     const [editingId, setEditingId] = useState<string | null>(null);
@@ -79,19 +101,37 @@ export function StudentManager({ currentUser, onViewModeChange }: StudentManager
     }, [currentUser]);
 
     const handleInstrumentToggle = (instrument: string) => {
-        setSelectedInstruments(prev =>
-            prev.includes(instrument)
+        setSelectedInstruments(prev => {
+            const next = prev.includes(instrument)
                 ? prev.filter(i => i !== instrument)
-                : [...prev, instrument]
-        );
+                : [...prev, instrument];
+            
+            if (prev.includes(instrument)) {
+                setSelectedTeachers(prevT => {
+                    const copy = { ...prevT };
+                    delete copy[instrument];
+                    return copy;
+                });
+            }
+            return next;
+        });
     };
 
     const handleEditInstrumentToggle = (instrument: string) => {
-        setEditInstruments(prev =>
-            prev.includes(instrument)
+        setEditInstruments(prev => {
+            const next = prev.includes(instrument)
                 ? prev.filter(i => i !== instrument)
-                : [...prev, instrument]
-        );
+                : [...prev, instrument];
+            
+            if (prev.includes(instrument)) {
+                setEditTeachers(prevT => {
+                    const copy = { ...prevT };
+                    delete copy[instrument];
+                    return copy;
+                });
+            }
+            return next;
+        });
     };
 
     const handleAddStudent = async (e: React.FormEvent) => {
@@ -111,6 +151,7 @@ export function StudentManager({ currentUser, onViewModeChange }: StudentManager
                 // Keep legitimate legacy field or primary instrument for simple queries if needed, 
                 // but moving forward 'instruments' is source of truth.
                 instrument: selectedInstruments[0],
+                teachers: selectedTeachers,
                 status: "등록",
                 createdAt: new Date(),
             });
@@ -118,6 +159,7 @@ export function StudentManager({ currentUser, onViewModeChange }: StudentManager
             setName("");
             setPhone("");
             setSelectedInstruments([]);
+            setSelectedTeachers({});
         } catch (error) {
             console.error("Error adding student: ", error);
             alert("학생 등록 실패");
@@ -146,6 +188,7 @@ export function StudentManager({ currentUser, onViewModeChange }: StudentManager
             ? student.instruments
             : (student.instrument ? [student.instrument] : []);
         setEditInstruments(currentInstruments);
+        setEditTeachers(student.teachers || {});
     };
 
     const cancelEdit = (e: React.MouseEvent) => {
@@ -165,7 +208,8 @@ export function StudentManager({ currentUser, onViewModeChange }: StudentManager
                 name: editName,
                 phone: editPhone,
                 instruments: editInstruments,
-                instrument: editInstruments[0] // Update legacy field to primary
+                instrument: editInstruments[0], // Update legacy field to primary
+                teachers: editTeachers
             });
             setEditingId(null);
         } catch (error) {
@@ -196,7 +240,16 @@ export function StudentManager({ currentUser, onViewModeChange }: StudentManager
             
             if (teacherSubjects.length === 0) return false;
 
-            const hasMatchingInstrument = teacherSubjects.some((subj: string) => studentInstruments.includes(subj));
+            const hasMatchingInstrument = teacherSubjects.some((subj: string) => {
+                if (!studentInstruments.includes(subj)) return false;
+                
+                // 피아노 과목은 전체 공유 계정을 사용하므로 개별 강사 필터링 제외
+                if (subj === "피아노") return true;
+
+                const assignedTeacherId = student.teachers?.[subj];
+                // 담당 강사로 본인이 지정되어 있거나, 아직 강사가 지정되지 않은 레거시 데이터인 경우 통과
+                return !assignedTeacherId || assignedTeacherId === currentUser.uid;
+            });
             if (!hasMatchingInstrument) return false;
         }
 
@@ -263,6 +316,40 @@ export function StudentManager({ currentUser, onViewModeChange }: StudentManager
                             ))}
                         </div>
                     </div>
+                    {/* 과목별 담당 강사 지정 UI (피아노 제외) */}
+                    {selectedInstruments.filter(inst => inst !== "피아노").length > 0 && (
+                        <div className="grid gap-2 border rounded-md p-3 bg-slate-50">
+                            <label className="text-xs font-semibold text-slate-600">과목별 담당 강사 지정</label>
+                            {selectedInstruments
+                                .filter(inst => inst !== "피아노")
+                                .map((inst) => {
+                                    const subjectTeachers = teachers.filter(t => 
+                                        t.subjects?.includes(inst) || t.subject === inst
+                                    );
+                                    return (
+                                        <div key={inst} className="flex items-center justify-between gap-2">
+                                            <span className="text-xs font-medium text-slate-700">{inst} 담당:</span>
+                                            <select
+                                                className="h-8 rounded-md border border-input px-2 text-xs bg-white w-48"
+                                                value={selectedTeachers[inst] || ""}
+                                                onChange={(e) => {
+                                                    const val = e.target.value;
+                                                    setSelectedTeachers(prev => ({
+                                                        ...prev,
+                                                        [inst]: val
+                                                    }));
+                                                }}
+                                            >
+                                                <option value="">선택 안함</option>
+                                                {subjectTeachers.map(t => (
+                                                    <option key={t.id} value={t.id}>{t.name} ({t.email})</option>
+                                                ))}
+                                            </select>
+                                        </div>
+                                    );
+                                })}
+                        </div>
+                    )}
                     <Button type="submit" className="w-full" disabled={loading}>
                         {loading ? "등록 중..." : "학생 등록"}
                     </Button>
@@ -341,6 +428,38 @@ export function StudentManager({ currentUser, onViewModeChange }: StudentManager
                                                             </div>
                                                         ))}
                                                     </div>
+                                                    {/* 담당 강사 수정 UI (피아노 제외) */}
+                                                    {editInstruments.filter(inst => inst !== "피아노").length > 0 && (
+                                                        <div className="col-span-2 border rounded p-2 bg-slate-50 space-y-2 mt-1 w-full text-left" onClick={(e) => e.stopPropagation()}>
+                                                            <p className="text-[11px] font-semibold text-slate-600">담당 강사 수정</p>
+                                                            {editInstruments.filter(inst => inst !== "피아노").map(inst => {
+                                                                const subjectTeachers = teachers.filter(t => 
+                                                                    t.subjects?.includes(inst) || t.subject === inst
+                                                                );
+                                                                return (
+                                                                    <div key={inst} className="flex items-center justify-between text-xs">
+                                                                        <span className="text-[11px] font-medium text-slate-700">{inst} 담당:</span>
+                                                                        <select
+                                                                            className="h-7 rounded border px-1 text-xs bg-white w-36"
+                                                                            value={editTeachers[inst] || ""}
+                                                                            onChange={(e) => {
+                                                                                const val = e.target.value;
+                                                                                setEditTeachers(prev => ({
+                                                                                    ...prev,
+                                                                                    [inst]: val
+                                                                                }));
+                                                                            }}
+                                                                        >
+                                                                            <option value="">선택 안함</option>
+                                                                            {subjectTeachers.map(t => (
+                                                                                <option key={t.id} value={t.id}>{t.name}</option>
+                                                                            ))}
+                                                                        </select>
+                                                                    </div>
+                                                                );
+                                                            })}
+                                                        </div>
+                                                    )}
                                                 </div>
                                             ) : (
                                                 <div className="flex-1">
