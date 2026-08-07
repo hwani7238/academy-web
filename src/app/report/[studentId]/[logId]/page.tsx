@@ -194,7 +194,7 @@ export default function ReportPage() {
                 ℹ️ 피드백 영상 보관 기간 안내
               </p>
               <p className="leading-relaxed text-blue-700">
-                피드백 영상은 개인정보 보호 및 서버 용량 관리를 위해 <strong>업로드 후 30일 동안만</strong> 시청 및 다운로드가 가능합니다. 중요한 영상은 기간 내에 다운로드하여 보관해 주세요.
+                피드백 영상은 개인정보 보호를 위해 <strong>업로드 후 30일 동안만</strong> 시청 및 다운로드가 가능합니다. 중요한 영상은 기간 내에 다운로드하여 보관해 주세요.
               </p>
             </div>
 
