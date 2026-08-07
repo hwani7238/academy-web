@@ -65,6 +65,7 @@ export function TeacherManager() {
     const [selectedTeacherForStudents, setSelectedTeacherForStudents] = useState<string | null>(null);
     const [transferTargetId, setTransferTargetId] = useState<string>("");
     const [transferLoading, setTransferLoading] = useState(false);
+    const [selectedStudentIds, setSelectedStudentIds] = useState<string[]>([]);
 
     useEffect(() => {
         const unsubscribe = onSnapshot(collection(db, "users"), (snapshot) => {
@@ -123,7 +124,19 @@ export function TeacherManager() {
         return list;
     };
 
+    const handleStudentSelectToggle = (studentId: string) => {
+        setSelectedStudentIds(prev => 
+            prev.includes(studentId)
+                ? prev.filter(id => id !== studentId)
+                : [...prev, studentId]
+        );
+    };
+
     const handleTransferStudents = async (sourceTeacherId: string, subject: string) => {
+        if (selectedStudentIds.length === 0) {
+            alert("이관할 학생을 최소 한 명 선택해주세요.");
+            return;
+        }
         if (!transferTargetId) {
             alert("이관받을 강사를 선택해주세요.");
             return;
@@ -138,13 +151,15 @@ export function TeacherManager() {
             }
         }
 
-        if (!confirm(`이 강사의 모든 "${subject}" 학생들을 ${targetTeacher.name} 선생님에게 이관하시겠습니까?`)) {
+        if (!confirm(`선택한 ${selectedStudentIds.length}명의 학생들을 ${targetTeacher.name} 선생님에게 이관하시겠습니까?`)) {
             return;
         }
 
         setTransferLoading(true);
         try {
-            const assigned = getAssignedStudentsWithSubjects(sourceTeacherId).filter(item => item.subject === subject);
+            const assigned = getAssignedStudentsWithSubjects(sourceTeacherId).filter(item => 
+                item.subject === subject && selectedStudentIds.includes(item.student.id)
+            );
             
             const promises = assigned.map(item => {
                 const studentRef = doc(db, "students", item.student.id);
@@ -156,8 +171,9 @@ export function TeacherManager() {
             });
 
             await Promise.all(promises);
-            alert(`총 ${assigned.length}명의 "${subject}" 학생들이 ${targetTeacher.name} 선생님에게 이관되었습니다.`);
+            alert(`총 ${assigned.length}명의 학생들이 ${targetTeacher.name} 선생님에게 이관되었습니다.`);
             setTransferTargetId("");
+            setSelectedStudentIds([]);
             setSelectedTeacherForStudents(null);
         } catch (error) {
             console.error("Error transferring students:", error);
@@ -605,14 +621,46 @@ export function TeacherManager() {
                                                         <div key={subj} className="border rounded p-2 bg-slate-50/50">
                                                             <div className="flex items-center justify-between border-b pb-1 mb-2">
                                                                 <span className="font-bold text-xs text-blue-600">[{subj}] 수강생 ({list.length}명)</span>
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() => {
+                                                                        const allIds = list.map(std => std.id);
+                                                                        const isAllSelected = allIds.every(id => selectedStudentIds.includes(id));
+                                                                        if (isAllSelected) {
+                                                                            setSelectedStudentIds(prev => prev.filter(id => !allIds.includes(id)));
+                                                                        } else {
+                                                                            setSelectedStudentIds(prev => [...new Set([...prev, ...allIds])]);
+                                                                        }
+                                                                    }}
+                                                                    className="text-[10px] text-slate-500 hover:text-slate-700 underline font-medium"
+                                                                >
+                                                                    {list.every(std => selectedStudentIds.includes(std.id)) ? "전체 해제" : "전체 선택"}
+                                                                </button>
                                                             </div>
                                                             <ul className="space-y-1 max-h-32 overflow-y-auto mb-2 pr-1">
-                                                                {list.map(std => (
-                                                                    <li key={std.id} className="text-xs text-slate-600 flex justify-between bg-white px-2 py-0.5 rounded border">
-                                                                        <span>{std.name}</span>
-                                                                        <span className="text-[10px] text-slate-400">{std.phone}</span>
-                                                                    </li>
-                                                                ))}
+                                                                {list.map(std => {
+                                                                    const isSelected = selectedStudentIds.includes(std.id);
+                                                                    return (
+                                                                        <li 
+                                                                            key={std.id} 
+                                                                            onClick={() => handleStudentSelectToggle(std.id)}
+                                                                            className={`text-xs flex items-center justify-between px-2 py-1 rounded border cursor-pointer select-none transition-colors ${
+                                                                                isSelected ? "bg-indigo-50 border-indigo-200 text-indigo-900" : "bg-white text-slate-600 hover:bg-slate-100"
+                                                                            }`}
+                                                                        >
+                                                                            <div className="flex items-center gap-2">
+                                                                                <input
+                                                                                    type="checkbox"
+                                                                                    checked={isSelected}
+                                                                                    onChange={() => {}}
+                                                                                    className="rounded border-gray-300 pointer-events-none"
+                                                                                />
+                                                                                <span className="font-medium">{std.name}</span>
+                                                                            </div>
+                                                                            <span className="text-[10px] text-slate-400">{std.phone}</span>
+                                                                        </li>
+                                                                    );
+                                                                })}
                                                             </ul>
                                                             <div className="flex items-center gap-2 mt-2">
                                                                 <select
@@ -627,11 +675,11 @@ export function TeacherManager() {
                                                                 </select>
                                                                 <Button
                                                                     size="sm"
-                                                                    disabled={transferLoading || !transferTargetId}
+                                                                    disabled={transferLoading || !transferTargetId || selectedStudentIds.length === 0}
                                                                     onClick={() => handleTransferStudents(teacher.id, subj)}
                                                                     className="h-8 text-xs font-semibold px-3 bg-indigo-600 hover:bg-indigo-700 text-white"
                                                                 >
-                                                                    {transferLoading ? "이관 중..." : "일괄 이관"}
+                                                                    {transferLoading ? "이관 중..." : `선택 이관 (${selectedStudentIds.filter(id => list.some(std => std.id === id)).length}명)`}
                                                                 </Button>
                                                             </div>
                                                         </div>
