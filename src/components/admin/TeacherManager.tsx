@@ -295,13 +295,33 @@ export function TeacherManager() {
     };
 
     const handleDelete = async (id: string) => {
-        if (!confirm("강사 프로필을 삭제하시겠습니까? Auth 계정은 별도로 남을 수 있습니다.")) return;
+        if (!confirm("강사 프로필을 삭제하시겠습니까? 이 강사에게 배정된 학생들은 모두 미배정 상태로 변경됩니다. (Auth 계정은 별도로 남을 수 있습니다.)")) return;
 
+        setLoading(true);
         try {
+            // 1. 이 강사에게 배정된 모든 학생을 찾아 배정 정보 제거 (미배정 상태로 전환)
+            const assignedList = getAssignedStudentsWithSubjects(id);
+            
+            const promises = assignedList.map(item => {
+                const studentRef = doc(db, "students", item.student.id);
+                const updatedTeachers = { ...item.student.teachers };
+                
+                // 해당 과목의 담당 강사 매핑 삭제
+                delete updatedTeachers[item.subject];
+                
+                return updateDoc(studentRef, { teachers: updatedTeachers });
+            });
+
+            await Promise.all(promises);
+
+            // 2. 강사 프로필 삭제
             await deleteDoc(doc(db, "users", id));
+            alert("강사 프로필이 삭제되었으며, 담당 학생들은 미배정 상태로 변경되었습니다.");
         } catch (error) {
-            console.error("Error deleting teacher doc:", error);
+            console.error("Error deleting teacher and unassigning students:", error);
             alert("삭제 실패");
+        } finally {
+            setLoading(false);
         }
     };
 
