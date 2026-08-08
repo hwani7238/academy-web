@@ -33,6 +33,7 @@ interface PublicReport {
   additionalTextbookImageUrl?: string;
   textbookImages?: { url: string; path: string }[];
   mediaFiles?: { url: string; type: string; path: string; title?: string }[];
+  videoExpired?: boolean;
 }
 
 export default function ReportPage() {
@@ -184,6 +185,16 @@ export default function ReportPage() {
             {report.feedback}
           </div>
         </div>
+
+        {report.videoExpired && (
+          <div className="px-6 pb-6">
+            <h3 className="text-lg font-semibold mb-4">첨부 미디어</h3>
+            <div className="rounded-lg bg-slate-100 border border-slate-200 p-6 text-sm text-slate-500 text-center flex flex-col items-center justify-center gap-2">
+              <span className="text-2xl">⏳</span>
+              <p>보관 기간(30일)이 만료되어 삭제된 영상입니다.</p>
+            </div>
+          </div>
+        )}
 
         {(report.mediaUrl || (report.mediaFiles && report.mediaFiles.length > 0)) && (
           <div className="px-6 space-y-4">

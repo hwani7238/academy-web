@@ -45,6 +45,7 @@ interface FeedbackLog {
     viewCount?: number;
     textbookImageUrl?: string;
     textbookImages?: { url: string; path: string }[];
+    videoExpired?: boolean;
 }
 
 const getDateValue = (timestamp: FirestoreDate) => {
@@ -493,6 +494,13 @@ export function FeedbackList({ filterSubjects }: FeedbackListProps) {
                                 <span className="mb-2 block text-xs font-medium text-slate-500">피드백 내용</span>
                                 <p className="whitespace-pre-wrap leading-relaxed">{selectedLog.feedback}</p>
                             </div>
+
+                            {selectedLog.videoExpired && (
+                                <div className="mt-3 p-4 bg-slate-100 rounded-lg text-center text-slate-500 text-sm">
+                                    <span className="text-xl block mb-1">⏳</span>
+                                    보관 기간(30일)이 만료되어 삭제된 영상입니다.
+                                </div>
+                            )}
 
                             {(selectedLog.mediaUrl || (selectedLog.mediaFiles && selectedLog.mediaFiles.length > 0)) && (
                                 <div className="space-y-4">

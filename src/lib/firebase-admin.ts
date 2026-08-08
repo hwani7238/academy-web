@@ -1,6 +1,7 @@
 import { applicationDefault, cert, getApp, getApps, initializeApp } from "firebase-admin/app";
 import { getAuth } from "firebase-admin/auth";
 import { getFirestore } from "firebase-admin/firestore";
+import { getStorage } from "firebase-admin/storage";
 
 function cleanPrivateKey(key: string | undefined): string | undefined {
     if (!key) return undefined;
@@ -56,3 +57,4 @@ const adminApp = getAdminApp();
 
 export const adminAuth = adminApp ? getAuth(adminApp) : null;
 export const adminDb = adminApp ? getFirestore(adminApp) : null;
+export const adminStorage = adminApp ? getStorage(adminApp) : null;

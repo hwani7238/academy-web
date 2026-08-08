@@ -22,6 +22,7 @@ interface LearningLog {
     reportToken?: string;
     mediaFiles?: { url: string; type: string; path: string; title?: string }[];
     textbookImages?: { url: string; path: string }[];
+    videoExpired?: boolean;
 }
 
 interface Match {
@@ -492,7 +493,7 @@ export default function WorldPage() {
                                     )}
 
                                     {/* Media previews inside log widget */}
-                                    {((log.textbookImages && log.textbookImages.length > 0) || (log.mediaFiles && log.mediaFiles.length > 0)) && (
+                                    {((log.textbookImages && log.textbookImages.length > 0) || (log.mediaFiles && log.mediaFiles.length > 0) || log.videoExpired) && (
                                         <div className="flex gap-2 flex-wrap mt-3 text-xs text-slate-500">
                                             {log.textbookImages && log.textbookImages.length > 0 && (
                                                 <span className="flex items-center gap-1 bg-slate-100 rounded-full py-1 px-2.5">
@@ -504,6 +505,12 @@ export default function WorldPage() {
                                                 <span className="flex items-center gap-1 bg-slate-100 rounded-full py-1 px-2.5">
                                                     <Film className="h-3.5 w-3.5 text-slate-400" />
                                                     미디어 파일 {log.mediaFiles.length}개
+                                                </span>
+                                            )}
+                                            {log.videoExpired && (
+                                                <span className="flex items-center gap-1 bg-slate-100 rounded-full py-1 px-2.5 text-orange-500">
+                                                    <Film className="h-3.5 w-3.5" />
+                                                    영상 만료됨
                                                 </span>
                                             )}
                                         </div>

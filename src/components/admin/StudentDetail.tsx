@@ -52,6 +52,7 @@ interface LearningLog {
     additionalTextbookImageUrl?: string; // legacy
     additionalTextbookImagePath?: string; // legacy
     textbookImages?: { url: string; path: string }[];
+    videoExpired?: boolean;
 }
 
 interface StudentDetailProps {
@@ -593,6 +594,12 @@ export function StudentDetail({ student, onBack, currentUser }: StudentDetailPro
                                         {log.feedback && (
                                             <div className="p-2 bg-white rounded border">
                                                 <p className="whitespace-pre-wrap">{log.feedback}</p>
+                                            </div>
+                                        )}
+                                        {log.videoExpired && (
+                                            <div className="mt-3 p-4 bg-slate-100 rounded-lg text-center text-slate-500 text-sm">
+                                                <span className="text-xl block mb-1">⏳</span>
+                                                보관 기간(30일)이 만료되어 삭제된 영상입니다.
                                             </div>
                                         )}
                                         {(log.mediaUrl || (log.mediaFiles && log.mediaFiles.length > 0)) && (
