@@ -6,8 +6,10 @@ export function useVisitorCounter() {
     const [todayCount, setTodayCount] = useState<number | null>(null);
 
     useEffect(() => {
-        // Basic date string for "today" in YYYY-MM-DD
-        const today = new Date().toISOString().split('T')[0];
+        // Get today's date in KST (UTC+9)
+        const now = new Date();
+        const kstTime = new Date(now.getTime() + 9 * 60 * 60 * 1000);
+        const today = kstTime.toISOString().split('T')[0];
         const docRef = doc(db, 'daily_stats', today);
 
         // Increment count on mount (once per session ideally, but simple increment for now)

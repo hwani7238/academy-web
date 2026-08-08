@@ -102,5 +102,10 @@ service cloud.firestore {
       allow read, create, update, delete: if isAdmin();
       allow create: if isValidTeacherSignup(userId);
     }
+
+    match /daily_stats/{date} {
+      allow read: if true;
+      allow write: if true;
+    }
   }
 }
