@@ -231,7 +231,8 @@ export default function ReportPage() {
                     <video src={report.mediaUrl} controls className="w-full rounded" />
                     <div className="flex justify-end mt-1">
                       <a
-                        href={report.mediaUrl}
+                        href={`https://academy-website-7a3e1.web.app/api/download?url=${encodeURIComponent(report.mediaUrl)}&filename=${encodeURIComponent(`${report.studentName || "학생"}_피드백_영상_${report.mediaTitle || "피아노연습"}.mp4`)}`}
+                        download
                         target="_blank"
                         rel="noreferrer"
                         className="text-xs bg-slate-100 hover:bg-slate-200 text-slate-700 py-1.5 px-3 rounded inline-flex items-center gap-1 transition-colors"
@@ -254,7 +255,8 @@ export default function ReportPage() {
                     <video src={media.url} controls className="w-full rounded" />
                     <div className="flex justify-end mt-1">
                       <a
-                        href={media.url}
+                        href={`https://academy-website-7a3e1.web.app/api/download?url=${encodeURIComponent(media.url)}&filename=${encodeURIComponent(`${report.studentName || "학생"}_피드백_영상_${media.title || `연습영상_${idx + 1}`}.mp4`)}`}
+                        download
                         target="_blank"
                         rel="noreferrer"
                         className="text-xs bg-slate-100 hover:bg-slate-200 text-slate-700 py-1.5 px-3 rounded inline-flex items-center gap-1 transition-colors"
