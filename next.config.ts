@@ -49,7 +49,7 @@ const nextConfig: NextConfig = {
     const managementHost = [{ type: 'host' as const, value: 'manage.wheemusic.com' }];
     return {
       beforeFiles: [
-        { source: '/', has: managementHost, destination: '/operations' },
+        { source: '/', has: managementHost, destination: '/login' },
         { source: '/demo', has: managementHost, destination: '/operations/demo' },
       ],
       afterFiles: [],
