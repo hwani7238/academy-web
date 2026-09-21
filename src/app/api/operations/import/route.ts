@@ -1,6 +1,6 @@
 import { database, manager, sameOrigin, failure, hash } from '@/lib/operations/auth';
 import { seoulDay } from '@/lib/operations/model';
-import { enrollmentId, studentSubjects } from '@/lib/operations/service';
+import { enrollmentId, studentSubjects, resolveImportedSubjects } from '@/lib/operations/service';
 export const runtime = 'nodejs';
 export const maxDuration = 60;
 const normal = (v: unknown) => String(v || '').replace(/\s+|님$/g, '');
@@ -28,15 +28,14 @@ export async function POST(request: Request) {
         const student=(await tx.get(db.doc(`students/${draft.matchedStudentId}`))).data();
         if(!student)throw new Error('연결된 학생이 없습니다.');
         const subjects=studentSubjects(student);
-        const aliases:Record<string,string>={'기타':'통기타','일렉':'일렉기타','피아노(어린이)':'어린이 피아노','피아노(성인)':'성인 피아노'};
-        const matches=subjects.filter(v=>(aliases[v]||v)===draft.subject);
+        const matches=resolveImportedSubjects(subjects,draft.subject);
         if(matches.length!==1)throw new Error('등록 과목과 원본 과목을 확인해주세요.');
         const subject=matches[0];const id=enrollmentId(draft.matchedStudentId,subject);
         const accountRef=db.doc(`opsAccounts/${id}`);
         const old=await tx.get(accountRef);const legacy=await tx.get(db.doc(`opsAccounts/${draft.matchedStudentId}`));
         if(old.exists||legacy.exists)throw new Error('이미 수강권이 있어 자동 덮어쓰기를 중단했습니다.');
         const at=new Date().toISOString();
-        tx.create(accountRef,{id,sourceStudentId:draft.matchedStudentId,subject,name:`${student.name} · ${subject}`,phone:draft.phone,checkinSuffixes:[draft.phone.slice(-4)],planUnits:draft.planUnits,planAmount:draft.planAmount,remaining:draft.remainingCandidate,openInvoiceId:null,autoBilling:false,active:true,updatedAt:at,importId:input.id,openingAsOf:draft.asOf});
+        tx.create(accountRef,{id,sourceStudentId:draft.matchedStudentId,subject,displaySubject:draft.subject,name:`${student.name} · ${draft.subject}`,phone:draft.phone,checkinSuffixes:[draft.phone.slice(-4)],planUnits:draft.planUnits,planAmount:draft.planAmount,remaining:draft.remainingCandidate,openInvoiceId:null,autoBilling:false,active:true,updatedAt:at,importId:input.id,openingAsOf:draft.asOf});
         tx.update(ref,{status:'activated',accountId:id,activatedAt:at});
         tx.create(db.collection('opsAudit').doc(),{actor,action:'import-opening-balance',studentId:id,at,detail:{importId:input.id,remaining:draft.remainingCandidate,asOf:draft.asOf}});
         return {ok:true};

@@ -25,6 +25,10 @@ export function studentSubjects(student: Record<string, unknown>): string[] {
   const raw = Array.isArray(student.instruments) && student.instruments.length ? student.instruments : [student.instrument];
   return [...new Set(raw.filter((v): v is string => typeof v === 'string' && Boolean(v.trim())).map(v => v.trim()))];
 }
+export function resolveImportedSubjects(subjects: string[], source: string) {
+  const aliases: Record<string, string> = { '기타': '통기타', '일렉': '일렉기타', '피아노(어린이)': '어린이 피아노', '피아노(성인)': '성인 피아노' };
+  return subjects.filter(s => (aliases[s] || s) === source || (s === '피아노' && ['어린이 피아노', '성인 피아노'].includes(source)));
+}
 export async function configure(input: Record<string, unknown>, actor: string) {
   const db = database(); const id = key(input.studentId); const ref = db.doc(`opsAccounts/${id}`);
   const sourceStudentId = input.sourceStudentId ? key(input.sourceStudentId) : id;
