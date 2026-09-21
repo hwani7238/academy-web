@@ -43,6 +43,19 @@ const securityHeaders = [
 
 const nextConfig: NextConfig = {
   poweredByHeader: false,
+  async rewrites() {
+    // Keep the public website unchanged; only the management hostname maps
+    // its home and demo URLs to the operations screens.
+    const managementHost = [{ type: 'host' as const, value: 'manage.wheemusic.com' }];
+    return {
+      beforeFiles: [
+        { source: '/', has: managementHost, destination: '/operations' },
+        { source: '/demo', has: managementHost, destination: '/operations/demo' },
+      ],
+      afterFiles: [],
+      fallback: [],
+    };
+  },
   async headers() {
     return [
       {
