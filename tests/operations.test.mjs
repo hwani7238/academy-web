@@ -48,7 +48,10 @@ function setup() {
     records.set(`students/${id}`, { name: '가상 학생', phone:'01000001234' });
     await service.configure({studentId:id, planUnits:8, planAmount:160000, remaining, phone:'01000001234', phones:['1234','5678'], active:true}, 'owner');
   };
-  return { records, service, load, seed };
+  const routeExports={};
+  const routeCode=fs.readFileSync('src/app/api/operations/import/route.ts','utf8');
+  new Function('require','exports',ts.transpileModule(routeCode,{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText)(id=>id.endsWith('/auth')?{database:()=>db,manager:async()=> 'owner',sameOrigin:()=>{},failure:e=>Response.json({error:e.message},{status:400}),hash:v=>require('node:crypto').createHash('sha256').update(v).digest('hex')}:id.endsWith('/service')?service:load('model'),routeExports);
+  return { records, service, load, seed, importPost:body=>routeExports.POST(new Request('https://test/api/operations/import',{method:'POST',body:JSON.stringify(body)})) };
 }
 test('concurrent duplicate check-ins deduct once and create one invoice/outbox', async () => {
   const s = setup(); await s.seed();
@@ -169,4 +172,25 @@ test('two courses for one student deduct and settle independently',async()=>{
  assert.equal(s.records.get(`opsAccounts/${piano}`).remaining,4);assert.equal(s.records.get(`opsAccounts/${vocal}`).remaining,2);
  assert.equal([...s.records.keys()].filter(k=>k.startsWith('opsAttendance/')).length,2);
  await assert.rejects(s.service.configure({studentId:piano,sourceStudentId:'person',subject:'보컬',planUnits:4,planAmount:160000,phone:'01000001234',phones:['1234']},'owner'));
+});
+
+test('opening balance import is idempotent and does not send notices or duplicate billing', async()=>{
+ const s=setup();const id='a'.repeat(64);
+ s.records.set('students/person',{name:'가상',phone:'01000001234',instruments:['보컬']});
+ s.records.set(`opsImports/${id}`,{matchedStudentId:'person',subject:'보컬',phone:'01000001234',remainingCandidate:3,planUnits:8,planAmount:170000,issues:['잔여 후보 확인 필요'],asOf:s.load('model').seoulDay(),status:'review'});
+ assert.equal((await s.importPost({action:'activate',id})).status,200);
+ assert.equal((await s.importPost({action:'activate',id})).status,200);
+ const account=s.records.get(`opsAccounts/${s.service.enrollmentId('person','보컬')}`);
+ assert.equal(account.remaining,3);assert.equal(account.autoBilling,false);
+ assert.equal([...s.records.keys()].filter(k=>k.startsWith('opsAccounts/')).length,1);
+ assert.equal([...s.records.keys()].filter(k=>k.startsWith('opsInvoices/')||k.startsWith('opsNotices/')).length,0);
+});
+test('opening import blocks unresolved, stale, and existing accounts',async()=>{
+ for(const change of [{issues:['전화번호 확인 필요']},{asOf:'2020-01-01'},{subject:'드럼'},{remainingCandidate:null},{existing:true}]){
+ const s=setup();const id='b'.repeat(64);s.records.set('students/person',{name:'가상',instruments:['보컬']});
+ s.records.set(`opsImports/${id}`,{matchedStudentId:'person',subject:'보컬',phone:'01000001234',remainingCandidate:3,planUnits:8,planAmount:170000,issues:['잔여 후보 확인 필요'],asOf:s.load('model').seoulDay(),status:'review',...change});
+ if(change.existing)s.records.set(`opsAccounts/${s.service.enrollmentId('person','보컬')}`,{remaining:9});
+ assert.equal((await s.importPost({action:'activate',id})).status,400);
+ if(change.existing)assert.equal(s.records.get(`opsAccounts/${s.service.enrollmentId('person','보컬')}`).remaining,9);
+ }
 });

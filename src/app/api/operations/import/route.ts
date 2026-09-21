@@ -1,5 +1,6 @@
 import { database, manager, sameOrigin, failure, hash } from '@/lib/operations/auth';
-import { studentSubjects } from '@/lib/operations/service';
+import { seoulDay } from '@/lib/operations/model';
+import { enrollmentId, studentSubjects } from '@/lib/operations/service';
 export const runtime = 'nodejs';
 export const maxDuration = 60;
 const normal = (v: unknown) => String(v || '').replace(/\s+|님$/g, '');
@@ -8,13 +9,39 @@ export async function GET(request: Request) {
   try {
     await manager(request);
     const rows = await database().collection('opsImports').get();
-    return Response.json({ rows: rows.docs.map(d => { const v=d.data(); return { id:d.id, name:v.name, subject:v.subject, sourceRow:v.sourceRow, planUnits:v.planUnits, planAmount:v.planAmount, remainingCandidate:v.remainingCandidate, issues:v.issues, matchedStudentId:v.matchedStudentId, historyCount:v.history?.length || 0 }; }) }, {headers:{'Cache-Control':'no-store'}});
+    return Response.json({ rows: rows.docs.map(d => { const v=d.data(); return { id:d.id, name:v.name, subject:v.subject, sourceRow:v.sourceRow, planUnits:v.planUnits, planAmount:v.planAmount, remainingCandidate:v.remainingCandidate, issues:v.issues, matchedStudentId:v.matchedStudentId, historyCount:v.history?.length || 0, status:v.status }; }) }, {headers:{'Cache-Control':'no-store'}});
   } catch(e) { return failure(e); }
 }
 export async function POST(request: Request) {
   try {
     sameOrigin(request); const actor=await manager(request);
     const input=await request.json();
+    if(input.action==='activate') {
+      if(typeof input.id!=='string'||!/^[a-f0-9]{64}$/.test(input.id))throw new Error('이관 항목을 확인해주세요.');
+      const db=database();const ref=db.doc(`opsImports/${input.id}`);
+      return Response.json(await db.runTransaction(async tx=>{
+        const draft=(await tx.get(ref)).data();
+        if(!draft)throw new Error('원본 자료를 찾을 수 없습니다.');
+        if(draft.status==='activated')return {ok:true,duplicate:true};
+        if(!draft.matchedStudentId || !Number.isSafeInteger(draft.remainingCandidate)||!Number.isSafeInteger(draft.planUnits)||draft.planUnits<1||!Number.isSafeInteger(draft.planAmount)||draft.planAmount<=0||draft.issues.some((v:string)=>v!=='잔여 후보 확인 필요'))throw new Error('확인이 필요한 항목이 남아 있습니다.');
+        if(draft.asOf!==seoulDay())throw new Error('이관 기준일을 확인해주세요.');
+        const student=(await tx.get(db.doc(`students/${draft.matchedStudentId}`))).data();
+        if(!student)throw new Error('연결된 학생이 없습니다.');
+        const subjects=studentSubjects(student);
+        const aliases:Record<string,string>={'기타':'통기타','일렉':'일렉기타','피아노(어린이)':'어린이 피아노','피아노(성인)':'성인 피아노'};
+        const matches=subjects.filter(v=>(aliases[v]||v)===draft.subject);
+        if(matches.length!==1)throw new Error('등록 과목과 원본 과목을 확인해주세요.');
+        const subject=matches[0];const id=enrollmentId(draft.matchedStudentId,subject);
+        const accountRef=db.doc(`opsAccounts/${id}`);
+        const old=await tx.get(accountRef);const legacy=await tx.get(db.doc(`opsAccounts/${draft.matchedStudentId}`));
+        if(old.exists||legacy.exists)throw new Error('이미 수강권이 있어 자동 덮어쓰기를 중단했습니다.');
+        const at=new Date().toISOString();
+        tx.create(accountRef,{id,sourceStudentId:draft.matchedStudentId,subject,name:`${student.name} · ${subject}`,phone:draft.phone,checkinSuffixes:[draft.phone.slice(-4)],planUnits:draft.planUnits,planAmount:draft.planAmount,remaining:draft.remainingCandidate,openInvoiceId:null,autoBilling:false,active:true,updatedAt:at,importId:input.id,openingAsOf:draft.asOf});
+        tx.update(ref,{status:'activated',accountId:id,activatedAt:at});
+        tx.create(db.collection('opsAudit').doc(),{actor,action:'import-opening-balance',studentId:id,at,detail:{importId:input.id,remaining:draft.remainingCandidate,asOf:draft.asOf}});
+        return {ok:true};
+      }));
+    }
     if(input.version!==1 || !Array.isArray(input.rows) || input.rows.length<1 || input.rows.length>10) throw new Error('한 번에 1~10개 항목만 가져올 수 있습니다.');
     const db=database(); const students=(await db.collection('students').get()).docs;
     const results=[];
