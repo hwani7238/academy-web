@@ -1,7 +1,7 @@
 import { database, manager, sameOrigin, failure } from '@/lib/operations/auth';
 import * as service from '@/lib/operations/service';
 import { noticeConfigured, processNotices } from '@/lib/operations/notices';
-import { seoulDay, validDay } from '@/lib/operations/model';
+import { seoulDay, validDay, type Snapshot } from '@/lib/operations/model';
 import { after } from 'next/server';
 export const runtime = 'nodejs';
 export const maxDuration = 60;
@@ -37,7 +37,7 @@ export async function GET(request: Request) {
       }
     }
     const rows = (snap: FirebaseFirestore.QuerySnapshot) => snap.docs.map(d => ({ ...d.data(), id: d.id }));
-    return Response.json({ day, legacyAttendance: [...legacyCells.values()].filter(Boolean), configured: noticeConfigured(), students: students.docs.flatMap(d => {
+    return Response.json({ day, legacyAttendance: [...legacyCells.values()].filter(Boolean), configured: noticeConfigured(), students: students.docs.flatMap<Snapshot['students'][number]>(d => {
       const raw = d.data(); const base = { name: raw.name || '학생', phone: raw.phone || '' };
       // Preserve existing single-account balances; do not silently duplicate them.
       if (accounts.docs.some(a => a.id === d.id)) return [{ ...base, id: d.id, instruments: service.studentSubjects(raw) }];
