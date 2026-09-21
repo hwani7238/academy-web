@@ -1,0 +1,154 @@
+import { randomUUID, randomBytes } from 'node:crypto';
+import type { Transaction, Firestore } from 'firebase-admin/firestore';
+import { database, hash, HttpError } from './auth';
+import { Account, Invoice, Attendance, integer, adjustBalance, settle, suffixes, seoulDay, METHODS } from './model';
+
+const now = () => new Date().toISOString();
+const key = (id: unknown) => { if (typeof id !== 'string' || !/^[A-Za-z0-9_-]{1,160}$/.test(id)) throw new Error('잘못된 항목입니다.'); return id; };
+const text = (value: unknown, max = 500) => typeof value === 'string' ? value.trim().slice(0, max) : '';
+function audit(tx: Transaction, db: Firestore, actor: string, action: string, studentId: string, detail: object) {
+  tx.create(db.collection('opsAudit').doc(), { actor, action, studentId, detail, at: now() });
+}
+function enqueue(tx: Transaction, db: Firestore, id: string, account: Account, kind: 'attendance' | 'billing', parameters: Record<string, string>) {
+  tx.create(db.doc(`opsNotices/${id}`), { id, studentId: account.id, name: account.name, phone: account.phone, kind, parameters, status: 'queued', createdAt: now() });
+}
+function newInvoice(tx: Transaction, db: Firestore, account: Account, id: string, reason: string) {
+  const invoice: Invoice = { id, studentId: account.id, name: account.name, units: account.planUnits, amount: account.planAmount, paid: 0, status: 'open', needsReview: false, createdAt: now() };
+  tx.create(db.doc(`opsInvoices/${id}`), { ...invoice, reason });
+  if (account.autoBilling) enqueue(tx, db, `billing_${id}`, account, 'billing', { student_name: account.name, amount: String(invoice.amount), lesson_count: String(invoice.units) });
+  return id;
+}
+export async function configure(input: Record<string, unknown>, actor: string) {
+  const db = database(); const id = key(input.studentId); const ref = db.doc(`opsAccounts/${id}`);
+  const planUnits = integer(input.planUnits, 1, 200, '등록 횟수');
+  const planAmount = integer(input.planAmount, 1, 100000000, '수강료');
+  const codes = suffixes(input.phones);
+  if (!codes.length || codes.length > 5) throw new Error('출석 번호를 1~5개 등록해주세요.');
+  const phone = text(input.phone, 30).replace(/[^0-9]/g, '');
+  if (!/^0[0-9]{8,10}$/.test(phone)) throw new Error('알림 수신 전화번호를 확인해주세요.');
+  await db.runTransaction(async tx => {
+    const [existing, student] = await Promise.all([tx.get(ref), tx.get(db.doc(`students/${id}`))]);
+    if (!student.exists) throw new Error('학생을 찾을 수 없습니다.');
+    const old = existing.data();
+    const remaining = old ? old.remaining : integer(input.remaining, -1000, 1000, '현재 남은 횟수');
+    tx.set(ref, { id, name: student.data()?.name || '학생', phone, checkinSuffixes: codes, planUnits, planAmount, remaining, openInvoiceId: old?.openInvoiceId || null, active: input.active !== false, autoBilling: input.autoBilling === true, updatedAt: now() });
+    audit(tx, db, actor, 'configure', id, { planUnits, planAmount, remaining, active: input.active !== false, autoBilling: input.autoBilling === true });
+  });
+}
+export async function checkIn(studentId: string, digits: string, actor: string) {
+  const db = database(); const id = key(studentId); const day = seoulDay(); const attendanceId = `${id}_${day}`;
+  const ref = db.doc(`opsAccounts/${id}`); const attendanceRef = db.doc(`opsAttendance/${attendanceId}`);
+  const invoiceId = randomUUID();
+  return db.runTransaction(async tx => {
+    const [accountSnap, attended] = await Promise.all([tx.get(ref), tx.get(attendanceRef)]);
+    const account = accountSnap.data() as Account | undefined;
+    if (!account?.active || !account.checkinSuffixes.includes(digits)) throw new HttpError(404, '등록된 학생을 찾을 수 없습니다.');
+    if (attended.exists) return { duplicate: true, name: account.name };
+    const remaining = adjustBalance(account.remaining, 0, 1);
+    const openInvoiceId = remaining <= 0 && !account.openInvoiceId ? newInvoice(tx, db, account, invoiceId, '수업 횟수 소진') : account.openInvoiceId;
+    tx.create(attendanceRef, { id: attendanceId, studentId: id, name: account.name, day, at: now(), units: 1, note: '', updatedAt: now() });
+    tx.update(ref, { remaining, openInvoiceId, updatedAt: now() });
+    enqueue(tx, db, `attendance_${attendanceId}`, account, 'attendance', { student_name: account.name, attendance_time: new Date().toLocaleTimeString('ko-KR', { timeZone: 'Asia/Seoul', hour: '2-digit', minute: '2-digit', hour12: false }) });
+    audit(tx, db, actor, 'check-in', id, { attendanceId, units: 1, remaining });
+    return { duplicate: false, name: account.name };
+  });
+}
+export async function adjust(input: Record<string, unknown>, actor: string) {
+  const db = database(); const id = key(input.attendanceId); const units = integer(input.units, 0, 10, '차감 횟수'); const note = text(input.note);
+  if (!note) throw new Error('변경 사유를 적어주세요.');
+  const invoiceId = randomUUID();
+  await db.runTransaction(async tx => {
+    const attendanceRef = db.doc(`opsAttendance/${id}`); const attendance = (await tx.get(attendanceRef)).data() as Attendance | undefined;
+    if (!attendance) throw new Error('출석 기록을 찾을 수 없습니다.');
+    const ref = db.doc(`opsAccounts/${attendance.studentId}`); const account = (await tx.get(ref)).data() as Account;
+    const currentInvoice = account.openInvoiceId ? await tx.get(db.doc(`opsInvoices/${account.openInvoiceId}`)) : null;
+    const remaining = adjustBalance(account.remaining, attendance.units, units);
+    const openInvoiceId = remaining <= 0 && !account.openInvoiceId ? newInvoice(tx, db, account, invoiceId, '횟수 수정 후 소진') : account.openInvoiceId;
+    if (remaining > 0 && currentInvoice?.exists) tx.update(currentInvoice.ref, { needsReview: true });
+    tx.update(ref, { remaining, openInvoiceId, updatedAt: now() });
+    tx.update(attendanceRef, { units, note, updatedAt: now() });
+    audit(tx, db, actor, 'adjust', account.id, { attendanceId: id, before: attendance.units, after: units, note, remaining });
+  });
+}
+export async function createInvoice(studentId: unknown, actor: string) {
+  const db = database(); const id = key(studentId); const invoiceId = randomUUID();
+  await db.runTransaction(async tx => {
+    const ref = db.doc(`opsAccounts/${id}`); const account = (await tx.get(ref)).data() as Account | undefined;
+    if (!account?.active) throw new Error('수강 설정을 먼저 저장해주세요.');
+    if (account.openInvoiceId) throw new Error('아직 완료하지 않은 청구가 있습니다.');
+    newInvoice(tx, db, account, invoiceId, '원장 등록');
+    tx.update(ref, { openInvoiceId: invoiceId, updatedAt: now() }); audit(tx, db, actor, 'invoice', id, { invoiceId });
+  });
+}
+export async function payment(input: Record<string, unknown>, actor: string) {
+  const db = database(); const id = key(input.invoiceId); const requestId = key(input.requestId); const method = text(input.method, 30);
+  if (!(METHODS as readonly string[]).includes(method)) throw new Error('결제 수단을 선택해주세요.');
+  const paymentRef = db.doc(`opsPayments/${requestId}`);
+  await db.runTransaction(async tx => {
+    const invoiceRef = db.doc(`opsInvoices/${id}`);
+    const [existing, snap] = await Promise.all([tx.get(paymentRef), tx.get(invoiceRef)]);
+    if (existing.exists) {
+      if (existing.data()?.invoiceId !== id || existing.data()?.amount !== input.amount || existing.data()?.method !== method) throw new Error('중복 요청 내용이 다릅니다.');
+      return;
+    }
+    const invoice = snap.data() as Invoice | undefined; if (!invoice) throw new Error('청구를 찾을 수 없습니다.');
+    const accountRef = db.doc(`opsAccounts/${invoice.studentId}`); const account = (await tx.get(accountRef)).data() as Account;
+    const { paid, complete } = settle(invoice, input.amount as number);
+    tx.create(paymentRef, { id: requestId, invoiceId: id, studentId: invoice.studentId, amount: input.amount, method, at: now(), note: text(input.note), actor });
+    tx.update(invoiceRef, { paid, status: complete ? 'paid' : 'open' });
+    if (complete) tx.update(accountRef, { remaining: account.remaining + invoice.units, openInvoiceId: account.openInvoiceId === id ? null : account.openInvoiceId, updatedAt: now() });
+    audit(tx, db, actor, 'payment', invoice.studentId, { invoiceId: id, amount: input.amount, method, complete });
+  });
+}
+export async function invoiceAction(input: Record<string, unknown>, actor: string) {
+  const db = database(); const id = key(input.invoiceId);
+  await db.runTransaction(async tx => {
+    const ref = db.doc(`opsInvoices/${id}`); const invoice = (await tx.get(ref)).data() as Invoice | undefined;
+    if (!invoice || invoice.status !== 'open') throw new Error('진행 중인 청구가 아닙니다.');
+    const accountRef = db.doc(`opsAccounts/${invoice.studentId}`); const account = (await tx.get(accountRef)).data() as Account;
+    const noticeRef = db.doc(`opsNotices/billing_${id}`); const notice = await tx.get(noticeRef);
+    if (input.action === 'cancelInvoice') {
+      if (invoice.paid !== 0) throw new Error('수납된 청구는 취소할 수 없습니다.');
+      if (notice.data()?.status === 'processing') throw new Error('발송 처리 중입니다. 잠시 후 확인해주세요.');
+      tx.update(ref, { status: 'cancelled' });
+      if (account.openInvoiceId === id) tx.update(accountRef, { openInvoiceId: null });
+      if (notice.exists && ['queued', 'blocked', 'failed'].includes(notice.data()?.status)) tx.update(noticeRef, { status: 'cancelled' });
+    } else if (input.action === 'confirmInvoice') {
+      tx.update(ref, { needsReview: false });
+      if (notice.data()?.status === 'review') tx.update(noticeRef, { status: 'queued', error: '' });
+    } else {
+      if (invoice.needsReview) throw new Error('횟수 수정에 따른 청구 내용을 먼저 확인해주세요.');
+      if (notice.exists) throw new Error('이미 발송 대기 또는 처리 기록이 있습니다.');
+      enqueue(tx, db, `billing_${id}`, account, 'billing', { student_name: account.name, amount: String(invoice.amount - invoice.paid), lesson_count: String(invoice.units) });
+    }
+    audit(tx, db, actor, String(input.action), invoice.studentId, { invoiceId: id });
+  });
+}
+export async function issuePair(actor: string) {
+  const db = database(); const code = randomBytes(16).toString('hex');
+  await db.doc(`opsPairing/${hash(code)}`).set({ actor, expiresAt: Date.now() + 10 * 60000, used: false });
+  return { code };
+}
+export async function pair(code: unknown) {
+  if (typeof code !== 'string' || !/^[a-f0-9]{32}$/.test(code)) throw new Error('등록 코드를 확인해주세요.');
+  const db = database(); const token = randomBytes(32).toString('hex'); const id = hash(token);
+  await db.runTransaction(async tx => {
+    const ref = db.doc(`opsPairing/${hash(code)}`); const data = (await tx.get(ref)).data();
+    if (!data || data.used || data.expiresAt < Date.now()) throw new Error('코드가 만료되었습니다. 새 코드를 만들어주세요.');
+    tx.update(ref, { used: true });
+    tx.create(db.doc(`opsDevices/${id}`), { id, name: '출석 아이폰', active: true, createdAt: now(), expiresAt: Date.now() + 90 * 86400000, actor: data.actor });
+  });
+  return token;
+}
+export async function revoke(id: unknown) { await database().doc(`opsDevices/${key(id)}`).update({ active: false }); }
+
+export async function releaseBlocked(actor: string) {
+  const db = database();
+  const blocked = await db.collection('opsNotices').where('status', '==', 'blocked').limit(100).get();
+  for (const item of blocked.docs) await db.runTransaction(async tx => {
+    const fresh = await tx.get(item.ref);
+    if (fresh.data()?.status !== 'blocked') return;
+    tx.update(item.ref, { status: 'queued', error: '' });
+    audit(tx, db, actor, 'notice-config-retry', fresh.data()!.studentId, { noticeId: item.id });
+  });
+}

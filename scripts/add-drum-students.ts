@@ -1,3 +1,4 @@
+import { phoneLast4 } from "../src/lib/phone.mjs";
 import { initializeApp } from "firebase/app";
 import { getFirestore, collection, addDoc, getDocs } from "firebase/firestore";
 
@@ -81,6 +82,7 @@ async function run() {
         const newDoc = {
             name: student.name,
             phone: student.phone,
+            phoneLast4: phoneLast4(student.phone),
             instruments: [student.subject],
             instrument: student.subject, // default legacy field
             status: "등록",
