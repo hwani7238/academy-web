@@ -19,7 +19,15 @@ export async function GET(request: Request) {
       db.collection('opsNotices').orderBy('createdAt', 'desc').limit(50).get(), db.collection('opsDevices').get(),
     ]);
     const rows = (snap: FirebaseFirestore.QuerySnapshot) => snap.docs.map(d => ({ ...d.data(), id: d.id }));
-    return Response.json({ day, configured: noticeConfigured(), students: students.docs.map(d => ({ id: d.id, name: d.data().name || '학생', phone: d.data().phone || '', instruments: (Array.isArray(d.data().instruments) && d.data().instruments.length ? d.data().instruments : [d.data().instrument]).filter((v: unknown) => typeof v === 'string' && v.trim()).map((v: string) => v.trim()) })), accounts: rows(accounts), attendance: rows(attendance), invoices: rows(invoices), payments: rows(payments), notices: notices.docs.map(d => { const n = d.data(); return { id: d.id, studentId: n.studentId, name: n.name, kind: n.kind, status: n.status, createdAt: n.createdAt, requestId: n.requestId || '', error: n.error || '' }; }), devices: devices.docs.map(d => { const v = d.data(); return { id: d.id, name: v.name, active: v.active && v.expiresAt > Date.now(), createdAt: v.createdAt }; }) }, { headers: { 'Cache-Control': 'no-store' } });
+    return Response.json({ day, configured: noticeConfigured(), students: students.docs.flatMap(d => {
+      const raw = d.data(); const base = { name: raw.name || '학생', phone: raw.phone || '' };
+      // Preserve existing single-account balances; do not silently duplicate them.
+      if (accounts.docs.some(a => a.id === d.id)) return [{ ...base, id: d.id, instruments: service.studentSubjects(raw) }];
+      const subjects = service.studentSubjects(raw);
+      if (!subjects.length) return [{ ...base, id: d.id, instruments: [] }];
+      const known = accounts.docs.filter(a => a.data().sourceStudentId === d.id).map(a => a.data().subject as string);
+      return [...new Set([...subjects, ...known])].map(subject => ({ ...base, id: service.enrollmentId(d.id, subject), sourceStudentId: d.id, subject, name: `${base.name} · ${subject}`, instruments: [subject] }));
+    }), accounts: rows(accounts), attendance: rows(attendance), invoices: rows(invoices), payments: rows(payments), notices: notices.docs.map(d => { const n = d.data(); return { id: d.id, studentId: n.studentId, name: n.name, kind: n.kind, status: n.status, createdAt: n.createdAt, requestId: n.requestId || '', error: n.error || '' }; }), devices: devices.docs.map(d => { const v = d.data(); return { id: d.id, name: v.name, active: v.active && v.expiresAt > Date.now(), createdAt: v.createdAt }; }) }, { headers: { 'Cache-Control': 'no-store' } });
   } catch (error) { return failure(error); }
 }
 export async function POST(request: Request) {

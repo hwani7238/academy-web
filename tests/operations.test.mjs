@@ -158,3 +158,15 @@ test('kiosk does not report absence as successful attendance',async()=>{
  await assert.rejects(s.service.checkIn('student-a','1234','device'),{status:409});
  assert.equal(s.records.get('opsAccounts/student-a').remaining,1);
 });
+test('two courses for one student deduct and settle independently',async()=>{
+ const s=setup();s.records.set('students/person',{name:'테스트',phone:'01000001234',instruments:['피아노','보컬']});
+ const piano=s.service.enrollmentId('person','피아노');const vocal=s.service.enrollmentId('person','보컬');
+ for(const [id,subject,remaining] of [[piano,'피아노',1],[vocal,'보컬',3]]) await s.service.configure({studentId:id,sourceStudentId:'person',subject,planUnits:4,planAmount:160000,remaining,phone:'01000001234',phones:['1234']},'owner');
+ await s.service.checkIn(piano,'1234','device');await s.service.checkIn(vocal,'1234','device');
+ assert.equal(s.records.get(`opsAccounts/${piano}`).remaining,0);assert.equal(s.records.get(`opsAccounts/${vocal}`).remaining,2);
+ const invoiceId=s.records.get(`opsAccounts/${piano}`).openInvoiceId;
+ await s.service.payment({invoiceId,requestId:'course-payment',amount:160000,method:'현금'},'owner');
+ assert.equal(s.records.get(`opsAccounts/${piano}`).remaining,4);assert.equal(s.records.get(`opsAccounts/${vocal}`).remaining,2);
+ assert.equal([...s.records.keys()].filter(k=>k.startsWith('opsAttendance/')).length,2);
+ await assert.rejects(s.service.configure({studentId:piano,sourceStudentId:'person',subject:'보컬',planUnits:4,planAmount:160000,phone:'01000001234',phones:['1234']},'owner'));
+});

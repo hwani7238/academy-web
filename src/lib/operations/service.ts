@@ -18,8 +18,18 @@ function newInvoice(tx: Transaction, db: Firestore, account: Account, id: string
   if (account.autoBilling) enqueue(tx, db, `billing_${id}`, account, 'billing', { student_name: account.name, amount: String(invoice.amount), lesson_count: String(invoice.units) });
   return id;
 }
+export function enrollmentId(studentId: string, subject: string) {
+  return `course_${hash(JSON.stringify([studentId, subject]))}`;
+}
+export function studentSubjects(student: Record<string, unknown>): string[] {
+  const raw = Array.isArray(student.instruments) && student.instruments.length ? student.instruments : [student.instrument];
+  return [...new Set(raw.filter((v): v is string => typeof v === 'string' && Boolean(v.trim())).map(v => v.trim()))];
+}
 export async function configure(input: Record<string, unknown>, actor: string) {
   const db = database(); const id = key(input.studentId); const ref = db.doc(`opsAccounts/${id}`);
+  const sourceStudentId = input.sourceStudentId ? key(input.sourceStudentId) : id;
+  const subject = text(input.subject, 80);
+  if (input.sourceStudentId && (!subject || enrollmentId(sourceStudentId, subject) !== id)) throw new Error('과목별 수강권 정보가 올바르지 않습니다.');
   const planUnits = integer(input.planUnits, 1, 200, '등록 횟수');
   const planAmount = integer(input.planAmount, 1, 100000000, '수강료');
   const codes = suffixes(input.phones);
@@ -27,11 +37,13 @@ export async function configure(input: Record<string, unknown>, actor: string) {
   const phone = text(input.phone, 30).replace(/[^0-9]/g, '');
   if (!/^0[0-9]{8,10}$/.test(phone)) throw new Error('알림 수신 전화번호를 확인해주세요.');
   await db.runTransaction(async tx => {
-    const [existing, student] = await Promise.all([tx.get(ref), tx.get(db.doc(`students/${id}`))]);
+    const [existing, student] = await Promise.all([tx.get(ref), tx.get(db.doc(`students/${sourceStudentId}`))]);
     if (!student.exists) throw new Error('학생을 찾을 수 없습니다.');
+    if (subject && !studentSubjects(student.data() || {}).includes(subject)) throw new Error('등록된 과목을 확인해주세요.');
+    if (subject && (await tx.get(db.doc(`opsAccounts/${sourceStudentId}`))).exists) throw new Error('기존 통합 수강권을 과목별로 분리한 후 등록해주세요.');
     const old = existing.data();
     const remaining = old ? old.remaining : integer(input.remaining, -1000, 1000, '현재 남은 횟수');
-    tx.set(ref, { id, name: student.data()?.name || '학생', phone, checkinSuffixes: codes, planUnits, planAmount, remaining, openInvoiceId: old?.openInvoiceId || null, active: input.active !== false, autoBilling: input.autoBilling === true, updatedAt: now() });
+    tx.set(ref, { id, ...(subject ? { sourceStudentId, subject } : {}), name: subject ? `${student.data()?.name || '학생'} · ${subject}` : student.data()?.name || '학생', phone, checkinSuffixes: codes, planUnits, planAmount, remaining, openInvoiceId: old?.openInvoiceId || null, active: input.active !== false, autoBilling: input.autoBilling === true, updatedAt: now() });
     audit(tx, db, actor, 'configure', id, { planUnits, planAmount, remaining, active: input.active !== false, autoBilling: input.autoBilling === true });
   });
 }

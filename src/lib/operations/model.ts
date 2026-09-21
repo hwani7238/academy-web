@@ -1,4 +1,5 @@
 export type Account = {
+  sourceStudentId?: string; subject?: string;
   id: string; name: string; phone: string; checkinSuffixes: string[];
   planUnits: number; planAmount: number; remaining: number; openInvoiceId: string | null;
   autoBilling: boolean; active: boolean; updatedAt: string;
@@ -10,7 +11,7 @@ export type Invoice = { id: string; studentId: string; name: string; units: numb
 export type Payment = { id: string; invoiceId: string; studentId: string; amount: number; method: string; at: string; note: string };
 export type Notice = { id: string; studentId: string; name: string; kind: 'attendance' | 'billing'; status: string; createdAt: string; requestId?: string; error?: string };
 export type Device = { id: string; name: string; active: boolean; createdAt: string };
-export type Snapshot = { students: { id: string; name: string; phone: string; instruments?: string[] }[]; accounts: Account[]; attendance: Attendance[]; invoices: Invoice[]; payments: Payment[]; notices: Notice[]; devices: Device[]; day: string; configured: boolean };
+export type Snapshot = { students: { id: string; name: string; phone: string; sourceStudentId?: string; subject?: string; instruments?: string[] }[]; accounts: Account[]; attendance: Attendance[]; invoices: Invoice[]; payments: Payment[]; notices: Notice[]; devices: Device[]; day: string; configured: boolean };
 export const METHODS = ['현금', '카드', '지역화폐', '계좌이체'] as const;
 export function seoulDay(date = new Date()) { return new Intl.DateTimeFormat('sv-SE', { timeZone: 'Asia/Seoul' }).format(date); }
 export function suffixes(values: unknown) {

@@ -2,11 +2,12 @@ import { Snapshot, Account, adjustBalance, settle, seoulDay, suffixes, attendanc
 export function sample(): Snapshot {
   const stamp = new Date().toISOString();
   const accounts: Account[] = [
-    { id: 'demo-a', name: '김하늘', phone: '01000001234', checkinSuffixes: ['1234'], planUnits: 8, planAmount: 160000, remaining: 1, openInvoiceId: null, autoBilling: false, active: true, updatedAt: stamp },
-    { id: 'demo-b', name: '이서준', phone: '01000005678', checkinSuffixes: ['5678'], planUnits: 12, planAmount: 210000, remaining: 4, openInvoiceId: null, autoBilling: false, active: true, updatedAt: stamp },
-    { id: 'demo-c', name: '김하린', phone: '01000001234', checkinSuffixes: ['1234'], planUnits: 8, planAmount: 160000, remaining: 6, openInvoiceId: null, autoBilling: false, active: true, updatedAt: stamp },
+    { id: 'demo-a', sourceStudentId: 'person-a', subject: '어린이 피아노', name: '김하늘 · 어린이 피아노', phone: '01000001234', checkinSuffixes: ['1234'], planUnits: 8, planAmount: 160000, remaining: 1, openInvoiceId: null, autoBilling: false, active: true, updatedAt: stamp },
+    { id: 'demo-b', sourceStudentId: 'person-b', subject: '통기타', name: '이서준 · 통기타', phone: '01000005678', checkinSuffixes: ['5678'], planUnits: 12, planAmount: 210000, remaining: 4, openInvoiceId: null, autoBilling: false, active: true, updatedAt: stamp },
+    { id: 'demo-c', sourceStudentId: 'person-c', subject: '성인 피아노', name: '김하린 · 성인 피아노', phone: '01000001234', checkinSuffixes: ['1234'], planUnits: 8, planAmount: 160000, remaining: 6, openInvoiceId: null, autoBilling: false, active: true, updatedAt: stamp },
   ];
-  return { accounts, students: accounts.map(({ id, name, phone }, i) => ({ id, name, phone, instruments: i === 0 ? ['어린이 피아노'] : i === 1 ? ['통기타'] : ['성인 피아노', '보컬'] })), attendance: [], invoices: [], payments: [], notices: [], devices: [], day: seoulDay(), configured: false };
+  accounts.push({ ...accounts[2], id: 'demo-c-vocal', subject: '보컬', name: '김하린 · 보컬', planUnits: 4, planAmount: 180000, remaining: 2 });
+  return { accounts, students: accounts.map(({ id, name, phone, sourceStudentId, subject }) => ({ id, name, phone, sourceStudentId, subject, instruments: subject ? [subject] : [] })), attendance: [], invoices: [], payments: [], notices: [], devices: [], day: seoulDay(), configured: false };
 }
 export function demoAction(current: Snapshot, input: Record<string, unknown>): { data: Snapshot; result: Record<string, unknown> } {
   const data = structuredClone(current); const at = new Date().toISOString();
@@ -40,7 +41,7 @@ export function demoAction(current: Snapshot, input: Record<string, unknown>): {
     result = { name: account.name, duplicate: false };
   } else if (input.action === 'configure') {
     const student = data.students.find(s => s.id === input.studentId)!;
-    const next: Account = { id: student.id, name: student.name, phone: String(input.phone), checkinSuffixes: suffixes(input.phones), planUnits: Number(input.planUnits), planAmount: Number(input.planAmount), remaining: account?.remaining ?? Number(input.remaining), openInvoiceId: account?.openInvoiceId || null, active: input.active !== false, autoBilling: input.autoBilling === true, updatedAt: at };
+    const next: Account = { id: student.id, sourceStudentId: student.sourceStudentId, subject: student.subject, name: student.name, phone: String(input.phone), checkinSuffixes: suffixes(input.phones), planUnits: Number(input.planUnits), planAmount: Number(input.planAmount), remaining: account?.remaining ?? Number(input.remaining), openInvoiceId: account?.openInvoiceId || null, active: input.active !== false, autoBilling: input.autoBilling === true, updatedAt: at };
     data.accounts = [...data.accounts.filter(a => a.id !== student.id), next];
   } else if (input.action === 'invoice') { if (!account) throw new Error('수강 설정을 저장해주세요.'); if (account.openInvoiceId) throw new Error('진행 중인 청구가 있습니다.'); invoice(account); }
   else if (input.action === 'adjust') {
