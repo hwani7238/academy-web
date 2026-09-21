@@ -2,6 +2,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { User } from 'firebase/auth';
 import { Attendance, Invoice, Snapshot, METHODS, seoulDay, ATTENDANCE_LABELS } from '@/lib/operations/model';
+import { ImportStudents } from './ImportStudents';
 import { MonthlyAttendance } from './MonthlyAttendance';
 import { CheckIn } from './CheckIn';
 import { sample, demoAction } from './demo';
@@ -57,7 +58,7 @@ export function Operations({ demo = false }: { demo?: boolean }) {
   const students = data.students.filter(s => s.name.includes(search) || s.phone.includes(search));
   const account = panel?.type === 'account' ? data.accounts.find(a => a.id === panel.id) : undefined;
   const student = panel?.type === 'account' ? data.students.find(s => s.id === panel.id) : undefined;
-  const tabs = [['today', '출석 기록'], ['monthly', '월별 출석표'], ['students', '수강 설정'], ['billing', '청구·수납'], ['notices', '알림 내역'], ['devices', '출석 기기']];
+  const tabs = [['today', '출석 기록'], ['monthly', '월별 출석표'], ['students', '수강 설정'], ['billing', '청구·수납'], ['notices', '알림 내역'], ['devices', '출석 기기'], ...(!demo ? [['imports', '기존 장부']] : [])];
   return <div className="whee-ops operations">
     {demo && <div className="demo-banner">가상 학생 체험 · 실제 학생 정보와 연결되지 않으며 메시지·결제가 발생하지 않습니다. <button onClick={() => { const next = sample(); dataRef.current = next; setData(next); setPanel(null); setMessage('체험을 초기화했습니다.'); }}>체험 초기화</button></div>}
     <header className="ops-header"><div><p className="brand">WHEE MUSIC</p><h1>출석·수납 관리</h1></div><div className="header-actions"><span className="subtle">{demo ? '원장님 화면 체험' : user?.email}</span><a href={demo ? '/check-in/demo' : '/check-in'} target="_blank" rel="noreferrer">출석 화면 ↗</a></div></header>
@@ -70,6 +71,7 @@ export function Operations({ demo = false }: { demo?: boolean }) {
     <nav className="ops-tabs" aria-label="관리 메뉴">{tabs.map(([id, label]) => <button key={id} aria-current={tab === id ? 'page' : undefined} onClick={() => { setTab(id); setMessage(''); }}>{label}{id === 'billing' && open.length > 0 && <b>{open.length}</b>}</button>)}</nav>
     {error && <p className="error" role="alert">{error}</p>}{message && <p className="success" role="status">{message}</p>}
     <div className={demo && tab === 'today' ? 'workspace-with-kiosk' : ''}><section className="surface">
+    {tab === 'imports' && !demo && <ImportStudents user={user} />}
     {tab === 'monthly' && <MonthlyAttendance data={data} day={day} busy={busy} save={act} />}
     {tab === 'today' && <><div className="section-head"><div><h2>출석 기록</h2><p>번호로 출석하면 자동 1회 차감 · 비고는 필요할 때만 적어주세요.</p></div></div>
       {todayAttendance.length ? <div className="table-wrap"><table><thead><tr><th>학생</th><th>상태</th><th>기록 시간</th><th>차감</th><th>남은 횟수</th><th>비고</th><th>관리</th></tr></thead><tbody>{todayAttendance.map(a => <tr key={a.id}><td><strong>{a.name}</strong></td><td>{ATTENDANCE_LABELS[a.status || "present"]}</td><td>{a.source === "manual" ? "수동 기록" : time(a.at)}</td><td>{a.units}회</td><td>{data.accounts.find(s => s.id === a.studentId)?.remaining}회</td><td>{a.note || '—'}</td><td><button disabled={busy} onClick={() => setPanel({ type: 'adjust', row: a })}>횟수·비고 수정</button></td></tr>)}</tbody></table></div> : <div className="empty"><h3>아직 출석 기록이 없습니다.</h3><p>{demo ? '옆 출석 화면에 1234를 입력하고 김하늘 학생을 선택해보세요. 마지막 수업이 차감되면 청구가 생성됩니다.' : '수강 설정을 저장한 학생이 등록된 아이폰에서 출석하면 여기에 표시됩니다.'}</p></div>}</>}
