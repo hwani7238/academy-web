@@ -1,7 +1,7 @@
 import { randomUUID, randomBytes } from 'node:crypto';
 import type { Transaction, Firestore } from 'firebase-admin/firestore';
 import { database, hash, HttpError } from './auth';
-import { Account, Invoice, Attendance, integer, adjustBalance, settle, suffixes, seoulDay, METHODS } from './model';
+import { Account, Invoice, Attendance, integer, adjustBalance, settle, suffixes, seoulDay, METHODS, attendanceInput } from './model';
 
 const now = () => new Date().toISOString();
 const key = (id: unknown) => { if (typeof id !== 'string' || !/^[A-Za-z0-9_-]{1,160}$/.test(id)) throw new Error('잘못된 항목입니다.'); return id; };
@@ -43,10 +43,14 @@ export async function checkIn(studentId: string, digits: string, actor: string) 
     const [accountSnap, attended] = await Promise.all([tx.get(ref), tx.get(attendanceRef)]);
     const account = accountSnap.data() as Account | undefined;
     if (!account?.active || !account.checkinSuffixes.includes(digits)) throw new HttpError(404, '등록된 학생을 찾을 수 없습니다.');
-    if (attended.exists) return { duplicate: true, name: account.name };
+    if (attended.exists) {
+      const status = attended.data()?.status;
+      if (status === 'absent' || status === 'cancelled') throw new HttpError(409, '오늘 결석·취소 기록이 있습니다. 선생님께 출석 변경을 요청해주세요.');
+      return { duplicate: true, name: account.name };
+    }
     const remaining = adjustBalance(account.remaining, 0, 1);
     const openInvoiceId = remaining <= 0 && !account.openInvoiceId ? newInvoice(tx, db, account, invoiceId, '수업 횟수 소진') : account.openInvoiceId;
-    tx.create(attendanceRef, { id: attendanceId, studentId: id, name: account.name, day, at: now(), units: 1, note: '', updatedAt: now() });
+    tx.create(attendanceRef, { id: attendanceId, studentId: id, name: account.name, day, at: now(), units: 1, status: 'present', source: 'kiosk', note: '', updatedAt: now() });
     tx.update(ref, { remaining, openInvoiceId, updatedAt: now() });
     enqueue(tx, db, `attendance_${attendanceId}`, account, 'attendance', { student_name: account.name, attendance_time: new Date().toLocaleTimeString('ko-KR', { timeZone: 'Asia/Seoul', hour: '2-digit', minute: '2-digit', hour12: false }) });
     audit(tx, db, actor, 'check-in', id, { attendanceId, units: 1, remaining });
@@ -55,11 +59,11 @@ export async function checkIn(studentId: string, digits: string, actor: string) 
 }
 export async function adjust(input: Record<string, unknown>, actor: string) {
   const db = database(); const id = key(input.attendanceId); const units = integer(input.units, 0, 10, '차감 횟수'); const note = text(input.note);
-  if (!note) throw new Error('변경 사유를 적어주세요.');
   const invoiceId = randomUUID();
   await db.runTransaction(async tx => {
     const attendanceRef = db.doc(`opsAttendance/${id}`); const attendance = (await tx.get(attendanceRef)).data() as Attendance | undefined;
     if (!attendance) throw new Error('출석 기록을 찾을 수 없습니다.');
+    if (attendance.status === 'cancelled' && units !== 0) throw new Error('취소 기록은 월별 출석표에서 상태를 먼저 변경해주세요.');
     const ref = db.doc(`opsAccounts/${attendance.studentId}`); const account = (await tx.get(ref)).data() as Account;
     const currentInvoice = account.openInvoiceId ? await tx.get(db.doc(`opsInvoices/${account.openInvoiceId}`)) : null;
     const remaining = adjustBalance(account.remaining, attendance.units, units);
@@ -150,5 +154,27 @@ export async function releaseBlocked(actor: string) {
     if (fresh.data()?.status !== 'blocked') return;
     tx.update(item.ref, { status: 'queued', error: '' });
     audit(tx, db, actor, 'notice-config-retry', fresh.data()!.studentId, { noticeId: item.id });
+  });
+}
+
+// Manual records never send an arrival notification. Absolute units and revision
+// checks prevent a retry or another open tab from deducting twice.
+export async function recordAttendance(input: Record<string, unknown>, actor: string) {
+  const values = attendanceInput(input); const studentId = key(input.studentId);
+  const db = database(); const id = `${studentId}_${values.day}`; const invoiceId = randomUUID();
+  await db.runTransaction(async tx => {
+    const ref = db.doc(`opsAttendance/${id}`); const accountRef = db.doc(`opsAccounts/${studentId}`);
+    const [previous, accountSnap] = await Promise.all([tx.get(ref), tx.get(accountRef)]);
+    const old = previous.data() as Attendance | undefined; const account = accountSnap.data() as Account | undefined;
+    if (!account) throw new Error('먼저 수강 설정을 저장해주세요.');
+    if (old && Object.entries(values).every(([k,v]) => (old as unknown as Record<string, unknown>)[k] === v)) return;
+    if ((old?.updatedAt || '') !== (input.expectedUpdatedAt || '')) throw new Error('다른 화면에서 기록이 변경됐습니다. 새로고침 후 다시 확인해주세요.');
+    const currentInvoice = account.openInvoiceId ? await tx.get(db.doc(`opsInvoices/${account.openInvoiceId}`)) : null;
+    const remaining = adjustBalance(account.remaining, old?.units || 0, values.units);
+    const openInvoiceId = remaining <= 0 && values.units > (old?.units || 0) && !account.openInvoiceId ? newInvoice(tx, db, account, invoiceId, '수동 출결 기록 후 소진') : account.openInvoiceId;
+    if (remaining > 0 && currentInvoice?.exists) tx.update(currentInvoice.ref, { needsReview: true });
+    tx.set(ref, { ...old, ...values, id, studentId, name: account.name, source: old?.source || 'manual', at: old?.at || now(), updatedAt: now() });
+    tx.update(accountRef, { remaining, openInvoiceId, updatedAt: now() });
+    audit(tx, db, actor, 'record-attendance', studentId, { attendanceId: id, before: old?.units || 0, ...values, remaining });
   });
 }

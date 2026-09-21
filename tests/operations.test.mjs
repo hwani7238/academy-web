@@ -118,3 +118,43 @@ test('missing NHN config preserves blocked notice without sending',async()=>{
  const original=global.fetch;global.fetch=()=>{throw Error('must not send');};
  try{await s.load('notices').processNotices();assert.equal([...s.records.values()].filter(x=>x.status==='blocked').length,1);}finally{global.fetch=original;if(previous!==undefined)process.env.NHN_APP_KEY=previous;}
 });
+
+test('billing stays blocked even with NHN billing credentials configured', async () => {
+ const s=setup(); await s.seed(); await s.service.createInvoice('student-a','owner');
+ const invoiceId=s.records.get('opsAccounts/student-a').openInvoiceId;
+ await s.service.invoiceAction({invoiceId,action:'sendInvoice'},'owner');
+ const keys=['NHN_APP_KEY','NHN_SECRET_KEY','NHN_SENDER_KEY','NHN_BILLING_TEMPLATE'];
+ const saved={...process.env}; for(const key of keys) process.env[key]='test';
+ const original=global.fetch; let calls=0; global.fetch=async()=>{calls++;throw Error('must not send');};
+ try {
+  await s.load('notices').processNotices(); assert.equal(calls,0);
+  assert.equal(s.records.get(`opsNotices/billing_${invoiceId}`).status,'blocked');
+  assert.match(s.records.get(`opsNotices/billing_${invoiceId}`).error,/결제선생/);
+ } finally { global.fetch=original; for(const key of keys){if(saved[key]===undefined)delete process.env[key];else process.env[key]=saved[key];} }
+});
+test('manual absence, makeup and repeated saves preserve lesson balances', async()=>{
+ const s=setup();await s.seed();const day=s.load('model').seoulDay();
+ const input={studentId:'student-a',day,status:'absent',units:0,note:'결석',expectedUpdatedAt:''};
+ await s.service.recordAttendance(input,'owner');
+ assert.equal(s.records.get('opsAccounts/student-a').remaining,1);
+ assert.equal([...s.records.keys()].filter(k=>k.startsWith('opsNotices/')).length,0);
+ const ref=`opsAttendance/student-a_${day}`;
+ const makeup={...input,status:'makeup',units:1,note:'보강',expectedUpdatedAt:s.records.get(ref).updatedAt};
+ await s.service.recordAttendance(makeup,'owner');await s.service.recordAttendance(makeup,'owner');
+ assert.equal(s.records.get('opsAccounts/student-a').remaining,0);
+ assert.equal([...s.records.keys()].filter(k=>k.startsWith('opsInvoices/')).length,1);
+ await assert.rejects(s.service.recordAttendance({...makeup,units:2,expectedUpdatedAt:'stale'},'owner'));
+ await s.service.recordAttendance({...makeup,units:0,note:'이미 차감한 수업',expectedUpdatedAt:s.records.get(ref).updatedAt},'owner');
+ assert.equal(s.records.get('opsAccounts/student-a').remaining,1);
+ assert.equal([...s.records.values()].filter(x=>x.needsReview).length,1);
+});
+test('invalid, future and nonzero cancelled attendance is rejected', async()=>{
+ const s=setup();await s.seed();const input={studentId:'student-a',day:'2026-02-30',status:'absent',units:0,note:'test'};
+ for(const patch of [{},{day:'2999-01-01'},{day:s.load('model').seoulDay(),status:'cancelled',units:1},{day:s.load('model').seoulDay(),status:'invalid'}]) await assert.rejects(s.service.recordAttendance({...input,...patch},'owner'));
+ assert.equal(s.records.get('opsAccounts/student-a').remaining,1);
+});
+test('kiosk does not report absence as successful attendance',async()=>{
+ const s=setup();await s.seed();await s.service.recordAttendance({studentId:'student-a',day:s.load('model').seoulDay(),status:'absent',units:0,note:'결석'},'owner');
+ await assert.rejects(s.service.checkIn('student-a','1234','device'),{status:409});
+ assert.equal(s.records.get('opsAccounts/student-a').remaining,1);
+});

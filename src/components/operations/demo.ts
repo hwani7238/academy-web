@@ -1,4 +1,4 @@
-import { Snapshot, Account, adjustBalance, settle, seoulDay, suffixes } from '@/lib/operations/model';
+import { Snapshot, Account, adjustBalance, settle, seoulDay, suffixes, attendanceInput } from '@/lib/operations/model';
 export function sample(): Snapshot {
   const stamp = new Date().toISOString();
   const accounts: Account[] = [
@@ -6,7 +6,7 @@ export function sample(): Snapshot {
     { id: 'demo-b', name: '이서준', phone: '01000005678', checkinSuffixes: ['5678'], planUnits: 12, planAmount: 210000, remaining: 4, openInvoiceId: null, autoBilling: false, active: true, updatedAt: stamp },
     { id: 'demo-c', name: '김하린', phone: '01000001234', checkinSuffixes: ['1234'], planUnits: 8, planAmount: 160000, remaining: 6, openInvoiceId: null, autoBilling: false, active: true, updatedAt: stamp },
   ];
-  return { accounts, students: accounts.map(({ id, name, phone }) => ({ id, name, phone })), attendance: [], invoices: [], payments: [], notices: [], devices: [], day: seoulDay(), configured: false };
+  return { accounts, students: accounts.map(({ id, name, phone }, i) => ({ id, name, phone, instruments: i === 0 ? ['어린이 피아노'] : i === 1 ? ['통기타'] : ['성인 피아노', '보컬'] })), attendance: [], invoices: [], payments: [], notices: [], devices: [], day: seoulDay(), configured: false };
 }
 export function demoAction(current: Snapshot, input: Record<string, unknown>): { data: Snapshot; result: Record<string, unknown> } {
   const data = structuredClone(current); const at = new Date().toISOString();
@@ -19,9 +19,20 @@ export function demoAction(current: Snapshot, input: Record<string, unknown>): {
     if (a.autoBilling) enqueue(a, `billing_${id}`, 'billing');
   };
   let result: Record<string, unknown> = { ok: true };
-  if (input.action === 'demoCheckIn') {
+  if (input.action === 'recordAttendance') {
+    const values = attendanceInput(input);
+    if (!account) throw new Error('먼저 수강 설정을 저장해주세요.');
+    const id = `${account.id}_${values.day}`; const old = data.attendance.find(a => a.id === id);
+    account.remaining = adjustBalance(account.remaining, old?.units || 0, values.units);
+    data.attendance = data.attendance.filter(a => a.id !== id);
+    data.attendance.push({ ...old, ...values, id, studentId: account.id, name: account.name, at: old?.at || at, source: old?.source || 'manual', updatedAt: at });
+    if (account.remaining <= 0 && values.units > (old?.units || 0)) invoice(account);
+    if (account.remaining > 0) { const open = data.invoices.find(i => i.id === account.openInvoiceId); if (open) open.needsReview = true; }
+  } else if (input.action === 'demoCheckIn') {
     if (!account?.active) throw new Error('학생 설정을 확인해주세요.');
-    if (data.attendance.some(a => a.studentId === account.id && a.day === seoulDay())) return { data, result: { duplicate: true, name: account.name } };
+    const existing = data.attendance.find(a => a.studentId === account.id && a.day === seoulDay());
+    if (existing?.status === 'absent' || existing?.status === 'cancelled') throw new Error('오늘 결석·취소 기록이 있습니다. 선생님께 출석 변경을 요청해주세요.');
+    if (existing) return { data, result: { duplicate: true, name: account.name } };
     const id = `${account.id}_${seoulDay()}`;
     account.remaining = adjustBalance(account.remaining, 0, 1);
     data.attendance.unshift({ id, studentId: account.id, name: account.name, day: seoulDay(), at, units: 1, note: '', updatedAt: at });
@@ -35,8 +46,7 @@ export function demoAction(current: Snapshot, input: Record<string, unknown>): {
   else if (input.action === 'adjust') {
     const attendance = data.attendance.find(a => a.id === input.attendanceId)!;
     const a = data.accounts.find(a => a.id === attendance.studentId)!;
-    if (!String(input.note || '').trim()) throw new Error('변경 사유를 적어주세요.');
-    a.remaining = adjustBalance(a.remaining, attendance.units, Number(input.units)); attendance.units = Number(input.units); attendance.note = String(input.note);
+    a.remaining = adjustBalance(a.remaining, attendance.units, Number(input.units)); attendance.units = Number(input.units); attendance.note = String(input.note || '').trim().slice(0, 500);
     if (a.remaining <= 0) invoice(a);
     else { const open = data.invoices.find(i => i.id === a.openInvoiceId); if (open) open.needsReview = true; }
   } else if (input.action === 'payment') {

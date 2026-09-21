@@ -3,12 +3,14 @@ export type Account = {
   planUnits: number; planAmount: number; remaining: number; openInvoiceId: string | null;
   autoBilling: boolean; active: boolean; updatedAt: string;
 };
-export type Attendance = { id: string; studentId: string; name: string; day: string; at: string; units: number; note: string; updatedAt: string };
+export const ATTENDANCE_LABELS = { present: "출석", absent: "결석", makeup: "보강", cancelled: "취소" } as const;
+export type AttendanceStatus = keyof typeof ATTENDANCE_LABELS;
+export type Attendance = { status?: AttendanceStatus; source?: "kiosk" | "manual"; relatedDay?: string; id: string; studentId: string; name: string; day: string; at: string; units: number; note: string; updatedAt: string };
 export type Invoice = { id: string; studentId: string; name: string; units: number; amount: number; paid: number; status: 'open' | 'paid' | 'cancelled'; needsReview: boolean; createdAt: string };
 export type Payment = { id: string; invoiceId: string; studentId: string; amount: number; method: string; at: string; note: string };
 export type Notice = { id: string; studentId: string; name: string; kind: 'attendance' | 'billing'; status: string; createdAt: string; requestId?: string; error?: string };
 export type Device = { id: string; name: string; active: boolean; createdAt: string };
-export type Snapshot = { students: { id: string; name: string; phone: string }[]; accounts: Account[]; attendance: Attendance[]; invoices: Invoice[]; payments: Payment[]; notices: Notice[]; devices: Device[]; day: string; configured: boolean };
+export type Snapshot = { students: { id: string; name: string; phone: string; instruments?: string[] }[]; accounts: Account[]; attendance: Attendance[]; invoices: Invoice[]; payments: Payment[]; notices: Notice[]; devices: Device[]; day: string; configured: boolean };
 export const METHODS = ['현금', '카드', '지역화폐', '계좌이체'] as const;
 export function seoulDay(date = new Date()) { return new Intl.DateTimeFormat('sv-SE', { timeZone: 'Asia/Seoul' }).format(date); }
 export function suffixes(values: unknown) {
@@ -29,4 +31,21 @@ export function settle(invoice: Invoice, amount: number) {
   if (invoice.paid + amount > invoice.amount) throw new Error('미납 금액보다 큰 금액은 기록할 수 없습니다.');
   const paid = invoice.paid + amount;
   return { paid, complete: paid === invoice.amount };
+}
+
+export function validDay(value: unknown): string {
+  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value) || !Number.isFinite(Date.parse(value)) || new Date(value).toISOString().slice(0, 10) !== value) throw new Error('날짜를 확인해주세요.');
+  return value;
+}
+export function attendanceInput(input: Record<string, unknown>) {
+  const day = validDay(input.day);
+  if (day > seoulDay()) throw new Error('미래 날짜의 출결은 기록할 수 없습니다.');
+  const status = input.status as AttendanceStatus;
+  if (!Object.hasOwn(ATTENDANCE_LABELS, status)) throw new Error('출결 상태를 선택해주세요.');
+  const units = integer(input.units, 0, 10, '차감 횟수');
+  if (status === 'cancelled' && units !== 0) throw new Error('취소 기록은 0회 차감으로 저장해주세요.');
+  const note = typeof input.note === 'string' ? input.note.trim().slice(0, 500) : '';
+  const relatedDay = status === 'makeup' && input.relatedDay ? validDay(input.relatedDay) : '';
+  if (relatedDay && relatedDay > day) throw new Error('원래 수업일은 보강일보다 늦을 수 없습니다.');
+  return { day, status, units, note, relatedDay };
 }

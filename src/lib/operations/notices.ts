@@ -1,5 +1,5 @@
 import { database } from './auth';
-export function noticeConfigured() { return Boolean(process.env.NHN_APP_KEY && process.env.NHN_SECRET_KEY && process.env.NHN_SENDER_KEY && process.env.NHN_ATTENDANCE_TEMPLATE && process.env.NHN_BILLING_TEMPLATE); }
+export function noticeConfigured() { return Boolean(process.env.NHN_APP_KEY && process.env.NHN_SECRET_KEY && process.env.NHN_SENDER_KEY && process.env.NHN_ATTENDANCE_TEMPLATE); }
 export async function processNotices() {
   const db = database();
   const pending = await db.collection('opsNotices').where('status', '==', 'queued').limit(5).get();
@@ -13,9 +13,11 @@ export async function processNotices() {
         const invoice = (await tx.get(db.doc(`opsInvoices/${item.id.replace(/^billing_/, '')}`))).data();
         if (!invoice || invoice.status !== 'open') { tx.update(item.ref, { status: 'cancelled' }); return null; }
         if (invoice.needsReview) { tx.update(item.ref, { status: 'review', error: '횟수 수정 후 청구 확인이 필요합니다.' }); return null; }
-        fresh.parameters = { ...fresh.parameters, amount: String(invoice.amount - invoice.paid) };
+        // Never substitute NHN for the contracted payment provider.
+        tx.update(item.ref, { status: 'blocked', error: '결제선생 API 계약·테스트 연결 대기 중입니다. 실제 청구서는 발송되지 않았습니다.' });
+        return null;
       }
-      const template = fresh.kind === 'attendance' ? process.env.NHN_ATTENDANCE_TEMPLATE : process.env.NHN_BILLING_TEMPLATE;
+      const template = process.env.NHN_ATTENDANCE_TEMPLATE;
       if (!process.env.NHN_APP_KEY || !process.env.NHN_SECRET_KEY || !process.env.NHN_SENDER_KEY || !template) reason = '알림톡 발신 및 템플릿 설정이 필요합니다.';
       if (reason) { tx.update(item.ref, { status: 'blocked', error: reason }); return null; }
       tx.update(item.ref, { status: 'processing', startedAt: new Date().toISOString(), error: '' });
