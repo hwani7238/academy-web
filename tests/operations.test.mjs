@@ -194,3 +194,12 @@ test('opening import blocks unresolved, stale, and existing accounts',async()=>{
  if(change.existing)assert.equal(s.records.get(`opsAccounts/${s.service.enrollmentId('person','보컬')}`).remaining,9);
  }
 });
+
+test('attendance already included in imported opening balance is not deducted again',async()=>{
+ const s=setup();await s.seed();const day=s.load('model').seoulDay();
+ const a=s.records.get('opsAccounts/student-a');s.records.set('opsAccounts/student-a',{...a,importId:'legacy',openingAsOf:day});
+ s.records.set('opsImports/legacy',{history:[{cells:[{day,value:'7'}]}]});
+ assert.equal((await s.service.checkIn('student-a','1234','device')).duplicate,true);
+ assert.equal(s.records.get('opsAccounts/student-a').remaining,1);
+ assert.equal([...s.records.keys()].some(k=>k.startsWith('opsNotices/')),false);
+});

@@ -47,7 +47,7 @@ export async function configure(input: Record<string, unknown>, actor: string) {
     if (subject && (await tx.get(db.doc(`opsAccounts/${sourceStudentId}`))).exists) throw new Error('기존 통합 수강권을 과목별로 분리한 후 등록해주세요.');
     const old = existing.data();
     const remaining = old ? old.remaining : integer(input.remaining, -1000, 1000, '현재 남은 횟수');
-    tx.set(ref, { id, ...(subject ? { sourceStudentId, subject } : {}), name: subject ? `${student.data()?.name || '학생'} · ${subject}` : student.data()?.name || '학생', phone, checkinSuffixes: codes, planUnits, planAmount, remaining, openInvoiceId: old?.openInvoiceId || null, active: input.active !== false, autoBilling: input.autoBilling === true, updatedAt: now() });
+    tx.set(ref, { id, ...(old?.importId ? { importId: old.importId, openingAsOf: old.openingAsOf } : {}), ...(old?.displaySubject ? { displaySubject: old.displaySubject } : {}), ...(subject ? { sourceStudentId, subject } : {}), name: subject ? `${student.data()?.name || '학생'} · ${subject}` : student.data()?.name || '학생', phone, checkinSuffixes: codes, planUnits, planAmount, remaining, openInvoiceId: old?.openInvoiceId || null, active: input.active !== false, autoBilling: input.autoBilling === true, updatedAt: now() });
     audit(tx, db, actor, 'configure', id, { planUnits, planAmount, remaining, active: input.active !== false, autoBilling: input.autoBilling === true });
   });
 }
@@ -59,6 +59,12 @@ export async function checkIn(studentId: string, digits: string, actor: string) 
     const [accountSnap, attended] = await Promise.all([tx.get(ref), tx.get(attendanceRef)]);
     const account = accountSnap.data() as Account | undefined;
     if (!account?.active || !account.checkinSuffixes.includes(digits)) throw new HttpError(404, '등록된 학생을 찾을 수 없습니다.');
+    if (!attended.exists && account.importId && account.openingAsOf === day) {
+      const imported = (await tx.get(db.doc(`opsImports/${account.importId}`))).data();
+      if (imported?.history?.some((h: { cells?: { day: string }[] }) => h.cells?.some(c => c.day === day))) {
+        return { duplicate: true, name: account.name };
+      }
+    }
     if (attended.exists) {
       const status = attended.data()?.status;
       if (status === 'absent' || status === 'cancelled') throw new HttpError(409, '오늘 결석·취소 기록이 있습니다. 선생님께 출석 변경을 요청해주세요.');
