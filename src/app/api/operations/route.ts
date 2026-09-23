@@ -67,10 +67,14 @@ export async function POST(request: Request) {
   try {
     sameOrigin(request); const actor = await manager(request); const input = await request.json();
     switch (input.action) {
-      case 'changeLifecycle': await service.changeLifecycle(input, actor); return Response.json({ok:true});
+      case 'changeLifecycle': return Response.json({ok:true,changes:await service.changeLifecycle(input, actor)});
       case 'registerStudent': return Response.json(await service.registerStudent(input, actor));
       case 'configure': await service.configure(input, actor); break;
-      case 'recordAttendance': await service.recordAttendance(input, actor); break;
+      case 'recordAttendance': {
+        const changes=await service.recordAttendance(input, actor);
+        after(async()=>{try{await processNotices();}catch{console.error('Notification worker failed');}});
+        return Response.json({ok:true,changes});
+      }
       case 'adjust': await service.adjust(input, actor); break;
       case 'invoice': await service.createInvoice(input.studentId, actor); break;
       case 'payment': await service.payment(input, actor); break;

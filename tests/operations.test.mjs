@@ -287,3 +287,27 @@ test('archive refresh rejects future cells, duplicate days and ambiguous source 
  const future=structuredClone(p);future.asOf='2099-09-23';future.month='2099-09';assert.equal((await s.importPost(future)).status,400);
  assert.equal(s.records.get(`opsImports/${id}`).attendanceRevision,undefined);
 });
+
+test('save response contains committed attendance, balance and invoice including retries',async()=>{
+ const s=setup();await s.seed();const day=s.load('model').seoulDay();
+ const input={studentId:'student-a',day,status:'present',units:1,note:''};
+ const changes=await s.service.recordAttendance(input,'owner');
+ assert.deepEqual(changes.attendance[0],s.records.get(`opsAttendance/student-a_${day}`));
+ assert.deepEqual(changes.accounts[0],s.records.get('opsAccounts/student-a'));
+ const invoice=s.records.get(`opsInvoices/${changes.invoices[0].id}`);
+ for(const [key,value] of Object.entries(changes.invoices[0]))assert.deepEqual(value,invoice[key]);
+ const retry=await s.service.recordAttendance(input,'owner');
+ assert.deepEqual(retry.accounts,changes.accounts);
+ const correction=await s.service.recordAttendance({...input,status:'absent',units:0,expectedUpdatedAt:changes.attendance[0].updatedAt},'owner');
+ assert.equal(correction.accounts[0].remaining,1);assert.equal(correction.invoices[0].needsReview,true);
+});
+test('confirmed patches preserve other data, update all courses, and respect selected month',async()=>{
+ const s=setup();await s.seed();const day=s.load('model').seoulDay();
+ const changes=await s.service.changeLifecycle({sourceStudentId:'student-a',status:'paused',until:day},'owner');
+ assert.deepEqual(changes.lifecycle.value,s.records.get('students/student-a').lifecycle);
+ const current={day,students:[{id:'course1',sourceStudentId:'student-a'},{id:'course2',sourceStudentId:'student-a'},{id:'other'}],attendance:[],accounts:[{id:'other',remaining:8}],invoices:[{id:'paid',status:'open'}],payments:[],notices:[],legacyAttendance:[]};
+ const next=s.load('snapshot-changes').applySnapshotChanges(current,{...changes,attendance:[{id:'past',day:'2020-01-01'}],accounts:[{id:'new',remaining:2}],invoices:[{id:'paid',status:'paid'}]});
+ assert.equal(next.students[0].lifecycle.status,'paused');assert.equal(next.students[1].lifecycle.status,'paused');assert.equal(next.students[2].lifecycle,undefined);
+ assert.equal(next.attendance.length,0);assert.equal(next.accounts.length,2);assert.equal(next.invoices.length,0);
+ assert.equal(next.legacyAttendance,current.legacyAttendance);assert.equal(next.payments,current.payments);
+});

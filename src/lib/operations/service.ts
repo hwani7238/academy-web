@@ -14,8 +14,8 @@ function audit(tx: Transaction, db: Firestore, actor: string, action: string, st
 function enqueue(tx: Transaction, db: Firestore, id: string, account: Account, kind: 'attendance' | 'billing', parameters: Record<string, string>) {
   tx.create(db.doc(`opsNotices/${id}`), { id, studentId: account.id, name: account.name, phone: account.phone, kind, parameters, status: 'queued', createdAt: now() });
 }
-function newInvoice(tx: Transaction, db: Firestore, account: Account, id: string, reason: string) {
-  const invoice: Invoice = { id, studentId: account.id, name: account.name, units: account.planUnits, amount: account.planAmount, paid: 0, status: 'open', needsReview: false, createdAt: now() };
+function newInvoice(tx: Transaction, db: Firestore, account: Account, id: string, reason: string, createdAt = now()) {
+  const invoice: Invoice = { id, studentId: account.id, name: account.name, units: account.planUnits, amount: account.planAmount, paid: 0, status: 'open', needsReview: false, createdAt };
   tx.create(db.doc(`opsInvoices/${id}`), { ...invoice, reason });
   if (account.autoBilling) enqueue(tx, db, `billing_${id}`, account, 'billing', { student_name: account.name, amount: String(invoice.amount), lesson_count: String(invoice.units) });
   return id;
@@ -25,14 +25,16 @@ export function enrollmentId(studentId: string, subject: string) {
 }
 export async function changeLifecycle(input: Record<string, unknown>, actor: string) {
   const id = key(input.sourceStudentId); const values = lifecycleInput(input); const db = database();
-  await db.runTransaction(async tx => {
+  return db.runTransaction(async tx => {
     const ref = db.doc(`students/${id}`); const student = (await tx.get(ref)).data();
     if (!student) throw Error('학생을 찾을 수 없습니다.');
     const old = student.lifecycle;
-    if (old && old.status === values.status && old.until === values.until && old.note === values.note) return;
+    if (old && old.status === values.status && old.until === values.until && old.note === values.note) return { lifecycle: { sourceStudentId:id, value:old } };
     if ((old?.updatedAt || '') !== (input.expectedUpdatedAt || '')) throw Error('학생 상태가 변경됐습니다. 새로고침 후 다시 확인해주세요.');
-    tx.update(ref, { lifecycle: { ...values, updatedAt: now() } });
+    const value = { ...values, updatedAt: now() };
+    tx.update(ref, { lifecycle: value });
     audit(tx, db, actor, 'student-lifecycle', id, { before: old || null, ...values });
+    return { lifecycle: { sourceStudentId:id, value } };
   });
 }
 export async function registerStudent(input: Record<string, unknown>, actor: string) {
@@ -224,19 +226,25 @@ export async function releaseBlocked(actor: string) {
 export async function recordAttendance(input: Record<string, unknown>, actor: string) {
   const values = attendanceInput(input); const studentId = key(input.studentId);
   const db = database(); const id = `${studentId}_${values.day}`; const invoiceId = randomUUID();
-  await db.runTransaction(async tx => {
+  return db.runTransaction(async tx => {
     const ref = db.doc(`opsAttendance/${id}`); const accountRef = db.doc(`opsAccounts/${studentId}`);
     const [previous, accountSnap] = await Promise.all([tx.get(ref), tx.get(accountRef)]);
     const old = previous.data() as Attendance | undefined; const account = accountSnap.data() as Account | undefined;
     if (!account) throw new Error('먼저 수강 설정을 저장해주세요.');
-    if (old && Object.entries(values).every(([k,v]) => (old as unknown as Record<string, unknown>)[k] === v)) return;
-    if ((old?.updatedAt || '') !== (input.expectedUpdatedAt || '')) throw new Error('다른 화면에서 기록이 변경됐습니다. 새로고침 후 다시 확인해주세요.');
     const currentInvoice = account.openInvoiceId ? await tx.get(db.doc(`opsInvoices/${account.openInvoiceId}`)) : null;
+    if (old && Object.entries(values).every(([k,v]) => (old as unknown as Record<string, unknown>)[k] === v)) return { attendance:[old], accounts:[account], invoices: currentInvoice?.exists ? [{...currentInvoice.data(),id:currentInvoice.id} as Invoice] : [] };
+    if ((old?.updatedAt || '') !== (input.expectedUpdatedAt || '')) throw new Error('다른 화면에서 기록이 변경됐습니다. 새로고침 후 다시 확인해주세요.');
+
+    const stamp=now();
     const remaining = adjustBalance(account.remaining, old?.units || 0, values.units);
-    const openInvoiceId = remaining <= 0 && values.units > (old?.units || 0) && !account.openInvoiceId ? newInvoice(tx, db, account, invoiceId, '수동 출결 기록 후 소진') : account.openInvoiceId;
+    const openInvoiceId = remaining <= 0 && values.units > (old?.units || 0) && !account.openInvoiceId ? newInvoice(tx, db, account, invoiceId, '수동 출결 기록 후 소진', stamp) : account.openInvoiceId;
     if (remaining > 0 && currentInvoice?.exists) tx.update(currentInvoice.ref, { needsReview: true });
-    tx.set(ref, { ...old, ...values, id, studentId, name: account.name, source: old?.source || 'manual', at: old?.at || now(), updatedAt: now() });
-    tx.update(accountRef, { remaining, openInvoiceId, updatedAt: now() });
+    const attendance:Attendance={ ...old, ...values, id, studentId, name: account.name, source: old?.source || 'manual', at: old?.at || stamp, updatedAt: stamp };
+    const updatedAccount={...account,remaining,openInvoiceId,updatedAt:stamp};
+    tx.set(ref, attendance);
+    tx.update(accountRef, { remaining, openInvoiceId, updatedAt: stamp });
     audit(tx, db, actor, 'record-attendance', studentId, { attendanceId: id, before: old?.units || 0, ...values, remaining });
+    const invoices:Invoice[]=openInvoiceId && openInvoiceId!==account.openInvoiceId ? [{id:openInvoiceId,studentId:account.id,name:account.name,units:account.planUnits,amount:account.planAmount,paid:0,status:'open',needsReview:false,createdAt:stamp}] : currentInvoice?.exists ? [{...currentInvoice.data(),id:currentInvoice.id,...(remaining>0?{needsReview:true}:{})} as Invoice] : [];
+    return { attendance:[attendance], accounts:[updatedAccount], invoices };
   });
 }

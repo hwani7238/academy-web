@@ -1,4 +1,5 @@
 'use client';
+import { applySnapshotChanges, type SnapshotChanges } from '@/lib/operations/snapshot-changes';
 import { enrollmentState } from '@/lib/operations/lifecycle';
 import { LifecycleDialog } from './LifecycleDialog';
 
@@ -17,7 +18,7 @@ const time = (v: string) => new Date(v).toLocaleString('ko-KR', { timeZone: 'Asi
 const STATUS: Record<string, string> = { queued: '발송 대기', blocked: '설정 필요', processing: '처리 중 · 결과 확인', submitted: 'NHN 접수', failed: '발송 실패', unknown: '결과 확인 필요', cancelled: '취소', demo: '체험 기록', review: '청구 확인 필요' };
 type Panel = { type: 'account'; id: string } | { type: 'adjust'; row: Attendance } | { type: 'payment'; row: Invoice; requestId: string } | null;
 export function Operations({ demo = false }: { demo?: boolean }) {
-  const [data, setData] = useState<Snapshot | null>(() => demo ? sample() : null); const dataRef = useRef(data); const refreshVersion = useRef(0);
+  const [data, setData] = useState<Snapshot | null>(() => demo ? sample() : null); const dataRef = useRef(data); const refreshVersion = useRef(0); const mutation = useRef(false); const pendingRefresh = useRef(false); const latestRefresh = useRef<() => void>(() => {});
   const [user, setUser] = useState<User | null>(null); const [authReady, setAuthReady] = useState(demo);
   const [tab, setTab] = useState(demo ? 'today' : 'monthly'); const [day, setDay] = useState(seoulDay()); const [search, setSearch] = useState('');
   const [lifecycleTarget,setLifecycleTarget]=useState<{student:Snapshot['students'][number];status:'paused'|'withdrawn'}|null>(null);
@@ -35,20 +36,29 @@ export function Operations({ demo = false }: { demo?: boolean }) {
     const response = await fetch(`/api/operations?day=${day}`, { method: body ? 'POST' : 'GET', cache: 'no-store', headers: { 'Authorization': `Bearer ${await user.getIdToken()}`, ...(body ? { 'Content-Type': 'application/json' } : {}) }, ...(body ? { body: JSON.stringify(body) } : {}) });
     const result = await response.json(); if (!response.ok) throw new Error(result.error); return result;
   };
-  const refresh = async () => { const version = ++refreshVersion.current; try { const next = await api(); if (version !== refreshVersion.current) return; if (JSON.stringify(dataRef.current) !== JSON.stringify(next)) { setData(next); dataRef.current = next; } setError(''); } catch (e) { if (version === refreshVersion.current) setError(e instanceof Error ? e.message : '불러오지 못했습니다.'); } };
+  const refresh = async (force = false) => { if (mutation.current && !force) { pendingRefresh.current = true; return; } const version = ++refreshVersion.current; try { const next = await api(); if (version !== refreshVersion.current) return; if (JSON.stringify(dataRef.current) !== JSON.stringify(next)) { setData(next); dataRef.current = next; } setError(''); } catch (e) { if (version === refreshVersion.current) setError(e instanceof Error ? e.message : '불러오지 못했습니다.'); } };
+  latestRefresh.current = () => { void refresh(); };
   useEffect(() => { if (demo || !user) return; void refresh(); const timer = setInterval(() => { if (document.visibilityState === 'visible') void refresh(); }, 30000); return () => { clearInterval(timer); refreshVersion.current++; };
   // Re-fetch only when the user or selected date changes.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [demo, user, day]);
   const act = async (input: Record<string, unknown>) => {
+    if (mutation.current) throw new Error('앞선 저장이 처리 중입니다.');
+    mutation.current = true; refreshVersion.current++;
     setBusy(true); setError(''); setMessage('');
     try {
       let result: Record<string, unknown>;
       if (demo) { const next = demoAction(dataRef.current!, input); setData(next.data); dataRef.current = next.data; result = next.result; }
-      else { result = await api(input); await refresh(); }
+      else {
+        result = await api(input);
+        if (result.changes && dataRef.current) {
+          const next = applySnapshotChanges(dataRef.current, result.changes as SnapshotChanges);
+          dataRef.current = next; setData(next);
+        } else { await refresh(true); }
+      }
       setMessage(input.action === 'process' ? (demo ? '체험에서는 실제 메시지를 보내지 않습니다.' : '발송 대기 항목을 처리했습니다. 결과를 확인해주세요.') : '저장했습니다.');
       return result;
-    } catch (e) { setError(e instanceof Error ? e.message : '처리하지 못했습니다.'); throw e; } finally { setBusy(false); }
+    } catch (e) { setError(e instanceof Error ? e.message : '처리하지 못했습니다.'); throw e; } finally { mutation.current = false; setBusy(false); if (pendingRefresh.current) { pendingRefresh.current = false; latestRefresh.current(); } }
   };
   const click = (input: Record<string, unknown>) => { void act(input).catch(() => {}); };
   const submit = (e: React.FormEvent<HTMLFormElement>, action: string, extra: Record<string, unknown>) => {
