@@ -1,4 +1,5 @@
 'use client';
+import { enrollmentState } from '@/lib/operations/lifecycle';
 import { calendarDay, HOLIDAY_YEARS } from '@/lib/operations/holidays';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { ATTENDANCE_LABELS, AttendanceStatus, Snapshot, seoulDay, defaultAttendanceUnits } from '@/lib/operations/model';
@@ -7,7 +8,7 @@ export function MonthlyAttendance({ data, day, busy, save }: { data: Snapshot; d
   const [search, setSearch] = useState('');
   const [subject, setSubject] = useState('');
   const subjects = useMemo(() => [...new Set([...GROUPS, ...data.students.map(groupName)])].sort(compareGroups), [data.students]);
-  const filteredStudents = useMemo(() => data.students.filter(s => s.name.includes(search.trim()) && (!subject || groupName(s) === subject)).sort(compareStudents), [data.students, search, subject]);
+  const filteredStudents = useMemo(() => data.students.filter(s => enrollmentState(s.lifecycle) === 'active' && s.name.includes(search.trim()) && (!subject || groupName(s) === subject)).sort(compareStudents), [data.students, search, subject, seoulDay()]);
   const [page, setPage] = useState(0);
   const pageSize = 40;
   const pageCount = Math.max(1, Math.ceil(filteredStudents.length / pageSize));

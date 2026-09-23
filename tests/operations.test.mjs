@@ -6,6 +6,22 @@ import { createRequire } from 'node:module';
 import ts from 'typescript';
 const require = createRequire(import.meta.url);
 const root = path.resolve('src/lib/operations');
+test('pause and withdrawal preserve balances; expiry and reinstatement restore check-in',async()=>{
+ const s=setup();await s.seed('student-a',8);const today=s.load('model').seoulDay();
+ await s.service.changeLifecycle({sourceStudentId:'student-a',status:'paused',until:today,expectedUpdatedAt:''},'owner');
+ const life=s.records.get('students/student-a').lifecycle;
+ assert.equal(s.load('lifecycle').enrollmentState(life,today),'paused');
+ const tomorrow=new Date(today);tomorrow.setUTCDate(tomorrow.getUTCDate()+1);
+ assert.equal(s.load('lifecycle').enrollmentState(life,tomorrow.toISOString().slice(0,10)),'active');
+ await assert.rejects(s.service.checkIn('student-a','1234','device'));
+ await assert.rejects(s.service.changeLifecycle({sourceStudentId:'student-a',status:'active',expectedUpdatedAt:''},'owner'));
+ await s.service.changeLifecycle({sourceStudentId:'student-a',status:'withdrawn',expectedUpdatedAt:life.updatedAt},'owner');
+ await assert.rejects(s.service.checkIn('student-a','1234','device'));
+ assert.equal(s.records.get('opsAccounts/student-a').remaining,8);
+ await s.service.changeLifecycle({sourceStudentId:'student-a',status:'active',expectedUpdatedAt:s.records.get('students/student-a').lifecycle.updatedAt},'owner');
+ assert.equal(s.records.get('opsAccounts/student-a').remaining,8);
+ await s.service.checkIn('student-a','1234','device');assert.equal(s.records.get('opsAccounts/student-a').remaining,7);
+});
 test('new registration atomically creates a compatible student and check-in account, with retry safety',async()=>{
  const s=setup();const input={requestId:'request-new',name:'신규 학생',phone:'010-0000-1234',personalPhone:'010-0000-5678',group:'어린이 피아노(2관)',planUnits:8,planAmount:170000,remaining:8};
  const results=await Promise.all([s.service.registerStudent(input,'owner'),s.service.registerStudent(input,'owner')]);

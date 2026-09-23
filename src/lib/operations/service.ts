@@ -1,3 +1,4 @@
+import { enrollmentState, lifecycleInput } from './lifecycle';
 import { randomUUID, randomBytes } from 'node:crypto';
 import { registrationInput } from './registration';
 import type { Transaction, Firestore } from 'firebase-admin/firestore';
@@ -21,6 +22,18 @@ function newInvoice(tx: Transaction, db: Firestore, account: Account, id: string
 }
 export function enrollmentId(studentId: string, subject: string) {
   return `course_${hash(JSON.stringify([studentId, subject]))}`;
+}
+export async function changeLifecycle(input: Record<string, unknown>, actor: string) {
+  const id = key(input.sourceStudentId); const values = lifecycleInput(input); const db = database();
+  await db.runTransaction(async tx => {
+    const ref = db.doc(`students/${id}`); const student = (await tx.get(ref)).data();
+    if (!student) throw Error('학생을 찾을 수 없습니다.');
+    const old = student.lifecycle;
+    if (old && old.status === values.status && old.until === values.until && old.note === values.note) return;
+    if ((old?.updatedAt || '') !== (input.expectedUpdatedAt || '')) throw Error('학생 상태가 변경됐습니다. 새로고침 후 다시 확인해주세요.');
+    tx.update(ref, { lifecycle: { ...values, updatedAt: now() } });
+    audit(tx, db, actor, 'student-lifecycle', id, { before: old || null, ...values });
+  });
 }
 export async function registerStudent(input: Record<string, unknown>, actor: string) {
   const v = registrationInput(input); const requestId = key(input.requestId);
@@ -84,6 +97,8 @@ export async function checkIn(studentId: string, digits: string, actor: string) 
     const [accountSnap, attended] = await Promise.all([tx.get(ref), tx.get(attendanceRef)]);
     const account = accountSnap.data() as Account | undefined;
     if (!account?.active || !account.checkinSuffixes.includes(digits)) throw new HttpError(404, '등록된 학생을 찾을 수 없습니다.');
+    const owner = (await tx.get(db.doc(`students/${account.sourceStudentId || id}`))).data();
+    if (!owner || enrollmentState(owner.lifecycle) !== 'active') throw new HttpError(409, '휴원·퇴원 상태입니다. 선생님께 복귀 처리를 요청해주세요.');
     if (!attended.exists && account.importId && account.openingAsOf === day) {
       const imported = (await tx.get(db.doc(`opsImports/${account.importId}`))).data();
       if (imported?.history?.some((h: { cells?: { day: string }[] }) => h.cells?.some(c => c.day === day))) {
@@ -91,7 +106,7 @@ export async function checkIn(studentId: string, digits: string, actor: string) 
       }
     }
     if (attended.exists) {
-      const status = attended.data()?.status;
+      const status = attended.data()?.status || 'present';
       if (status !== 'present' && status !== 'makeup') throw new HttpError(409, '오늘 결석·취소 기록이 있습니다. 선생님께 출석 변경을 요청해주세요.');
       return { duplicate: true, name: account.name };
     }

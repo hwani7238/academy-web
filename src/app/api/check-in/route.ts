@@ -1,3 +1,4 @@
+import { enrollmentState } from '@/lib/operations/lifecycle';
 import { database, sameOrigin, device, failure } from '@/lib/operations/auth';
 import { pair, checkIn } from '@/lib/operations/service';
 import { after } from 'next/server';
@@ -16,7 +17,8 @@ export async function POST(request: Request) {
     if (typeof input.digits !== 'string' || !/^[0-9]{4}$/.test(input.digits)) throw new Error('뒷번호 네 자리를 입력해주세요.');
     if (input.action === 'lookup') {
       const matches = await database().collection('opsAccounts').where('checkinSuffixes', 'array-contains', input.digits).get();
-      return Response.json({ matches: matches.docs.filter(d => d.data().active).map(d => ({ id: d.id, name: d.data().name })) }, { headers: { 'Cache-Control': 'no-store' } });
+      const available = await Promise.all(matches.docs.filter(d=>d.data().active).map(async d=>{const owner=(await database().doc(`students/${d.data().sourceStudentId || d.id}`).get()).data();return owner && enrollmentState(owner.lifecycle) === 'active' ? {id:d.id,name:d.data().name} : null;}));
+      return Response.json({ matches: available.filter(Boolean) }, { headers: { 'Cache-Control': 'no-store' } });
     }
     if (input.action === 'checkIn') {
       const result = await checkIn(input.studentId, input.digits, `device:${actor}`);

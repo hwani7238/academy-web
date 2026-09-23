@@ -1,3 +1,4 @@
+import { enrollmentState, lifecycleInput } from '@/lib/operations/lifecycle';
 import { registrationInput } from '@/lib/operations/registration';
 import { Snapshot, Account, adjustBalance, settle, seoulDay, suffixes, attendanceInput } from '@/lib/operations/model';
 export function sample(): Snapshot {
@@ -21,7 +22,12 @@ export function demoAction(current: Snapshot, input: Record<string, unknown>): {
     if (a.autoBilling) enqueue(a, `billing_${id}`, 'billing');
   };
   let result: Record<string, unknown> = { ok: true };
-  if (input.action === 'registerStudent') {
+  if(input.action === 'changeLifecycle'){
+    const values=lifecycleInput(input);const rows=data.students.filter(s=>(s.sourceStudentId||s.id)===input.sourceStudentId);
+    if(!rows.length)throw Error('학생을 찾을 수 없습니다.');
+    if((rows[0].lifecycle?.updatedAt||'')!==(input.expectedUpdatedAt||''))throw Error('학생 상태가 변경됐습니다.');
+    for(const row of rows)row.lifecycle={...values,updatedAt:at};
+  } else if (input.action === 'registerStudent') {
     const v=registrationInput(input);const id=`demo-new-${input.requestId}`;
     if(data.accounts.some(a=>a.id===id))return {data,result:{ok:true,duplicate:true}};
     if(data.students.some(s=>s.name.split(' · ')[0].replace(/\s/g,'')===v.name.replace(/\s/g,'')&&s.phone.replace(/\D/g,'')===v.phone))throw Error('이미 등록된 학생입니다.');
@@ -37,7 +43,7 @@ export function demoAction(current: Snapshot, input: Record<string, unknown>): {
     if (account.remaining <= 0 && values.units > (old?.units || 0)) invoice(account);
     if (account.remaining > 0) { const open = data.invoices.find(i => i.id === account.openInvoiceId); if (open) open.needsReview = true; }
   } else if (input.action === 'demoCheckIn') {
-    if (!account?.active) throw new Error('학생 설정을 확인해주세요.');
+    if (!account?.active || enrollmentState(data.students.find(s=>s.id===account.id)?.lifecycle)!=='active') throw new Error('학생 설정을 확인해주세요.');
     const existing = data.attendance.find(a => a.studentId === account.id && a.day === seoulDay());
     if (existing?.status && existing.status !== 'present' && existing.status !== 'makeup') throw new Error('오늘 결석·취소 기록이 있습니다. 선생님께 출석 변경을 요청해주세요.');
     if (existing) return { data, result: { duplicate: true, name: account.name } };

@@ -13,7 +13,7 @@ export async function GET(request: Request) {
     validDay(day);
     const month = day.slice(0, 7); const end = new Date(`${month}-01T00:00:00Z`); end.setUTCMonth(end.getUTCMonth() + 1);
     const [students, accounts, attendance, invoices, payments, notices, devices, imports] = await Promise.all([
-      db.collection('students').select('name', 'phone', 'instruments', 'instrument').get(), db.collection('opsAccounts').get(),
+      db.collection('students').select('name', 'phone', 'instruments', 'instrument', 'lifecycle').get(), db.collection('opsAccounts').get(),
       db.collection('opsAttendance').where('day', '>=', `${month}-01`).where('day', '<', end.toISOString().slice(0, 10)).get(),
       db.collection('opsInvoices').where('status', '==', 'open').get(),
       db.collection('opsPayments').orderBy('at', 'desc').limit(100).get(),
@@ -53,7 +53,7 @@ export async function GET(request: Request) {
     }
     const rows = (snap: FirebaseFirestore.QuerySnapshot) => snap.docs.map(d => ({ ...d.data(), id: d.id }));
     return Response.json({ day, legacyAttendance: [...legacyCells.values()].filter(Boolean), configured: noticeConfigured(), students: students.docs.flatMap<Snapshot['students'][number]>(d => {
-      const raw = d.data(); const base = { name: raw.name || '학생', phone: raw.phone || '' };
+      const raw = d.data(); const base = { name: raw.name || '학생', phone: raw.phone || '', ...(raw.lifecycle ? { lifecycle: raw.lifecycle } : {}) };
       // Preserve existing single-account balances; do not silently duplicate them.
       if (accountById.has(d.id)) return [{ ...base, id: d.id, instruments: service.studentSubjects(raw) }];
       const subjects = service.studentSubjects(raw);
@@ -67,6 +67,7 @@ export async function POST(request: Request) {
   try {
     sameOrigin(request); const actor = await manager(request); const input = await request.json();
     switch (input.action) {
+      case 'changeLifecycle': await service.changeLifecycle(input, actor); return Response.json({ok:true});
       case 'registerStudent': return Response.json(await service.registerStudent(input, actor));
       case 'configure': await service.configure(input, actor); break;
       case 'recordAttendance': await service.recordAttendance(input, actor); break;
