@@ -11,4 +11,5 @@ export function groupName(student: Snapshot['students'][number]) {
 const korean = new Intl.Collator('ko', { numeric: true });
 function rank(group: string) { const index = GROUPS.indexOf(group); return index >= 0 ? index : group === '어린이 피아노(관 미확인)' ? 2.5 : GROUPS.length; }
 export const compareGroups = (a: string, b: string) => rank(a) - rank(b) || korean.compare(a, b);
-export const compareStudents = (a: Snapshot['students'][number], b: Snapshot['students'][number]) => compareGroups(groupName(a), groupName(b)) || korean.compare(a.name.split(' · ')[0], b.name.split(' · ')[0]) || korean.compare(a.id, b.id);
+export const compareNames = (a: string, b: string) => korean.compare(a.split(' · ')[0].trim(), b.split(' · ')[0].trim());
+export const compareStudents = (a: Snapshot['students'][number], b: Snapshot['students'][number]) => compareNames(a.name, b.name) || compareGroups(groupName(a), groupName(b)) || korean.compare(a.id, b.id);
