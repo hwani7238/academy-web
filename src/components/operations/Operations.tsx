@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { User } from 'firebase/auth';
 import { Attendance, Invoice, Snapshot, METHODS, seoulDay, ATTENDANCE_LABELS } from '@/lib/operations/model';
 import { ImportStudents } from './ImportStudents';
+import { compareStudents } from '@/lib/operations/student-order';
 import { MonthlyAttendance } from './MonthlyAttendance';
 import { CheckIn } from './CheckIn';
 import { sample, demoAction } from './demo';
@@ -55,7 +56,7 @@ export function Operations({ demo = false }: { demo?: boolean }) {
   const presentCount = todayAttendance.filter(a => !a.status || a.status === 'present' || a.status === 'makeup').length;
   const unconfigured = data.students.length - data.accounts.length;
   const open = data.invoices.filter(i => i.status === 'open');
-  const students = data.students.filter(s => s.name.includes(search) || s.phone.includes(search));
+  const students = data.students.filter(s => s.name.includes(search) || s.phone.includes(search)).sort(compareStudents);
   const account = panel?.type === 'account' ? data.accounts.find(a => a.id === panel.id) : undefined;
   const student = panel?.type === 'account' ? data.students.find(s => s.id === panel.id) : undefined;
   const tabs = [['today', '출석 기록'], ['monthly', '월별 출석표'], ['students', '수강 설정'], ['billing', '청구·수납'], ['notices', '알림 내역'], ['devices', '출석 기기'], ...(!demo ? [['imports', '기존 장부']] : [])];
