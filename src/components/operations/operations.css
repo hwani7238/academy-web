@@ -7,3 +7,5 @@
 
 
 .whee-ops .monthly-table tbody th{line-height:16px;font-size:13px}.whee-ops .monthly-table tbody th small{font-size:12px;line-height:16px}.whee-ops .monthly-table td small{font-size:11px;line-height:14px;margin-top:0}.whee-ops .monthly-table thead th{padding:4px 3px;font-size:12px;line-height:15px}.whee-ops .monthly-table thead small{font-size:11px;line-height:14px}.whee-ops .monthly-table .attendance-badge{font-size:11px;line-height:14px;margin-top:1px}
+
+.whee-ops .monthly-table thead th.calendar-saturday,.whee-ops .monthly-table thead th.calendar-saturday small{color:#2563eb}.whee-ops .monthly-table thead th.calendar-holiday,.whee-ops .monthly-table thead th.calendar-holiday small{color:#dc2626}
