@@ -13,7 +13,7 @@ const time = (v: string) => new Date(v).toLocaleString('ko-KR', { timeZone: 'Asi
 const STATUS: Record<string, string> = { queued: '발송 대기', blocked: '설정 필요', processing: '처리 중 · 결과 확인', submitted: 'NHN 접수', failed: '발송 실패', unknown: '결과 확인 필요', cancelled: '취소', demo: '체험 기록', review: '청구 확인 필요' };
 type Panel = { type: 'account'; id: string } | { type: 'adjust'; row: Attendance } | { type: 'payment'; row: Invoice; requestId: string } | null;
 export function Operations({ demo = false }: { demo?: boolean }) {
-  const [data, setData] = useState<Snapshot | null>(() => demo ? sample() : null); const dataRef = useRef(data);
+  const [data, setData] = useState<Snapshot | null>(() => demo ? sample() : null); const dataRef = useRef(data); const refreshVersion = useRef(0);
   const [user, setUser] = useState<User | null>(null); const [authReady, setAuthReady] = useState(demo);
   const [tab, setTab] = useState(demo ? 'today' : 'monthly'); const [day, setDay] = useState(seoulDay()); const [search, setSearch] = useState('');
   const [busy, setBusy] = useState(false); const [error, setError] = useState(''); const [message, setMessage] = useState(''); const [panel, setPanel] = useState<Panel>(null); const [pairCode, setPairCode] = useState('');
@@ -26,8 +26,8 @@ export function Operations({ demo = false }: { demo?: boolean }) {
     const response = await fetch(`/api/operations?day=${day}`, { method: body ? 'POST' : 'GET', cache: 'no-store', headers: { 'Authorization': `Bearer ${await user.getIdToken()}`, ...(body ? { 'Content-Type': 'application/json' } : {}) }, ...(body ? { body: JSON.stringify(body) } : {}) });
     const result = await response.json(); if (!response.ok) throw new Error(result.error); return result;
   };
-  const refresh = async () => { try { const next = await api(); setData(next); dataRef.current = next; setError(''); } catch (e) { setError(e instanceof Error ? e.message : '불러오지 못했습니다.'); } };
-  useEffect(() => { if (demo || !user) return; void refresh(); const timer = setInterval(() => void refresh(), 30000); return () => clearInterval(timer);
+  const refresh = async () => { const version = ++refreshVersion.current; try { const next = await api(); if (version !== refreshVersion.current) return; if (JSON.stringify(dataRef.current) !== JSON.stringify(next)) { setData(next); dataRef.current = next; } setError(''); } catch (e) { if (version === refreshVersion.current) setError(e instanceof Error ? e.message : '불러오지 못했습니다.'); } };
+  useEffect(() => { if (demo || !user) return; void refresh(); const timer = setInterval(() => { if (document.visibilityState === 'visible') void refresh(); }, 30000); return () => { clearInterval(timer); refreshVersion.current++; };
   // Re-fetch only when the user or selected date changes.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [demo, user, day]);

@@ -1,3 +1,4 @@
+import { importSources } from '@/lib/operations/import-cache';
 import { database, manager, sameOrigin, failure } from '@/lib/operations/auth';
 import * as service from '@/lib/operations/service';
 import { noticeConfigured, processNotices } from '@/lib/operations/notices';
@@ -12,17 +13,21 @@ export async function GET(request: Request) {
     validDay(day);
     const month = day.slice(0, 7); const end = new Date(`${month}-01T00:00:00Z`); end.setUTCMonth(end.getUTCMonth() + 1);
     const [students, accounts, attendance, invoices, payments, notices, devices, imports] = await Promise.all([
-      db.collection('students').get(), db.collection('opsAccounts').get(),
+      db.collection('students').select('name', 'phone', 'instruments', 'instrument').get(), db.collection('opsAccounts').get(),
       db.collection('opsAttendance').where('day', '>=', `${month}-01`).where('day', '<', end.toISOString().slice(0, 10)).get(),
       db.collection('opsInvoices').where('status', '==', 'open').get(),
       db.collection('opsPayments').orderBy('at', 'desc').limit(100).get(),
-      db.collection('opsNotices').orderBy('createdAt', 'desc').limit(50).get(), db.collection('opsDevices').get(), db.collection('opsImports').get(),
+      db.collection('opsNotices').orderBy('createdAt', 'desc').limit(50).get(), db.collection('opsDevices').get(), importSources(),
     ]);
+    const studentById = new Map(students.docs.map(d => [d.id, d]));
+    const accountById = new Map(accounts.docs.map(d => [d.id, d.data()]));
+    const subjectsByStudent = new Map<string, string[]>();
+    for (const a of accounts.docs) { const v = a.data(); if (v.sourceStudentId && v.subject) subjectsByStudent.set(v.sourceStudentId, [...(subjectsByStudent.get(v.sourceStudentId) || []), v.subject]); }
     const attendanceGroups = new Map<string, Set<string>>();
     const legacyCells = new Map<string, { studentId: string; day: string; value: string; color: string } | null>();
     for (const doc of imports.docs) {
       const source = doc.data();
-      const person = students.docs.find(s => s.id === source.matchedStudentId);
+      const person = studentById.get(source.matchedStudentId);
       if (!person || !Array.isArray(source.history)) continue;
       const subjects = service.studentSubjects(person.data());
       const matching = service.resolveImportedSubjects(subjects, source.subject);
@@ -50,11 +55,11 @@ export async function GET(request: Request) {
     return Response.json({ day, legacyAttendance: [...legacyCells.values()].filter(Boolean), configured: noticeConfigured(), students: students.docs.flatMap<Snapshot['students'][number]>(d => {
       const raw = d.data(); const base = { name: raw.name || '학생', phone: raw.phone || '' };
       // Preserve existing single-account balances; do not silently duplicate them.
-      if (accounts.docs.some(a => a.id === d.id)) return [{ ...base, id: d.id, instruments: service.studentSubjects(raw) }];
+      if (accountById.has(d.id)) return [{ ...base, id: d.id, instruments: service.studentSubjects(raw) }];
       const subjects = service.studentSubjects(raw);
       if (!subjects.length) return [{ ...base, id: d.id, instruments: [] }];
-      const known = accounts.docs.filter(a => a.data().sourceStudentId === d.id).map(a => a.data().subject as string);
-      return [...new Set([...subjects, ...known])].map(subject => { const id = service.enrollmentId(d.id, subject); const display = accounts.docs.find(a => a.id === id)?.data().displaySubject || subject; const groups = attendanceGroups.get(id); const attendanceGroup = groups?.size === 1 ? [...groups][0] : undefined; return { ...base, id, sourceStudentId: d.id, subject, ...(attendanceGroup ? { attendanceGroup } : {}), name: `${base.name} · ${display}`, instruments: [display] }; });
+      const known = (subjectsByStudent.get(d.id) || []);
+      return [...new Set([...subjects, ...known])].map(subject => { const id = service.enrollmentId(d.id, subject); const display = accountById.get(id)?.displaySubject || subject; const groups = attendanceGroups.get(id); const attendanceGroup = groups?.size === 1 ? [...groups][0] : undefined; return { ...base, id, sourceStudentId: d.id, subject, ...(attendanceGroup ? { attendanceGroup } : {}), name: `${base.name} · ${display}`, instruments: [display] }; });
     }), accounts: rows(accounts), attendance: rows(attendance), invoices: rows(invoices), payments: rows(payments), notices: notices.docs.map(d => { const n = d.data(); return { id: d.id, studentId: n.studentId, name: n.name, kind: n.kind, status: n.status, createdAt: n.createdAt, requestId: n.requestId || '', error: n.error || '' }; }), devices: devices.docs.map(d => { const v = d.data(); return { id: d.id, name: v.name, active: v.active && v.expiresAt > Date.now(), createdAt: v.createdAt }; }) }, { headers: { 'Cache-Control': 'no-store' } });
   } catch (error) { return failure(error); }
 }

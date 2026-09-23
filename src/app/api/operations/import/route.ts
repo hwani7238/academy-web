@@ -1,3 +1,4 @@
+import { invalidateImportCache } from '@/lib/operations/import-cache';
 import { database, manager, sameOrigin, failure, hash } from '@/lib/operations/auth';
 import { seoulDay } from '@/lib/operations/model';
 import { enrollmentId, studentSubjects, resolveImportedSubjects } from '@/lib/operations/service';
@@ -59,6 +60,7 @@ export async function POST(request: Request) {
       });
       results.push({id,matched:Boolean(match)});
     }
+    invalidateImportCache();
     return Response.json({results});
   }catch(e){return failure(e);}
 }
