@@ -1,5 +1,7 @@
 "use client";
 
+import { phoneLast4 } from "@/lib/phone.mjs";
+
 import { useEffect, useState } from "react";
 import { collection, addDoc, getDocs, deleteDoc, doc, onSnapshot, query, orderBy, updateDoc, where } from "firebase/firestore";
 import { db } from "@/lib/firebase";
@@ -147,6 +149,7 @@ export function StudentManager({ currentUser, onViewModeChange }: StudentManager
             await addDoc(collection(db, "students"), {
                 name,
                 phone,
+                phoneLast4: phoneLast4(phone),
                 instruments: selectedInstruments,
                 // Keep legitimate legacy field or primary instrument for simple queries if needed, 
                 // but moving forward 'instruments' is source of truth.
@@ -207,6 +210,7 @@ export function StudentManager({ currentUser, onViewModeChange }: StudentManager
             await updateDoc(doc(db, "students", id), {
                 name: editName,
                 phone: editPhone,
+                phoneLast4: phoneLast4(editPhone),
                 instruments: editInstruments,
                 instrument: editInstruments[0], // Update legacy field to primary
                 teachers: editTeachers

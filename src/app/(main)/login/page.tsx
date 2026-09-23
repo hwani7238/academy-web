@@ -24,7 +24,7 @@ export default function LoginPage() {
 
         try {
             await signInWithEmailAndPassword(auth, email, password);
-            router.push("/admin"); // 관리자 페이지로 이동
+            router.push(window.location.hostname === 'manage.wheemusic.com' ? '/operations' : '/admin');
         } catch (err: unknown) {
             console.error("Login error:", err);
             const errorCode =

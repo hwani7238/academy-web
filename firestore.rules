@@ -2,6 +2,16 @@ rules_version = '2';
 
 service cloud.firestore {
   match /databases/{database}/documents {
+    // Operations data is available only through server APIs with role/device checks.
+    // Keep financial records out of the broad legacy students subtree.
+    match /opsAccounts/{path=**} { allow read, write: if false; }
+    match /opsAttendance/{path=**} { allow read, write: if false; }
+    match /opsInvoices/{path=**} { allow read, write: if false; }
+    match /opsPayments/{path=**} { allow read, write: if false; }
+    match /opsNotices/{path=**} { allow read, write: if false; }
+    match /opsAudit/{path=**} { allow read, write: if false; }
+    match /opsDevices/{path=**} { allow read, write: if false; }
+    match /opsPairing/{path=**} { allow read, write: if false; }
     function userDoc(userId) {
       return /databases/$(database)/documents/users/$(userId);
     }
@@ -81,8 +91,8 @@ service cloud.firestore {
     }
 
     match /students/{studentId}/logs/{logId} {
-      allow read: if true;
-      allow update: if isAllowedReportViewUpdate();
+      // Public reports use the server endpoint that checks reportToken.
+      allow read: if isStaff();
     }
 
     match /{path=**}/logs/{logId} {
