@@ -61,7 +61,7 @@ export function Operations({ demo = false }: { demo?: boolean }) {
   const students = data.students.filter(s => (s.name.includes(search.trim()) || s.phone.includes(search.trim())) && (!subject || groupName(s) === subject)).sort((a, b) => compareGroups(groupName(a), groupName(b)) || compareStudents(a, b));
   const account = panel?.type === 'account' ? data.accounts.find(a => a.id === panel.id) : undefined;
   const student = panel?.type === 'account' ? data.students.find(s => s.id === panel.id) : undefined;
-  const tabs = [['today', '출석 기록'], ['monthly', '월별 출석표'], ['students', '총 등록 현황'], ['billing', '청구·수납'], ['notices', '알림 내역'], ['devices', '출석 기기'], ...(!demo ? [['imports', '기존 장부']] : [])];
+  const tabs = [['students', '총 등록 현황'], ['monthly', '월별 출석표'], ['today', '출석 기록'], ['billing', '청구·수납'], ['notices', '알림 내역'], ['devices', '출석 기기'], ...(!demo ? [['imports', '기존 장부']] : [])];
   return <div className="whee-ops operations">
     {demo && <div className="demo-banner">가상 학생 체험 · 실제 학생 정보와 연결되지 않으며 메시지·결제가 발생하지 않습니다. <button onClick={() => { const next = sample(); dataRef.current = next; setData(next); setPanel(null); setMessage('체험을 초기화했습니다.'); }}>체험 초기화</button></div>}
     <header className="ops-header"><div><p className="brand">WHEE MUSIC</p><h1>출석·수납 관리</h1></div><div className="header-actions"><span className="subtle">{demo ? '원장님 화면 체험' : user?.email}</span><a href={demo ? '/check-in/demo' : '/check-in'} target="_blank" rel="noreferrer">출석 화면 ↗</a></div></header>
