@@ -1,3 +1,4 @@
+import { refreshImport } from "@/lib/operations/refresh-import";
 import { invalidateImportCache } from '@/lib/operations/import-cache';
 import { database, manager, sameOrigin, failure, hash } from '@/lib/operations/auth';
 import { seoulDay } from '@/lib/operations/model';
@@ -10,13 +11,20 @@ export async function GET(request: Request) {
   try {
     await manager(request);
     const rows = await database().collection('opsImports').get();
-    return Response.json({ rows: rows.docs.map(d => { const v=d.data(); return { id:d.id, name:v.name, subject:v.subject, sourceRow:v.sourceRow, planUnits:v.planUnits, planAmount:v.planAmount, remainingCandidate:v.remainingCandidate, issues:v.issues, matchedStudentId:v.matchedStudentId, historyCount:v.history?.length || 0, status:v.status }; }) }, {headers:{'Cache-Control':'no-store'}});
+    return Response.json({ rows: rows.docs.map(d => { const v=d.data(); return { id:d.id, name:v.name, subject:v.subject, sourceRow:v.sourceRow, planUnits:v.planUnits, planAmount:v.planAmount, remainingCandidate:v.remainingCandidate, issues:v.issues, matchedStudentId:v.matchedStudentId, historyCount:v.history?.length || 0, status:v.status, attendanceRevision:v.attendanceRevision || 0, attendanceAsOf:v.attendanceAsOf || v.asOf }; }) }, {headers:{'Cache-Control':'no-store'}});
   } catch(e) { return failure(e); }
 }
 export async function POST(request: Request) {
   try {
     sameOrigin(request); const actor=await manager(request);
     const input=await request.json();
+    if(input.action==='refresh-attendance') {
+      if(!Array.isArray(input.rows)||input.rows.length<1||input.rows.length>5)throw Error('한 번에 1~5건씩 갱신해주세요.');
+      const results=[];
+      for(const row of input.rows) results.push(await refreshImport({...row, month:input.month, asOf:input.asOf},actor));
+      invalidateImportCache();
+      return Response.json({results});
+    }
     if(input.action==='activate') {
       if(typeof input.id!=='string'||!/^[a-f0-9]{64}$/.test(input.id))throw new Error('이관 항목을 확인해주세요.');
       const db=database();const ref=db.doc(`opsImports/${input.id}`);

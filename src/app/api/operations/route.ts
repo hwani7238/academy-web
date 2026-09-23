@@ -44,7 +44,7 @@ export async function GET(request: Request) {
       }
       for (const history of source.history) {
         for (const cell of history.cells || []) {
-          if (typeof cell.day !== 'string' || !cell.day.startsWith(`${month}-`) || cell.day > source.asOf) continue;
+          if (typeof cell.day !== 'string' || !cell.day.startsWith(`${month}-`) || cell.day > (source.attendanceCutoffs?.[month] || source.asOf)) continue;
           const key = `${studentId}_${cell.day}`;
           if (legacyCells.has(key)) { legacyCells.set(key, null); continue; }
           legacyCells.set(key, { studentId, day: cell.day, value: String(cell.value), color: String(cell.color || '') });

@@ -50,7 +50,7 @@ function setup() {
   };
   const routeExports={};
   const routeCode=fs.readFileSync('src/app/api/operations/import/route.ts','utf8');
-  new Function('require','exports',ts.transpileModule(routeCode,{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText)(id=>id.endsWith('/auth')?{database:()=>db,manager:async()=> 'owner',sameOrigin:()=>{},failure:e=>Response.json({error:e.message},{status:400}),hash:v=>require('node:crypto').createHash('sha256').update(v).digest('hex')}:id.endsWith('/service')?service:load('model'),routeExports);
+  new Function('require','exports',ts.transpileModule(routeCode,{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText)(id=>id.endsWith('/auth')?{database:()=>db,manager:async()=> 'owner',sameOrigin:()=>{},failure:e=>Response.json({error:e.message},{status:400}),hash:v=>require('node:crypto').createHash('sha256').update(v).digest('hex')}:id.endsWith('/service')?service:id.endsWith('/refresh-import')?load('refresh-import'):id.endsWith('/import-cache')?{invalidateImportCache:()=>{}}:load('model'),routeExports);
   return { records, service, load, seed, importPost:body=>routeExports.POST(new Request('https://test/api/operations/import',{method:'POST',body:JSON.stringify(body)})) };
 }
 test('concurrent duplicate check-ins deduct once and create one invoice/outbox', async () => {
@@ -202,4 +202,38 @@ test('attendance already included in imported opening balance is not deducted ag
  assert.equal((await s.service.checkIn('student-a','1234','device')).duplicate,true);
  assert.equal(s.records.get('opsAccounts/student-a').remaining,1);
  assert.equal([...s.records.keys()].some(k=>k.startsWith('opsNotices/')),false);
+});
+
+test('archive refresh preserves live attendance and balances, backs up source and is idempotent',async()=>{
+ const s=setup();await s.seed();const day=s.load('model').seoulDay();const month=day.slice(0,7);const id='a'.repeat(64);
+ const history={name:'가상 학생',subject:'보컬',sheet:'이번 달',row:3,section:'보컬',note:'',cells:[{day,value:'4',color:'FF000000'}]};
+ const oldHistory={...history,cells:[{day,value:'3',color:'FF000000'}]};
+ s.records.set(`opsImports/${id}`,{name:'가상 학생',subject:'보컬',asOf:day,remainingCandidate:5,status:'activated',history:[oldHistory]});
+ s.records.set('opsAttendance/live',{day,units:1});
+ const before=structuredClone([...s.records].filter(([k])=>!k.startsWith('opsImports/')));
+ const payload={action:'refresh-attendance',month,asOf:day,rows:[{id,revision:0,history:[history]}]};
+ assert.equal((await s.importPost(payload)).status,200);
+ const imported=s.records.get(`opsImports/${id}`);
+ assert.equal(imported.attendanceRevision,1);assert.equal(imported.remainingCandidate,5);assert.equal(imported.asOf,day);
+ assert.deepEqual(s.records.get(`opsImports/${id}/revisions/1`).history,[oldHistory]);
+ for(const [k,v] of before)assert.deepEqual(s.records.get(k),v);
+ assert.equal([...s.records.keys()].some(k=>k.startsWith('opsInvoices/')||k.startsWith('opsNotices/')),false);
+ assert.equal((await (await s.importPost(payload)).json()).results[0].duplicate,true);
+ const changed=structuredClone(payload);changed.rows[0].history[0].cells[0].value='5';
+ assert.equal((await s.importPost(changed)).status,400);
+ changed.rows[0].revision=1;changed.rows[0].history[0].subject='드럼';
+ assert.equal((await s.importPost(changed)).status,400);
+ assert.equal(s.records.get(`opsImports/${id}`).attendanceRevision,1);
+});
+
+test('archive refresh rejects future cells, duplicate days and ambiguous source rows',async()=>{
+ const s=setup();const day=s.load('model').seoulDay(),month=day.slice(0,7),id='b'.repeat(64);
+ const h={name:'학생',subject:'보컬',sheet:'이번 달',row:2,section:'보컬',note:'',cells:[{day,value:'1',color:''}]};
+ s.records.set(`opsImports/${id}`,{name:'학생',subject:'보컬',asOf:day,history:[h,h]});
+ const p={action:'refresh-attendance',month,asOf:day,rows:[{id,revision:0,history:[h]}]};
+ assert.equal((await s.importPost(p)).status,400);
+ s.records.get(`opsImports/${id}`).history=[];
+ const duplicate=structuredClone(p);duplicate.rows[0].history[0].cells.push(h.cells[0]);assert.equal((await s.importPost(duplicate)).status,400);
+ const future=structuredClone(p);future.asOf='2099-09-23';future.month='2099-09';assert.equal((await s.importPost(future)).status,400);
+ assert.equal(s.records.get(`opsImports/${id}`).attendanceRevision,undefined);
 });
