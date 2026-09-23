@@ -1,3 +1,4 @@
+import { registrationInput } from '@/lib/operations/registration';
 import { Snapshot, Account, adjustBalance, settle, seoulDay, suffixes, attendanceInput } from '@/lib/operations/model';
 export function sample(): Snapshot {
   const stamp = new Date().toISOString();
@@ -20,7 +21,13 @@ export function demoAction(current: Snapshot, input: Record<string, unknown>): {
     if (a.autoBilling) enqueue(a, `billing_${id}`, 'billing');
   };
   let result: Record<string, unknown> = { ok: true };
-  if (input.action === 'recordAttendance') {
+  if (input.action === 'registerStudent') {
+    const v=registrationInput(input);const id=`demo-new-${input.requestId}`;
+    if(data.accounts.some(a=>a.id===id))return {data,result:{ok:true,duplicate:true}};
+    if(data.students.some(s=>s.name.split(' · ')[0].replace(/\s/g,'')===v.name.replace(/\s/g,'')&&s.phone.replace(/\D/g,'')===v.phone))throw Error('이미 등록된 학생입니다.');
+    const a:Account={id,sourceStudentId:id,subject:v.subject,name:`${v.name} · ${v.subject}`,phone:v.phone,checkinSuffixes:[...new Set([v.phone.slice(-4),...(v.personalPhone?[v.personalPhone.slice(-4)]:[])])],planUnits:v.planUnits,planAmount:v.planAmount,remaining:v.remaining,openInvoiceId:null,autoBilling:false,active:true,updatedAt:at};
+    data.accounts.push(a);data.students.push({id,name:a.name,phone:v.phone,sourceStudentId:id,subject:v.subject,instruments:[v.subject],attendanceGroup:v.group});
+  } else if (input.action === 'recordAttendance') {
     const values = attendanceInput(input);
     if (!account) throw new Error('먼저 수강 설정을 저장해주세요.');
     const id = `${account.id}_${values.day}`; const old = data.attendance.find(a => a.id === id);

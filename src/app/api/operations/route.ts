@@ -59,7 +59,7 @@ export async function GET(request: Request) {
       const subjects = service.studentSubjects(raw);
       if (!subjects.length) return [{ ...base, id: d.id, instruments: [] }];
       const known = (subjectsByStudent.get(d.id) || []);
-      return [...new Set([...subjects, ...known])].map(subject => { const id = service.enrollmentId(d.id, subject); const display = accountById.get(id)?.displaySubject || subject; const groups = attendanceGroups.get(id); const attendanceGroup = groups?.size === 1 ? [...groups][0] : undefined; return { ...base, id, sourceStudentId: d.id, subject, ...(attendanceGroup ? { attendanceGroup } : {}), name: `${base.name} · ${display}`, instruments: [display] }; });
+      return [...new Set([...subjects, ...known])].map(subject => { const id = service.enrollmentId(d.id, subject); const display = accountById.get(id)?.displaySubject || subject; const groups = attendanceGroups.get(id); const attendanceGroup = accountById.get(id)?.attendanceGroup || (groups?.size === 1 ? [...groups][0] : undefined); return { ...base, id, sourceStudentId: d.id, subject, ...(attendanceGroup ? { attendanceGroup } : {}), name: `${base.name} · ${display}`, instruments: [display] }; });
     }), accounts: rows(accounts), attendance: rows(attendance), invoices: rows(invoices), payments: rows(payments), notices: notices.docs.map(d => { const n = d.data(); return { id: d.id, studentId: n.studentId, name: n.name, kind: n.kind, status: n.status, createdAt: n.createdAt, requestId: n.requestId || '', error: n.error || '' }; }), devices: devices.docs.map(d => { const v = d.data(); return { id: d.id, name: v.name, active: v.active && v.expiresAt > Date.now(), createdAt: v.createdAt }; }) }, { headers: { 'Cache-Control': 'no-store' } });
   } catch (error) { return failure(error); }
 }
@@ -67,6 +67,7 @@ export async function POST(request: Request) {
   try {
     sameOrigin(request); const actor = await manager(request); const input = await request.json();
     switch (input.action) {
+      case 'registerStudent': return Response.json(await service.registerStudent(input, actor));
       case 'configure': await service.configure(input, actor); break;
       case 'recordAttendance': await service.recordAttendance(input, actor); break;
       case 'adjust': await service.adjust(input, actor); break;

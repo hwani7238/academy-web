@@ -6,6 +6,25 @@ import { createRequire } from 'node:module';
 import ts from 'typescript';
 const require = createRequire(import.meta.url);
 const root = path.resolve('src/lib/operations');
+test('new registration atomically creates a compatible student and check-in account, with retry safety',async()=>{
+ const s=setup();const input={requestId:'request-new',name:'신규 학생',phone:'010-0000-1234',personalPhone:'010-0000-5678',group:'어린이 피아노(2관)',planUnits:8,planAmount:170000,remaining:8};
+ const results=await Promise.all([s.service.registerStudent(input,'owner'),s.service.registerStudent(input,'owner')]);
+ assert.equal(results.filter(r=>r.duplicate).length,1);
+ const students=[...s.records].filter(([k])=>k.startsWith('students/'));assert.equal(students.length,1);
+ assert.equal(students[0][1].status,'등록');assert.equal(students[0][1].phoneLast4,'1234');
+ const a=s.records.get(`opsAccounts/${results[0].studentId}`);assert.equal(a.attendanceGroup,'어린이 피아노(2관)');assert.equal(a.remaining,8);assert.deepEqual(a.checkinSuffixes,['1234','5678']);
+ assert.equal([...s.records.keys()].some(k=>k.startsWith('opsInvoices/')||k.startsWith('opsPayments/')||k.startsWith('opsNotices/')),false);
+ await assert.rejects(s.service.registerStudent({...input,requestId:'other'},'owner'));
+ await assert.rejects(s.service.registerStudent({...input,planAmount:190000},'owner'));
+ await s.service.checkIn(a.id,'5678','device');assert.equal(s.records.get(`opsAccounts/${a.id}`).remaining,7);
+});
+test('registration rejects existing legacy students and invalid input before creating records',async()=>{
+ const s=setup();s.records.set('students/legacy',{name:'기존 학생',phone:'010-0000-1234'});
+ const input={requestId:'new',name:'기존학생',phone:'01000001234',group:'드럼',planUnits:4,planAmount:180000,remaining:4};
+ await assert.rejects(s.service.registerStudent(input,'owner'));
+ for(const patch of [{phone:'1234'},{planAmount:0},{remaining:5},{group:'없는 과목'}])await assert.rejects(s.service.registerStudent({...input,...patch},'owner'));
+ assert.equal(s.records.size,1);
+});
 test('quick attendance reasons save without notes, preserve balance on retries and block kiosk false success',async()=>{
  for(const status of ['late_cancel','travel','sick']){
   const s=setup();await s.seed('student-a',8);const day=s.load('model').seoulDay();

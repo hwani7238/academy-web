@@ -1,4 +1,5 @@
 import { randomUUID, randomBytes } from 'node:crypto';
+import { registrationInput } from './registration';
 import type { Transaction, Firestore } from 'firebase-admin/firestore';
 import { database, hash, HttpError } from './auth';
 import { Account, Invoice, Attendance, integer, adjustBalance, settle, suffixes, seoulDay, METHODS, attendanceInput } from './model';
@@ -20,6 +21,30 @@ function newInvoice(tx: Transaction, db: Firestore, account: Account, id: string
 }
 export function enrollmentId(studentId: string, subject: string) {
   return `course_${hash(JSON.stringify([studentId, subject]))}`;
+}
+export async function registerStudent(input: Record<string, unknown>, actor: string) {
+  const v = registrationInput(input); const requestId = key(input.requestId);
+  const db = database(); const digest = hash(JSON.stringify(v));
+  const identity = hash(JSON.stringify([v.name.replace(/\s/g, ''), v.phone]));
+  const sourceStudentId = `registered_${identity}`;
+  const id = enrollmentId(sourceStudentId, v.subject);
+  const students = await db.collection('students').get();
+  if (students.docs.some(d => d.id !== sourceStudentId && String(d.data().name || '').replace(/\s/g, '') === v.name.replace(/\s/g, '') && String(d.data().phone || '').replace(/\D/g, '') === v.phone)) throw Error('같은 이름과 전화번호의 학생이 이미 있습니다. 총 등록 현황에서 확인해주세요.');
+  return db.runTransaction(async tx => {
+    const studentRef = db.doc(`students/${sourceStudentId}`); const accountRef = db.doc(`opsAccounts/${id}`);
+    const old = await tx.get(studentRef);
+    if (old.exists) {
+      if (old.data()?.registrationRequestId === requestId && old.data()?.registrationDigest === digest) return { ok: true, studentId: id, duplicate: true };
+      throw Error('이미 등록된 학생입니다. 총 등록 현황에서 확인해주세요.');
+    }
+    const at = now();
+    tx.create(studentRef, { name: v.name, phone: v.phone, instruments: [v.subject], instrument: v.subject, phoneLast4: v.phone.slice(-4), teachers: [], status: '등록', createdAt: new Date(), registrationRequestId: requestId, registrationDigest: digest });
+    tx.create(accountRef, { id, sourceStudentId, subject: v.subject, displaySubject: v.subject, attendanceGroup: v.group,
+      name: `${v.name} · ${v.subject}`, phone: v.phone, checkinSuffixes: [...new Set([v.phone.slice(-4), ...(v.personalPhone ? [v.personalPhone.slice(-4)] : [])])],
+      planUnits: v.planUnits, planAmount: v.planAmount, remaining: v.remaining, openInvoiceId: null, autoBilling: false, active: true, updatedAt: at });
+    audit(tx, db, actor, 'register-student', id, { sourceStudentId, group: v.group, planUnits: v.planUnits, planAmount: v.planAmount, remaining: v.remaining });
+    return { ok: true, studentId: id };
+  });
 }
 export function studentSubjects(student: Record<string, unknown>): string[] {
   const raw = Array.isArray(student.instruments) && student.instruments.length ? student.instruments : [student.instrument];
@@ -47,7 +72,7 @@ export async function configure(input: Record<string, unknown>, actor: string) {
     if (subject && (await tx.get(db.doc(`opsAccounts/${sourceStudentId}`))).exists) throw new Error('기존 통합 수강권을 과목별로 분리한 후 등록해주세요.');
     const old = existing.data();
     const remaining = old ? old.remaining : integer(input.remaining, -1000, 1000, '현재 남은 횟수');
-    tx.set(ref, { id, ...(old?.importId ? { importId: old.importId, openingAsOf: old.openingAsOf } : {}), ...(old?.displaySubject ? { displaySubject: old.displaySubject } : {}), ...(subject ? { sourceStudentId, subject } : {}), name: subject ? `${student.data()?.name || '학생'} · ${subject}` : student.data()?.name || '학생', phone, checkinSuffixes: codes, planUnits, planAmount, remaining, openInvoiceId: old?.openInvoiceId || null, active: input.active !== false, autoBilling: input.autoBilling === true, updatedAt: now() });
+    tx.set(ref, { id, ...(old?.importId ? { importId: old.importId, openingAsOf: old.openingAsOf } : {}), ...(old?.attendanceGroup ? { attendanceGroup: old.attendanceGroup } : {}), ...(old?.displaySubject ? { displaySubject: old.displaySubject } : {}), ...(subject ? { sourceStudentId, subject } : {}), name: subject ? `${student.data()?.name || '학생'} · ${subject}` : student.data()?.name || '학생', phone, checkinSuffixes: codes, planUnits, planAmount, remaining, openInvoiceId: old?.openInvoiceId || null, active: input.active !== false, autoBilling: input.autoBilling === true, updatedAt: now() });
     audit(tx, db, actor, 'configure', id, { planUnits, planAmount, remaining, active: input.active !== false, autoBilling: input.autoBilling === true });
   });
 }
