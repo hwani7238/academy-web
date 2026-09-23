@@ -4,7 +4,7 @@ export type Account = {
   planUnits: number; planAmount: number; remaining: number; openInvoiceId: string | null;
   autoBilling: boolean; active: boolean; updatedAt: string;
 };
-export const ATTENDANCE_LABELS = { present: "출석", absent: "결석", makeup: "보강", cancelled: "취소" } as const;
+export const ATTENDANCE_LABELS = { present: "출석", absent: "결석", makeup: "보강", late_cancel: "당일 취소", travel: "여행", sick: "병가", cancelled: "취소" } as const;
 export type AttendanceStatus = keyof typeof ATTENDANCE_LABELS;
 export type Attendance = { status?: AttendanceStatus; source?: "kiosk" | "manual"; relatedDay?: string; id: string; studentId: string; name: string; day: string; at: string; units: number; note: string; updatedAt: string };
 export type Invoice = { id: string; studentId: string; name: string; units: number; amount: number; paid: number; status: 'open' | 'paid' | 'cancelled'; needsReview: boolean; createdAt: string };
@@ -49,4 +49,8 @@ export function attendanceInput(input: Record<string, unknown>) {
   const relatedDay = status === 'makeup' && input.relatedDay ? validDay(input.relatedDay) : '';
   if (relatedDay && relatedDay > day) throw new Error('원래 수업일은 보강일보다 늦을 수 없습니다.');
   return { day, status, units, note, relatedDay };
+}
+
+export function defaultAttendanceUnits(status: AttendanceStatus, subject = '') {
+  return status === 'present' || status === 'makeup' || (status === 'late_cancel' && !subject.includes('피아노')) ? 1 : 0;
 }

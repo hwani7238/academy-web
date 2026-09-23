@@ -67,7 +67,7 @@ export async function checkIn(studentId: string, digits: string, actor: string) 
     }
     if (attended.exists) {
       const status = attended.data()?.status;
-      if (status === 'absent' || status === 'cancelled') throw new HttpError(409, '오늘 결석·취소 기록이 있습니다. 선생님께 출석 변경을 요청해주세요.');
+      if (status !== 'present' && status !== 'makeup') throw new HttpError(409, '오늘 결석·취소 기록이 있습니다. 선생님께 출석 변경을 요청해주세요.');
       return { duplicate: true, name: account.name };
     }
     const remaining = adjustBalance(account.remaining, 0, 1);

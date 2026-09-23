@@ -6,6 +6,21 @@ import { createRequire } from 'node:module';
 import ts from 'typescript';
 const require = createRequire(import.meta.url);
 const root = path.resolve('src/lib/operations');
+test('quick attendance reasons save without notes, preserve balance on retries and block kiosk false success',async()=>{
+ for(const status of ['late_cancel','travel','sick']){
+  const s=setup();await s.seed('student-a',8);const day=s.load('model').seoulDay();
+  const units=s.load('model').defaultAttendanceUnits(status,'드럼');
+  const input={studentId:'student-a',day,status,units,note:'',expectedUpdatedAt:''};
+  await s.service.recordAttendance(input,'owner');await s.service.recordAttendance(input,'owner');
+  assert.equal(s.records.get('opsAccounts/student-a').remaining,8-units);
+  assert.equal(s.records.get(`opsAttendance/student-a_${day}`).status,status);
+  await assert.rejects(s.service.checkIn('student-a','1234','device'));
+  const revision=s.records.get(`opsAttendance/student-a_${day}`).updatedAt;
+  await s.service.recordAttendance({...input,status:'present',units:1,expectedUpdatedAt:revision},'owner');
+  assert.equal(s.records.get('opsAccounts/student-a').remaining,7);
+ }
+ const s=setup();assert.equal(s.load('model').defaultAttendanceUnits('late_cancel','어린이 피아노(1관)'),0);
+});
 function setup() {
   const records = new Map(); let sequence = 0; let tail = Promise.resolve();
   const ref = p => ({ path: p, id: p.split('/').at(-1), get: async () => snap(p), update: async d => { if (!records.has(p)) throw Error('missing'); records.set(p, { ...records.get(p), ...structuredClone(d) }); }, set: async d => records.set(p, structuredClone(d)) });

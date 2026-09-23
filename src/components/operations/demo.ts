@@ -32,7 +32,7 @@ export function demoAction(current: Snapshot, input: Record<string, unknown>): {
   } else if (input.action === 'demoCheckIn') {
     if (!account?.active) throw new Error('학생 설정을 확인해주세요.');
     const existing = data.attendance.find(a => a.studentId === account.id && a.day === seoulDay());
-    if (existing?.status === 'absent' || existing?.status === 'cancelled') throw new Error('오늘 결석·취소 기록이 있습니다. 선생님께 출석 변경을 요청해주세요.');
+    if (existing?.status && existing.status !== 'present' && existing.status !== 'makeup') throw new Error('오늘 결석·취소 기록이 있습니다. 선생님께 출석 변경을 요청해주세요.');
     if (existing) return { data, result: { duplicate: true, name: account.name } };
     const id = `${account.id}_${seoulDay()}`;
     account.remaining = adjustBalance(account.remaining, 0, 1);
