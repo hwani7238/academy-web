@@ -29,7 +29,7 @@ export async function changeLifecycle(input: Record<string, unknown>, actor: str
     const ref = db.doc(`students/${id}`); const student = (await tx.get(ref)).data();
     if (!student) throw Error('학생을 찾을 수 없습니다.');
     const old = student.lifecycle;
-    if (old && old.status === values.status && old.until === values.until && old.note === values.note) return { lifecycle: { sourceStudentId:id, value:old } };
+    if (old && old.status === values.status && old.until === values.until && (old.withdrawnOn || '') === values.withdrawnOn && old.note === values.note) return { lifecycle: { sourceStudentId:id, value:old } };
     if ((old?.updatedAt || '') !== (input.expectedUpdatedAt || '')) throw Error('학생 상태가 변경됐습니다. 새로고침 후 다시 확인해주세요.');
     const value = { ...values, updatedAt: now() };
     tx.update(ref, { lifecycle: value });

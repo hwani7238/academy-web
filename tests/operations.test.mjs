@@ -340,3 +340,22 @@ test('remaining correction rejects invalid counts and stale balances after check
  assert.equal(s.records.get('opsAccounts/student-a').remaining,0);
  assert.equal(s.records.has('opsAudit/balance_invalid'),false);
 });
+
+test('withdrawal date is recorded and date-only changes are not ignored',async()=>{
+ const s=setup();await s.seed();
+ const first=await s.service.changeLifecycle({sourceStudentId:'student-a',status:'withdrawn',withdrawnOn:'2026-01-01'},'owner');
+ assert.equal(first.lifecycle.value.withdrawnOn,'2026-01-01');
+ const next=await s.service.changeLifecycle({sourceStudentId:'student-a',status:'withdrawn',withdrawnOn:'2026-01-02',expectedUpdatedAt:first.lifecycle.value.updatedAt},'owner');
+ assert.equal(next.lifecycle.value.withdrawnOn,'2026-01-02');
+ assert.equal(s.records.get('opsAccounts/student-a').remaining,1);
+ for(const withdrawnOn of ['bad','2026-02-30','2999-01-01'])await assert.rejects(s.service.changeLifecycle({sourceStudentId:'student-a',status:'withdrawn',withdrawnOn},'owner'));
+});
+test('pause end date edits preserve balances and use the new expiry',async()=>{
+ const s=setup();await s.seed();const today=s.load('model').seoulDay();
+ const first=await s.service.changeLifecycle({sourceStudentId:'student-a',status:'paused',until:'2099-01-01',note:'기존 비고'},'owner');
+ const result=await s.service.changeLifecycle({sourceStudentId:'student-a',status:'paused',until:today,note:'기존 비고',expectedUpdatedAt:first.lifecycle.value.updatedAt},'owner');
+ assert.equal(result.lifecycle.value.until,today);assert.equal(result.lifecycle.value.note,'기존 비고');
+ assert.equal(s.load('lifecycle').enrollmentState(result.lifecycle.value,today),'paused');
+ assert.equal(s.load('lifecycle').enrollmentState(result.lifecycle.value,'2099-01-02'),'active');
+ assert.equal(s.records.get('opsAccounts/student-a').remaining,1);
+});
