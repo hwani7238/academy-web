@@ -311,3 +311,32 @@ test('confirmed patches preserve other data, update all courses, and respect sel
  assert.equal(next.attendance.length,0);assert.equal(next.accounts.length,2);assert.equal(next.invoices.length,0);
  assert.equal(next.legacyAttendance,current.legacyAttendance);assert.equal(next.payments,current.payments);
 });
+
+test('remaining correction is audited, course-scoped, retry-safe and never sends notices',async()=>{
+ const s=setup();await s.seed();await s.seed('student-b',6);
+ const old=s.records.get('opsAccounts/student-a');old.autoBilling=true;
+ const input={studentId:'student-a',requestId:'balance-test',remaining:0,note:'',expectedUpdatedAt:old.updatedAt,expectedRemaining:old.remaining};
+ const changes=await s.service.correctRemaining(input,'owner');
+ assert.equal(changes.accounts[0].remaining,0);assert.equal(changes.invoices.length,1);
+ assert.equal(s.records.get('opsAccounts/student-b').remaining,6);
+ assert.deepEqual(s.records.get('opsAudit/balance_balance-test').detail,{before:1,after:0,note:''});
+ assert.equal([...s.records.keys()].some(k=>k.startsWith('opsNotices/')||k.startsWith('opsAttendance/')||k.startsWith('opsPayments/')),false);
+ await s.service.correctRemaining(input,'owner');
+ assert.equal([...s.records.keys()].filter(k=>k.startsWith('opsInvoices/')).length,1);
+ await assert.rejects(s.service.correctRemaining({...input,remaining:8},'owner'));
+ await assert.rejects(s.service.correctRemaining({...input,requestId:'stale',remaining:8},'owner'));
+ const current=s.records.get('opsAccounts/student-a');
+ const next=await s.service.correctRemaining({...input,requestId:'restore',remaining:5,expectedUpdatedAt:current.updatedAt,expectedRemaining:0},'owner');
+ assert.equal(next.accounts[0].remaining,5);assert.equal(next.invoices[0].needsReview,true);
+ // Retrying the earlier request must not undo a subsequent correction.
+ const retry=await s.service.correctRemaining(input,'owner');assert.equal(retry.accounts[0].remaining,5);
+});
+test('remaining correction rejects invalid counts and stale balances after check-in',async()=>{
+ const s=setup();await s.seed();const a=s.records.get('opsAccounts/student-a');
+ const input={studentId:'student-a',requestId:'invalid',remaining:4,expectedUpdatedAt:a.updatedAt,expectedRemaining:a.remaining};
+ for(const remaining of [1.5,1001,-1001,'',NaN])await assert.rejects(s.service.correctRemaining({...input,remaining},'owner'));
+ await s.service.checkIn('student-a','1234','device');
+ await assert.rejects(s.service.correctRemaining(input,'owner'));
+ assert.equal(s.records.get('opsAccounts/student-a').remaining,0);
+ assert.equal(s.records.has('opsAudit/balance_invalid'),false);
+});

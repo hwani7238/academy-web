@@ -1,6 +1,6 @@
 import { enrollmentState, lifecycleInput } from '@/lib/operations/lifecycle';
 import { registrationInput } from '@/lib/operations/registration';
-import { Snapshot, Account, adjustBalance, settle, seoulDay, suffixes, attendanceInput } from '@/lib/operations/model';
+import { Snapshot, Account, integer, adjustBalance, settle, seoulDay, suffixes, attendanceInput } from '@/lib/operations/model';
 export function sample(): Snapshot {
   const stamp = new Date().toISOString();
   const accounts: Account[] = [
@@ -22,7 +22,14 @@ export function demoAction(current: Snapshot, input: Record<string, unknown>): {
     if (a.autoBilling) enqueue(a, `billing_${id}`, 'billing');
   };
   let result: Record<string, unknown> = { ok: true };
-  if(input.action === 'changeLifecycle'){
+  if(input.action === 'correctRemaining'){
+    if(!account)throw Error('먼저 수강 등록을 해주세요.');
+    if(account.updatedAt!==input.expectedUpdatedAt||account.remaining!==input.expectedRemaining)throw Error('잔여 횟수가 변경됐습니다. 다시 열어주세요.');
+    account.remaining=integer(input.remaining,-1000,1000,'남은 횟수');account.updatedAt=at;
+    const existing=data.invoices.find(i=>i.id===account.openInvoiceId);
+    if(existing)existing.needsReview=true;
+    else if(account.remaining<=0){const auto=account.autoBilling;account.autoBilling=false;invoice(account);account.autoBilling=auto;}
+  } else if(input.action === 'changeLifecycle'){
     const values=lifecycleInput(input);const rows=data.students.filter(s=>(s.sourceStudentId||s.id)===input.sourceStudentId);
     if(!rows.length)throw Error('학생을 찾을 수 없습니다.');
     if((rows[0].lifecycle?.updatedAt||'')!==(input.expectedUpdatedAt||''))throw Error('학생 상태가 변경됐습니다.');

@@ -248,3 +248,36 @@ export async function recordAttendance(input: Record<string, unknown>, actor: st
     return { attendance:[attendance], accounts:[updatedAccount], invoices };
   });
 }
+
+// Absolute balance correction, separate from attendance and payment records.
+export async function correctRemaining(input: Record<string, unknown>, actor: string) {
+  const studentId=key(input.studentId), requestId=key(input.requestId);
+  const remaining=integer(input.remaining,-1000,1000,'남은 횟수'), note=text(input.note);
+  const db=database(), ref=db.doc(`opsAccounts/${studentId}`);
+  const auditRef=db.doc(`opsAudit/balance_${requestId}`);
+  const digest=hash(JSON.stringify([studentId,remaining,note]));
+  return db.runTransaction(async tx=>{
+    const [accountSnap, previous]=await Promise.all([tx.get(ref),tx.get(auditRef)]);
+    const account=accountSnap.data() as Account|undefined;
+    if(!account)throw Error('먼저 수강 등록을 해주세요.');
+    const invoiceSnap=account.openInvoiceId?await tx.get(db.doc(`opsInvoices/${account.openInvoiceId}`)):null;
+    if(previous.exists){
+      if(previous.data()?.digest!==digest)throw Error('이미 처리한 요청과 내용이 다릅니다.');
+      return {accounts:[account],invoices:invoiceSnap?.exists?[invoiceSnap.data() as Invoice]:[]};
+    }
+    if(account.updatedAt!==input.expectedUpdatedAt || account.remaining!==input.expectedRemaining)throw Error('다른 화면에서 잔여 횟수가 변경됐습니다. 새로고침 후 다시 수정해주세요.');
+    const at=new Date(Math.max(Date.now(),Date.parse(account.updatedAt)+1)).toISOString();
+    let invoice=invoiceSnap?.data() as Invoice|undefined;
+    let openInvoiceId=account.openInvoiceId;
+    if(remaining<=0 && !openInvoiceId){
+      openInvoiceId=newInvoice(tx,db,{...account,autoBilling:false},randomUUID(),'잔여 횟수 정정 후 소진',at);
+      invoice={id:openInvoiceId,studentId,name:account.name,units:account.planUnits,amount:account.planAmount,paid:0,status:'open',needsReview:false,createdAt:at};
+    }else if(remaining!==account.remaining && invoice?.status==='open'){
+      invoice={...invoice,needsReview:true};tx.update(invoiceSnap!.ref,{needsReview:true});
+    }
+    const updated={...account,remaining,openInvoiceId,updatedAt:at};
+    tx.update(ref,{remaining,openInvoiceId,updatedAt:at});
+    tx.create(auditRef,{actor,action:'correct-remaining',studentId,digest,detail:{before:account.remaining,after:remaining,note},at});
+    return {accounts:[updated],invoices:invoice?[invoice]:[]};
+  });
+}

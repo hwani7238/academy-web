@@ -69,6 +69,7 @@ export async function POST(request: Request) {
     switch (input.action) {
       case 'changeLifecycle': return Response.json({ok:true,changes:await service.changeLifecycle(input, actor)});
       case 'registerStudent': return Response.json(await service.registerStudent(input, actor));
+      case 'correctRemaining': return Response.json({ok:true,changes:await service.correctRemaining(input,actor)});
       case 'configure': await service.configure(input, actor); break;
       case 'recordAttendance': {
         const changes=await service.recordAttendance(input, actor);
