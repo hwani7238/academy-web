@@ -1,6 +1,6 @@
 import { enrollmentState, lifecycleInput } from './lifecycle';
 import { randomUUID, randomBytes } from 'node:crypto';
-import { registrationInput } from './registration';
+import { REGISTRATION_SUBJECTS, registrationInput } from './registration';
 import type { Transaction, Firestore } from 'firebase-admin/firestore';
 import { database, hash, HttpError } from './auth';
 import { Account, Invoice, Attendance, integer, adjustBalance, settle, suffixes, seoulDay, METHODS, validDay, attendanceInput } from './model';
@@ -86,8 +86,10 @@ export async function configure(input: Record<string, unknown>, actor: string) {
     if (subject && !studentSubjects(student.data() || {}).includes(subject)) throw new Error('등록된 과목을 확인해주세요.');
     if (subject && (await tx.get(db.doc(`opsAccounts/${sourceStudentId}`))).exists) throw new Error('기존 통합 수강권을 과목별로 분리한 후 등록해주세요.');
     const old = existing.data();
+    const overrideGroup=student.data()?.operationsCourseGroups?.[subject] as string|undefined;
+    const overrideSubject=overrideGroup?(overrideGroup.includes('피아노')?'피아노':overrideGroup):undefined;
     const remaining = old ? old.remaining : integer(input.remaining, -1000, 1000, '현재 남은 횟수');
-    tx.set(ref, { id, ...(old?.importId ? { importId: old.importId, openingAsOf: old.openingAsOf } : {}), ...(old?.attendanceGroup ? { attendanceGroup: old.attendanceGroup } : {}), ...(old?.displaySubject ? { displaySubject: old.displaySubject } : {}), ...(subject ? { sourceStudentId, subject } : {}), name: subject ? `${student.data()?.name || '학생'} · ${subject}` : student.data()?.name || '학생', phone, checkinSuffixes: codes, planUnits, planAmount, remaining, openInvoiceId: old?.openInvoiceId || null, active: input.active !== false, autoBilling: input.autoBilling === true, updatedAt: now() });
+    tx.set(ref, { id, ...(old?.importId ? { importId: old.importId, openingAsOf: old.openingAsOf } : {}), ...(old?.attendanceGroup ? { attendanceGroup: old.attendanceGroup } : {}), ...(old?.displaySubject ? { displaySubject: old.displaySubject } : {}), ...(subject ? { sourceStudentId, subject } : {}), name: subject ? `${student.data()?.name || '학생'} · ${subject}` : student.data()?.name || '학생', phone, checkinSuffixes: codes, planUnits, planAmount, remaining, openInvoiceId: old?.openInvoiceId || null, active: input.active !== false, autoBilling: input.autoBilling === true, updatedAt: now(), ...(overrideGroup?{attendanceGroup:overrideGroup,displaySubject:overrideSubject,name:`${student.data()?.name} · ${overrideSubject}`}:{}) });
     audit(tx, db, actor, 'configure', id, { planUnits, planAmount, remaining, active: input.active !== false, autoBilling: input.autoBilling === true });
   });
 }
@@ -297,5 +299,32 @@ export async function createCurrentCycleInvoice(input:Record<string,unknown>,act
   tx.create(invoiceRef,invoice);tx.update(ref,{openInvoiceId:invoiceId,updatedAt:at});
   audit(tx,db,actor,'current-cycle-invoice',id,{invoiceId,cycleStart,amount:invoice.amount,remaining:account.remaining,creditUnits:0});
   return {accounts:[{...account,openInvoiceId:invoiceId,updatedAt:at}],invoices:[invoice]};
+ });
+}
+
+// Keep enrollment IDs stable so past attendance, payments and balances stay linked.
+export async function manageCourse(input:Record<string,unknown>,actor:string){
+ const sourceStudentId=key(input.sourceStudentId),id=key(input.studentId),group=text(input.group,80),subject=text(input.subject,80);
+ if(!REGISTRATION_SUBJECTS.includes(group)||!['add','change'].includes(String(input.mode)))throw Error('과목과 변경 방법을 선택해주세요.');
+ const canonical=(v:string)=>v.includes('피아노')?'피아노':v;
+ const displaySubject=canonical(group),db=database();
+ await db.runTransaction(async tx=>{
+  const studentRef=db.doc(`students/${sourceStudentId}`),ref=db.doc(`opsAccounts/${id}`);
+  const [studentSnap,accountSnap,legacy]=await Promise.all([tx.get(studentRef),tx.get(ref),tx.get(db.doc(`opsAccounts/${sourceStudentId}`))]);
+  const student=studentSnap.data(),account=accountSnap.data();if(!student)throw Error('학생을 찾을 수 없습니다.');
+  const subjects=studentSubjects(student),groups=student.operationsCourseGroups||{};
+  if(legacy.exists)throw Error('통합 수강권은 과목별 분리 확인이 필요합니다.');
+  if(id!==enrollmentId(sourceStudentId,subject)||!subjects.includes(subject))throw Error('학생의 과목 정보를 확인해주세요.');
+  if((student.courseUpdatedAt||'')!==(input.expectedUpdatedAt||''))throw Error('과목 정보가 변경됐습니다. 창을 닫고 다시 확인해주세요.');
+  if(subjects.some(s=>(input.mode==='add'||s!==subject)&&canonical(groups[s]||s)===displaySubject))throw Error('이미 등록된 과목입니다. 해당 과목에서 반을 변경해주세요.');
+  const at=now();
+  if(input.mode==='add'){
+   if(subjects.includes(displaySubject))throw Error('기존 과목 기록이 있어 같은 과목을 추가할 수 없습니다.');
+   tx.update(studentRef,{instruments:[...subjects,displaySubject],operationsCourseGroups:{...groups,[displaySubject]:group},courseUpdatedAt:at});
+  }else{
+   tx.update(studentRef,{operationsCourseGroups:{...groups,[subject]:group},courseUpdatedAt:at});
+   if(account)tx.update(ref,{attendanceGroup:group,displaySubject,name:`${student.name} · ${displaySubject}`,updatedAt:at});
+  }
+  audit(tx,db,actor,'manage-course',id,{mode:input.mode,subject,before:groups[subject]||subject,group});
  });
 }

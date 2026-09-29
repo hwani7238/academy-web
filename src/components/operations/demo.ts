@@ -1,5 +1,5 @@
 import { enrollmentState, lifecycleInput } from '@/lib/operations/lifecycle';
-import { registrationInput } from '@/lib/operations/registration';
+import { REGISTRATION_SUBJECTS, registrationInput } from '@/lib/operations/registration';
 import { Snapshot, Account, integer, adjustBalance, settle, seoulDay, suffixes, validDay, attendanceInput } from '@/lib/operations/model';
 export function sample(): Snapshot {
   const stamp = new Date().toISOString();
@@ -22,7 +22,13 @@ export function demoAction(current: Snapshot, input: Record<string, unknown>): {
     if (a.autoBilling) enqueue(a, `billing_${id}`, 'billing');
   };
   let result: Record<string, unknown> = { ok: true };
-  if(input.action === 'correctRemaining'){
+  if(input.action==='manageCourse'){
+    const row=data.students.find(s=>s.id===input.studentId);const group=String(input.group);if(!row||!REGISTRATION_SUBJECTS.includes(group))throw Error('과목을 확인해주세요.');
+    const subject=group.includes('피아노')?'피아노':group;const siblings=data.students.filter(s=>(s.sourceStudentId||s.id)===(row.sourceStudentId||row.id));
+    if(siblings.some(s=>(input.mode==='add'||s.id!==row.id)&&(s.instruments?.[0]?.includes('피아노')?'피아노':s.instruments?.[0])===subject))throw Error('이미 등록된 과목입니다.');
+    if(input.mode==='add')data.students.push({...row,id:`demo-course-${crypto.randomUUID()}`,subject,name:`${row.name.split(' · ')[0]} · ${subject}`,instruments:[subject],attendanceGroup:group});
+    else{row.attendanceGroup=group;row.instruments=[subject];row.name=`${row.name.split(' · ')[0]} · ${subject}`;if(account)account.name=row.name;}
+  } else if(input.action === 'correctRemaining'){
     if(!account)throw Error('먼저 수강 등록을 해주세요.');
     if(account.updatedAt!==input.expectedUpdatedAt||account.remaining!==input.expectedRemaining)throw Error('잔여 횟수가 변경됐습니다. 다시 열어주세요.');
     account.remaining=integer(input.remaining,-1000,1000,'남은 횟수');account.updatedAt=at;

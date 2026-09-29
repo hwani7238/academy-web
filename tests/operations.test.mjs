@@ -381,3 +381,26 @@ test('current-cycle invoice rejects invalid date, stale settings and existing de
  await assert.rejects(s.service.createCurrentCycleInvoice({studentId:'student-a',cycleStart:s.load('model').seoulDay(),expectedUpdatedAt:a.updatedAt},'owner'));
  assert.equal([...s.records.keys()].filter(k=>k.startsWith('opsInvoices/')).length,1);
 });
+
+test('course group change preserves enrollment and history; adding a course keeps existing courses',async()=>{
+ const s=setup();s.records.set('students/person',{name:'가상',instruments:['피아노','드럼']});
+ const id=s.service.enrollmentId('person','피아노');
+ await s.service.configure({studentId:id,sourceStudentId:'person',subject:'피아노',planUnits:8,planAmount:160000,remaining:6,phone:'01000001234',phones:['1234']},'owner');
+ s.records.set('opsAttendance/history',{studentId:id,units:1});
+ const input={sourceStudentId:'person',studentId:id,subject:'피아노',mode:'change',group:'어린이 피아노(1관)',expectedUpdatedAt:''};
+ await s.service.manageCourse(input,'owner');
+ assert.equal(s.records.get(`opsAccounts/${id}`).remaining,6);assert.equal(s.records.get(`opsAccounts/${id}`).attendanceGroup,'어린이 피아노(1관)');
+ assert.deepEqual(s.records.get('opsAttendance/history'),{studentId:id,units:1});
+ await assert.rejects(s.service.manageCourse({...input,group:'드럼',expectedUpdatedAt:s.records.get('students/person').courseUpdatedAt},'owner'));
+ await s.service.manageCourse({...input,mode:'add',group:'보컬',expectedUpdatedAt:s.records.get('students/person').courseUpdatedAt},'owner');
+ assert.deepEqual(s.records.get('students/person').instruments,['피아노','드럼','보컬']);
+ assert.equal(s.records.has(`opsAccounts/${s.service.enrollmentId('person','보컬')}`),false);
+ await assert.rejects(s.service.manageCourse({...input,group:'어린이 피아노(2관)'},'owner'));
+});
+test('unconfigured course can move to a campus and keeps its group when configured',async()=>{
+ const s=setup();s.records.set('students/person',{name:'가상',instruments:['피아노','드럼']});const id=s.service.enrollmentId('person','피아노');
+ await s.service.manageCourse({sourceStudentId:'person',studentId:id,subject:'피아노',mode:'change',group:'어린이 피아노(1관)'},'owner');
+ await s.service.configure({studentId:id,sourceStudentId:'person',subject:'피아노',planUnits:8,planAmount:160000,remaining:6,phone:'01000001234',phones:['1234']},'owner');
+ assert.equal(s.records.get(`opsAccounts/${id}`).attendanceGroup,'어린이 피아노(1관)');
+ assert.deepEqual(s.records.get('students/person').instruments,['피아노','드럼']);
+});
