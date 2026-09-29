@@ -21,3 +21,5 @@
 .whee-ops button.attendance-time-button{display:inline-flex;align-items:center;gap:10px;min-height:32px;padding:3px 7px;white-space:nowrap;font-variant-numeric:tabular-nums;background:transparent;border-color:#e0e5ef}.whee-ops .attendance-time-button span:last-child{font-size:20px;line-height:1;color:#63718a}
 
 .whee-ops .attendance-sort-heading{display:inline-flex;align-items:center;gap:6px;white-space:nowrap}.whee-ops button.attendance-sort-button{min-width:30px;min-height:30px;padding:2px 6px;font-size:13px;line-height:20px;border-radius:5px;background:transparent}.whee-ops button.attendance-sort-button[aria-pressed="true"]{background:#edf3ff;border-color:#c3d2f9;color:#244ce6}
+
+.whee-ops button.ops-close-button{display:inline-flex;align-items:center;justify-content:center;flex:0 0 36px;width:36px;height:36px;min-height:36px;padding:0;border:0;border-radius:6px;background:transparent;color:#63718a}.whee-ops button.ops-close-button:hover:not(:disabled){background:#edf0f5;color:#14223c}.whee-ops button.ops-close-button:focus-visible{outline:2px solid var(--blue);outline-offset:2px}

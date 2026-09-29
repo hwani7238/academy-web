@@ -1,4 +1,5 @@
 'use client';
+import { CloseButton } from './CloseButton';
 import { useEffect, useRef, useState } from 'react';
 import { REGISTRATION_SUBJECTS } from '@/lib/operations/registration';
 export function RegisterStudent({ save, close }: { save: (input: Record<string, unknown>) => Promise<unknown>; close: () => void }) {
@@ -15,7 +16,7 @@ export function RegisterStudent({ save, close }: { save: (input: Record<string, 
     finally { locked.current=false; setBusy(false); }
   }
   return <dialog ref={dialog} className="quick-attendance registration-dialog" aria-labelledby="registration-title" onCancel={e=>{e.preventDefault();if(!locked.current)close();}}>
-    <div className="section-head"><h2 id="registration-title">신규 학생 등록</h2><button disabled={busy} onClick={close}>닫기</button></div>
+    <div className="section-head"><h2 id="registration-title">신규 학생 등록</h2><CloseButton disabled={busy} onClick={close} /></div>
     <form onSubmit={submit}>
       <label>학생 이름<input name="name" required maxLength={60} autoComplete="off" /></label>
       <label>과목<select name="group" required defaultValue=""><option value="" disabled>과목 선택</option>{REGISTRATION_SUBJECTS.map(s=><option key={s}>{s}</option>)}</select></label>
