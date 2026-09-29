@@ -1,6 +1,20 @@
 import type { Snapshot } from './model';
 import { attendanceTimeMs } from './attendance-time';
-import { compareStudents } from './student-order';
+import { compareNames, compareStudents } from './student-order';
+
+export type DailyAttendanceOrder = 'earliest' | 'latest' | 'name';
+export function orderDailyAttendance(rows: Snapshot['attendance'], order: DailyAttendanceOrder) {
+  const times = new Map(rows.map(row => [row.id, attendanceTimeMs(row)]));
+  return [...rows].sort((a, b) => {
+    if (order !== 'name') {
+      const aa = times.get(a.id), bb = times.get(b.id);
+      // Unknown times stay at the bottom in both directions.
+      if ((aa === undefined) !== (bb === undefined)) return aa === undefined ? 1 : -1;
+      if (aa !== undefined && bb !== undefined && aa !== bb) return order === 'earliest' ? aa - bb : bb - aa;
+    }
+    return compareNames(a.name, b.name) || a.id.localeCompare(b.id);
+  });
+}
 
 export type AttendanceOrder = 'name' | 'attendance';
 export type Arrival = { time?: number };

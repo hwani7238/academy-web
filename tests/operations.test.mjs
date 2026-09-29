@@ -6,6 +6,17 @@ import { createRequire } from 'node:module';
 import ts from 'typescript';
 const require = createRequire(import.meta.url);
 const root = path.resolve('src/lib/operations');
+test('daily attendance toggles arrival direction and Korean names using corrected times with unknown times last',()=>{
+ const s=setup(),{orderDailyAttendance}=s.load('attendance-order');
+ const base={day:'2026-09-29',at:'2026-09-29T05:00:00Z',status:'present',source:'kiosk'};
+ const rows=[{...base,id:'hong',name:'홍길동',arrivalAt:'2026-09-29T01:00:00Z'},{...base,id:'kim',name:'김가람'},{...base,id:'kang',name:'강하늘',at:'2026-09-29T06:00:00Z'},{...base,id:'manual',name:'가나다',source:'manual'},{...base,id:'invalid',name:'나나',at:'invalid'}];
+ const ids=order=>orderDailyAttendance(rows,order).map(r=>r.id);
+ assert.deepEqual(ids('earliest'),['hong','kim','kang','manual','invalid']);
+ assert.deepEqual(ids('latest'),['kang','kim','hong','manual','invalid']);
+ assert.deepEqual(ids('name'),['manual','kang','kim','invalid','hong']);
+ assert.equal(rows[0].id,'hong');
+ assert.deepEqual(orderDailyAttendance([{...base,id:'b',name:'동명'},{...base,id:'a',name:'동명'}],'latest').map(r=>r.id),['a','b']);
+});
 test('attendance time correction preserves attendance day, source, units, balance and original timestamp',async()=>{
  const s=setup();await s.seed('student-a',8);
  const day=s.load('model').seoulDay();
