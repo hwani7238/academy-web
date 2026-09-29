@@ -6,6 +6,21 @@ import { createRequire } from 'node:module';
 import ts from 'typescript';
 const require = createRequire(import.meta.url);
 const root = path.resolve('src/lib/operations');
+test('monthly roster sorts all rows by Korean name or selected-day arrivals without merging courses',()=>{
+ const s=setup(),{arrivalsOnDay,orderAttendanceStudents}=s.load('attendance-order');
+ const students=Array.from({length:195},(_,i)=>({id:`s${i}`,name:`학생${i}`,phone:''}));
+ students[0].name='홍길동 · 피아노';students[1].name='강하늘 · 보컬';students[2].name='김가람 · 드럼';students[3].name='김가람 · 피아노';
+ const day='2026-09-29';
+ const record=(id,status,at,source='kiosk')=>({studentId:id,day,status,at,source});
+ const arrivals=arrivalsOnDay({attendance:[record('s0','present','2026-09-29T05:00:00Z'),record('s2','makeup','2026-09-29T04:00:00Z'),record('s3','cancelled','2026-09-29T03:00:00Z'),record('s4','absent','2026-09-29T02:00:00Z'),record('s5','present','2026-09-29T01:00:00Z','manual'),{...record('s6','present','2026-09-28T01:00:00Z'),day:'2026-09-28'}],legacyAttendance:[{studentId:'s3',day,value:'3',color:''},{studentId:'s7',day,value:'2',color:'FFCCCCCC'},{studentId:'s8',day,value:'2',color:'FFFF00FF'},{studentId:'s9',day,value:'병가',color:''}]},day);
+ assert.deepEqual([...arrivals.keys()],['s0','s2','s5','s8']);
+ assert.equal(arrivals.get('s5').time,undefined);
+ const ordered=orderAttendanceStudents(students,'attendance',arrivals);
+ assert.equal(ordered.length,195);assert.deepEqual(ordered.slice(0,4).map(s=>s.id),['s2','s0','s5','s8']);
+ assert.equal(orderAttendanceStudents(students,'name',arrivals)[0].id,'s1');
+ assert.equal(students[0].id,'s0');
+ assert.equal(arrivalsOnDay({attendance:[record('s0','present','invalid')],legacyAttendance:[]},day).get('s0').time,undefined);
+});
 test('attendance cancellation restores all deducted units once, preserves history and rejects stale edits',async()=>{
  const s=setup();await s.seed('student-a',2);
  const day=s.load('model').seoulDay();
