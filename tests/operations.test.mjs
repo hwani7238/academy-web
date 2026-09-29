@@ -428,3 +428,63 @@ test('legacy whole-student withdrawal is preserved until each course is explicit
  const owner=s.records.get('students/person'),get=s.load('lifecycle').courseLifecycle;
  assert.equal(get(owner,piano).status,'active');assert.equal(get(owner,drums).status,'withdrawn');assert.deepEqual(owner.lifecycle,life);
 });
+
+test('common announcements deduplicate phones and respect per-course lifecycle and missing contacts',async()=>{
+ const s=setup();const a=s.load('announcements');
+ const students=[{id:'p',name:'학생 · 피아노',phone:'010-0000-1234'},{id:'d',name:'학생 · 드럼',phone:'01000001234',lifecycle:{status:'withdrawn'}},{id:'v',name:'형제 · 보컬',phone:'01000001234'},{id:'bad',name:'연락처 없음',phone:'1234'}];
+ const result=a.announcementRecipients(students,[],['p','d','v','bad']);
+ assert.equal(result.recipients.length,1);assert.deepEqual(result.recipients[0].ids,['p','v']);assert.equal(result.excluded.length,2);
+ assert.throws(()=>a.announcementRecipients(students,[],['forged']));
+});
+async function announcementSetup(){
+ const s=setup();await s.seed('student-a',8);await s.seed('student-b',8);
+ const a=s.load('announcements');const service=s.load('announcement-service');
+ const input={requestId:'notice-test',title:'가상 휴강 공지',templateCode:a.ANNOUNCEMENT_TEMPLATES[0].code,parameters:{대상:'가상 재원생',기간:'10월 9일',사유:'공휴일',재개일:'10월 10일'},studentIds:['student-a','student-b']};
+ return {...s,a,noticeService:service,input};
+}
+function fakeAnnouncementNhn(t,s,send){
+ const original=globalThis.fetch;const env={};for(const k of ['NHN_APP_KEY','NHN_SECRET_KEY','NHN_SENDER_KEY']){env[k]=process.env[k];process.env[k]='test-only';}
+ t.after(()=>{globalThis.fetch=original;for(const [k,v] of Object.entries(env)){if(v===undefined)delete process.env[k];else process.env[k]=v;}});
+ globalThis.fetch=async(url,init)=>url.includes('/templates/')?Response.json({header:{isSuccessful:true},templates:{templateCode:s.input.templateCode,templateContent:s.a.ANNOUNCEMENT_TEMPLATES[0].content,status:'TSC03',templateMessageType:'BA',templateEmphasizeType:'NONE',buttons:[]}}):send(url,init);
+}
+test('announcement drafts send nothing; owner confirmation sends once with immutable content and no SMS fallback',async t=>{
+ const s=await announcementSetup();let sends=0;
+ fakeAnnouncementNhn(t,s,async(url,init)=>{sends++;const body=JSON.parse(init.body);assert.equal(body.recipientList.length,1);assert.equal(body.recipientList[0].resendParameter.isResend,false);assert.equal(body.recipientList[0].templateParameter.사유,'공휴일');assert.ok(init.headers['X-NC-API-IDEMPOTENCY-KEY']);return Response.json({header:{isSuccessful:true},message:{requestId:'nhn-test',sendResults:[{recipientNo:'01000001234',resultCode:0}]}});});
+ const draft=await s.noticeService.saveAnnouncement(s.input,'owner');assert.equal(sends,0);
+ assert.equal((await s.noticeService.saveAnnouncement(s.input,'owner')).id,draft.id);
+ await assert.rejects(s.noticeService.saveAnnouncement({...s.input,title:'changed'},'owner'));
+ await assert.rejects(s.noticeService.sendAnnouncement({id:draft.id},'owner'));
+ await Promise.all([s.noticeService.sendAnnouncement({id:draft.id,confirmed:true},'owner'),s.noticeService.sendAnnouncement({id:draft.id,confirmed:true},'owner')]);
+ assert.equal(sends,1);assert.equal((await s.noticeService.getAnnouncement(draft.id)).status,'submitted');
+ assert.equal(s.records.get('opsAccounts/student-a').remaining,8);
+ await s.noticeService.sendAnnouncement({id:draft.id,confirmed:true},'owner');assert.equal(sends,1);
+});
+test('unapproved templates, altered contacts, stale drafts and arbitrary template codes cannot send',async t=>{
+ const s=await announcementSetup();let sends=0;fakeAnnouncementNhn(t,s,async()=>{sends++;throw Error('must not send');});
+ const draft=await s.noticeService.saveAnnouncement(s.input,'owner');
+ const old=s.records.get('opsAccounts/student-a');s.records.set('opsAccounts/student-a',{...old,phone:'01000005678'});
+ await assert.rejects(s.noticeService.sendAnnouncement({id:draft.id,confirmed:true},'owner'),/연락처/);
+ s.records.set('opsAccounts/student-a',old);
+ const originalFetch=globalThis.fetch;globalThis.fetch=async()=>Response.json({header:{isSuccessful:true},templates:{status:'TSC02'}});
+ await assert.rejects(s.noticeService.sendAnnouncement({id:draft.id,confirmed:true},'owner'),/승인/);
+ globalThis.fetch=originalFetch;s.records.get(`opsAnnouncements/${draft.id}`).createdAt='2020-01-01T00:00:00Z';
+ await assert.rejects(s.noticeService.sendAnnouncement({id:draft.id,confirmed:true},'owner'),/하루/);
+ await assert.rejects(s.noticeService.saveAnnouncement({...s.input,templateCode:'FEEDBACK_LOG_V2'},'owner'));
+ assert.equal(sends,0);
+});
+test('ambiguous announcement responses remain unknown and never auto retry',async t=>{
+ const s=await announcementSetup();let sends=0;fakeAnnouncementNhn(t,s,async()=>{sends++;return Response.json({header:{isSuccessful:true}});});
+ const draft=await s.noticeService.saveAnnouncement(s.input,'owner');
+ assert.equal((await s.noticeService.sendAnnouncement({id:draft.id,confirmed:true},'owner')).status,'unknown');
+ await s.noticeService.sendAnnouncement({id:draft.id,confirmed:true},'owner');assert.equal(sends,1);
+});
+test('announcement delivery lookup distinguishes provider acceptance from delivered and failed recipients',async t=>{
+ const s=await announcementSetup();let sends=0;
+ s.records.get('opsAccounts/student-b').phone='01000005678';
+ fakeAnnouncementNhn(t,s,async(url,init)=>{
+  if(init.method==='POST'){sends++;return Response.json({header:{isSuccessful:true},message:{requestId:'nhn-test',sendResults:[{recipientNo:'01000001234',resultCode:0},{recipientNo:'01000005678',resultCode:0}]}});}
+  return Response.json({header:{isSuccessful:true},messageSearchResultResponse:{messages:[{recipientNo:'01000001234',messageStatus:'COMPLETED',resultCode:'MRC01'},{recipientNo:'01000005678',messageStatus:'FAILED',resultCode:'MRC02'}]}});
+ });
+ const draft=await s.noticeService.saveAnnouncement(s.input,'owner');await s.noticeService.sendAnnouncement({id:draft.id,confirmed:true},'owner');
+ const result=await s.noticeService.refreshAnnouncement(draft.id);assert.equal(result.status,'partial');assert.deepEqual(result.recipients.map(r=>r.status),['delivered','failed']);assert.equal(sends,1);
+});
