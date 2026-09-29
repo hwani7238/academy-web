@@ -15,3 +15,10 @@ export const compareNames = (a: string, b: string) => korean.compare(a.split(' �
 export const compareStudents = (a: Snapshot['students'][number], b: Snapshot['students'][number]) => compareNames(a.name, b.name) || compareGroups(groupName(a), groupName(b)) || korean.compare(a.id, b.id);
 
 export const displayCourseName = (name: string) => name.replace(/ · (?:어린이 |성인 )?피아노(?:\([^)]*\))?$/, ' · 피아노');
+
+export function displayEnrollmentName(student: Snapshot['students'][number]) {
+  const group = groupName(student);
+  if (!group.includes('피아노')) return displayCourseName(student.name);
+  const label = group === '피아노' ? '피아노(관 미지정)' : group.replace(/^어린이 /, '');
+  return `${student.name.split(' · ')[0]} · ${label}`;
+}
