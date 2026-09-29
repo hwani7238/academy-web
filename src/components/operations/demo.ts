@@ -1,4 +1,5 @@
 import { enrollmentState, lifecycleInput } from '@/lib/operations/lifecycle';
+import { checkInName } from '@/lib/operations/course-label';
 import { REGISTRATION_SUBJECTS, registrationInput } from '@/lib/operations/registration';
 import { Snapshot, Account, integer, adjustBalance, settle, seoulDay, suffixes, validDay, attendanceInput } from '@/lib/operations/model';
 export function sample(): Snapshot {
@@ -9,7 +10,8 @@ export function sample(): Snapshot {
     { id: 'demo-c', sourceStudentId: 'person-c', subject: '성인 피아노', name: '김하린 · 성인 피아노', phone: '01000001234', checkinSuffixes: ['1234'], planUnits: 8, planAmount: 160000, remaining: 6, openInvoiceId: null, autoBilling: false, active: true, updatedAt: stamp },
   ];
   accounts.push({ ...accounts[2], id: 'demo-c-vocal', subject: '보컬', name: '김하린 · 보컬', planUnits: 4, planAmount: 180000, remaining: 2 });
-  return { accounts, students: accounts.map(({ id, name, phone, sourceStudentId, subject }) => ({ id, name, phone, sourceStudentId, subject, instruments: subject ? [subject] : [] })), attendance: [], invoices: [], payments: [], notices: [], devices: [], day: seoulDay(), configured: false };
+  accounts[0].attendanceGroup = '어린이 피아노(1관)';
+  return { accounts, students: accounts.map(({ id, name, phone, sourceStudentId, subject, attendanceGroup }) => ({ id, name, phone, sourceStudentId, subject, attendanceGroup, instruments: subject ? [subject] : [] })), attendance: [], invoices: [], payments: [], notices: [], devices: [], day: seoulDay(), configured: false };
 }
 export function demoAction(current: Snapshot, input: Record<string, unknown>): { data: Snapshot; result: Record<string, unknown> } {
   const data = structuredClone(current); const at = new Date().toISOString();
@@ -59,12 +61,12 @@ export function demoAction(current: Snapshot, input: Record<string, unknown>): {
     if (!account?.active || enrollmentState(data.students.find(s=>s.id===account.id)?.lifecycle)!=='active') throw new Error('학생 설정을 확인해주세요.');
     const existing = data.attendance.find(a => a.studentId === account.id && a.day === seoulDay());
     if (existing?.status && existing.status !== 'present' && existing.status !== 'makeup') throw new Error('오늘 결석·취소 기록이 있습니다. 선생님께 출석 변경을 요청해주세요.');
-    if (existing) return { data, result: { duplicate: true, name: account.name } };
+    if (existing) return { data, result: { duplicate: true, name: checkInName(account, {}) } };
     const id = `${account.id}_${seoulDay()}`;
     account.remaining = adjustBalance(account.remaining, 0, 1);
     data.attendance.unshift({ id, studentId: account.id, name: account.name, day: seoulDay(), at, units: 1, note: '', updatedAt: at });
     enqueue(account, `attendance_${id}`, 'attendance'); if (account.remaining <= 0) invoice(account);
-    result = { name: account.name, duplicate: false };
+    result = { name: checkInName(account, {}), duplicate: false };
   } else if (input.action === 'configure') {
     const student = data.students.find(s => s.id === input.studentId)!;
     const next: Account = { id: student.id, sourceStudentId: student.sourceStudentId, subject: student.subject, name: student.name, phone: String(input.phone), checkinSuffixes: suffixes(input.phones), planUnits: Number(input.planUnits), planAmount: Number(input.planAmount), remaining: account?.remaining ?? Number(input.remaining), openInvoiceId: account?.openInvoiceId || null, active: input.active !== false, autoBilling: input.autoBilling === true, updatedAt: at };

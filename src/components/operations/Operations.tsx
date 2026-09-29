@@ -14,6 +14,7 @@ import { ImportStudents } from './ImportStudents';
 import { GROUPS, groupName, compareGroups, compareStudents, compareNames, displayCourseName, displayEnrollmentName } from '@/lib/operations/student-order';
 import { MonthlyAttendance } from './MonthlyAttendance';
 import { CheckIn } from './CheckIn';
+import { checkInName } from '@/lib/operations/course-label';
 import { sample, demoAction } from './demo';
 import './operations.css';
 const invoiceDay = (invoice: Invoice) => invoice.cycleStart || seoulDay(new Date(invoice.createdAt));
@@ -117,7 +118,7 @@ export function Operations({ demo = false }: { demo?: boolean }) {
     {tab === 'devices' && <><div className="section-head"><div><h2>아이폰 출석 기기</h2><p>등록된 기기만 출석할 수 있습니다. 등록 코드는 10분 동안 한 번 사용할 수 있어요.</p></div><button className="primary" disabled={busy} onClick={() => { void act({ action: 'pair' }).then(r => setPairCode(String(r.code))).catch(() => {}); }}>등록 코드 만들기</button></div>
       {pairCode && <div className="notice"><p>아이폰에서 <strong>{typeof window === 'undefined' ? '/check-in' : `${window.location.origin}/check-in`}</strong>을 열고 아래 코드를 입력해주세요.</p><code className="pair-code">{pairCode}</code><button onClick={() => { void navigator.clipboard.writeText(pairCode).then(() => setMessage('등록 코드를 복사했습니다.')).catch(() => setError('코드를 직접 복사해주세요.')); }}>코드 복사</button></div>}
       {data.devices.map(d => <div className="invoice-row" key={d.id}><div><strong>{d.name}</strong><p>{time(d.createdAt)} 등록 · {d.active ? '사용 중' : '중지됨'}</p></div>{d.active && <button disabled={busy} onClick={() => { if (window.confirm('이 기기의 출석 권한을 중지할까요?')) click({ action: 'revoke', deviceId: d.id }); }}>사용 중지</button>}</div>)}{!data.devices.length && <div className="empty">등록된 출석 기기가 없습니다.</div>}</>}
-    </section>{demo && tab === 'today' && <aside><CheckIn demo={{ lookup: digits => data.accounts.filter(a => a.active && activeIds.has(a.id) && a.checkinSuffixes.includes(digits)).map(a => ({ id: a.id, name: a.name })), checkIn: id => act({ action: 'demoCheckIn', studentId: id }) }} /></aside>}</div>
+    </section>{demo && tab === 'today' && <aside><CheckIn demo={{ lookup: digits => data.accounts.filter(a => a.active && activeIds.has(a.id) && a.checkinSuffixes.includes(digits)).map(a => ({ id: a.id, name: checkInName(a, {}) })), checkIn: id => act({ action: 'demoCheckIn', studentId: id }) }} /></aside>}</div>
     </main>
     {lifecycleTarget && <LifecycleDialog {...lifecycleTarget} save={act} close={()=>setLifecycleTarget(null)}/>}
     {courseStudent && <CourseDialog student={courseStudent} save={act} close={()=>setCourseStudent(null)}/>}

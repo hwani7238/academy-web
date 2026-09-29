@@ -6,6 +6,29 @@ import { createRequire } from 'node:module';
 import ts from 'typescript';
 const require = createRequire(import.meta.url);
 const root = path.resolve('src/lib/operations');
+test('check-in labels use the registered piano group and preserve separate siblings',()=>{
+ const s=setup(),{checkInName}=s.load('course-label');
+ const a={name:'가상 유민 · 피아노',subject:'피아노'};
+ assert.equal(checkInName({...a,attendanceGroup:'어린이 피아노(1관)'},{}),'가상 유민 · 어린이 피아노 (1관)');
+ assert.equal(checkInName({...a,attendanceGroup:'어린이 피아노(1관)'},{operationsCourseGroups:{피아노:'어린이 피아노(2관)'}}),'가상 유민 · 어린이 피아노 (2관)');
+ assert.equal(checkInName({...a,subject:'성인 피아노'},{}),'가상 유민 · 성인 피아노');
+ const source={subject:'어린이 피아노',asOf:'2026-09-23',history:[{section:'피아노(어린이)2관',cells:[{day:'2026-08-01'}]},{section:'피아노(어린이)',cells:[{day:'2026-09-01'}]}]};
+ assert.equal(checkInName(a,{},source),'가상 유민 · 어린이 피아노 (1관)');
+ assert.equal(checkInName({...a,name:'가상 유나 · 어린이 피아노',subject:'어린이 피아노'},{},source),'가상 유나 · 어린이 피아노 (1관)');
+ source.history.push({section:'피아노(어린이)2관',cells:[{day:'2026-09-02'}]});
+ assert.equal(checkInName(a,{},source),'가상 유민 · 피아노 · 반 확인 필요');
+ assert.equal(checkInName({...a,subject:'드럼',name:'가상 유민 · 드럼'},{}),'가상 유민 · 드럼');
+});
+test('check-in success and duplicate responses use the same imported campus without extra deductions',async()=>{
+ const s=setup();await s.seed('student-a',6);
+ const account=s.records.get('opsAccounts/student-a');
+ Object.assign(account,{name:'가상 학생 · 피아노',subject:'피아노',importId:'source'});
+ s.records.set('opsImports/source',{subject:'어린이 피아노',asOf:'2026-09-23',history:[{section:'피아노(어린이)2관',cells:[{day:'2026-09-01'}]}]});
+ const result=await s.service.checkIn('student-a','1234','device');
+ assert.equal(result.name,'가상 학생 · 어린이 피아노 (2관)');
+ assert.equal((await s.service.checkIn('student-a','1234','device')).name,result.name);
+ assert.equal(s.records.get('opsAccounts/student-a').remaining,5);
+});
 test('pause and withdrawal preserve balances; expiry and reinstatement restore check-in',async()=>{
  const s=setup();await s.seed('student-a',8);const today=s.load('model').seoulDay();
  await s.service.changeLifecycle({studentId:'student-a',sourceStudentId:'student-a',status:'paused',until:today,expectedUpdatedAt:''},'owner');

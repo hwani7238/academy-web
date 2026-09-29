@@ -1,4 +1,5 @@
 import type { Snapshot } from './model';
+import { pianoGroup } from './course-label';
 export const GROUPS = ['성인 피아노', '어린이 피아노(1관)', '어린이 피아노(2관)', '앙상블', '보컬', '드럼', '우쿨렐레', '기타', '미디'];
 export function groupName(student: Snapshot['students'][number]) {
   const value = student.attendanceGroup || student.instruments?.[0] || '';
@@ -19,6 +20,6 @@ export const displayCourseName = (name: string) => name.replace(/ · (?:어린�
 export function displayEnrollmentName(student: Snapshot['students'][number]) {
   const group = groupName(student);
   if (!group.includes('피아노')) return displayCourseName(student.name);
-  const label = group === '피아노' ? '피아노(관 미지정)' : group.replace(/^어린이 /, '');
+  const label = pianoGroup(group) || '피아노 · 반 확인 필요';
   return `${student.name.split(' · ')[0]} · ${label}`;
 }

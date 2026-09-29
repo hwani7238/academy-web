@@ -3,6 +3,8 @@ import { database, sameOrigin, device, failure } from '@/lib/operations/auth';
 import { pair, checkIn } from '@/lib/operations/service';
 import { after } from 'next/server';
 import { processNotices } from '@/lib/operations/notices';
+import { checkInName } from '@/lib/operations/course-label';
+import type { Account } from '@/lib/operations/model';
 export const runtime = 'nodejs';
 export const maxDuration = 60;
 export async function POST(request: Request) {
@@ -17,7 +19,14 @@ export async function POST(request: Request) {
     if (typeof input.digits !== 'string' || !/^[0-9]{4}$/.test(input.digits)) throw new Error('뒷번호 네 자리를 입력해주세요.');
     if (input.action === 'lookup') {
       const matches = await database().collection('opsAccounts').where('checkinSuffixes', 'array-contains', input.digits).get();
-      const available = await Promise.all(matches.docs.filter(d=>d.data().active).map(async d=>{const owner=(await database().doc(`students/${d.data().sourceStudentId || d.id}`).get()).data();return owner && enrollmentState(courseLifecycle(owner,d.id)) === 'active' ? {id:d.id,name:d.data().name} : null;}));
+      const available = await Promise.all(matches.docs.filter(d=>d.data().active).map(async d=>{
+        const account = { ...d.data(), id: d.id } as Account;
+        const owner = (await database().doc(`students/${account.sourceStudentId || d.id}`).get()).data();
+        if (!owner || enrollmentState(courseLifecycle(owner,d.id)) !== 'active') return null;
+        const source = account.importId && !account.attendanceGroup && !owner.operationsCourseGroups?.[account.subject || '']
+          ? (await database().doc(`opsImports/${account.importId}`).get()).data() : undefined;
+        return { id:d.id, name:checkInName(account, owner, source) };
+      }));
       return Response.json({ matches: available.filter(Boolean) }, { headers: { 'Cache-Control': 'no-store' } });
     }
     if (input.action === 'checkIn') {

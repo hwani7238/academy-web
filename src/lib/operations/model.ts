@@ -1,5 +1,6 @@
 import type { Lifecycle } from './lifecycle';
 export type Account = {
+  attendanceGroup?: string; displaySubject?: string;
   sourceStudentId?: string; subject?: string; importId?: string; openingAsOf?: string;
   id: string; name: string; phone: string; checkinSuffixes: string[];
   planUnits: number; planAmount: number; remaining: number; openInvoiceId: string | null;
