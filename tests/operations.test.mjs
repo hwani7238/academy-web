@@ -6,6 +6,38 @@ import { createRequire } from 'node:module';
 import ts from 'typescript';
 const require = createRequire(import.meta.url);
 const root = path.resolve('src/lib/operations');
+test('student rename updates all owned course accounts while keeping identities, balances and historical records',async()=>{
+ const s=setup();
+ s.records.set('students/person',{name:'기존 이름',instruments:['피아노','드럼'],phone:'01000001234'});
+ const ids=['피아노','드럼'].map(subject=>s.service.enrollmentId('person',subject));
+ for(const [i,subject] of ['피아노','드럼'].entries())await s.service.configure({studentId:ids[i],sourceStudentId:'person',subject,planUnits:8,planAmount:160000,remaining:6-i,phone:'01000001234',phones:['1234'],active:true},'owner');
+ await s.seed('other',4);
+ const before=ids.map(id=>structuredClone(s.records.get(`opsAccounts/${id}`))),other=structuredClone(s.records.get('opsAccounts/other'));
+ s.records.set('opsAttendance/past',{id:'past',studentId:ids[0],name:'기존 이름 · 피아노',units:1});
+ const input={studentId:ids[0],sourceStudentId:'person',name:'새 이름',expectedName:'기존 이름',expectedUpdatedAt:''};
+ await s.service.renameStudent(input,'owner');
+ assert.equal(s.records.get('students/person').name,'새 이름');
+ for(const [i,id] of ids.entries()){
+  const a=s.records.get(`opsAccounts/${id}`);assert.equal(a.name,`새 이름 · ${before[i].subject}`);
+  for(const field of ['id','sourceStudentId','subject','remaining','planUnits','planAmount','phone','openInvoiceId'])assert.deepEqual(a[field],before[i][field]);
+ }
+ assert.deepEqual(s.records.get('opsAccounts/other'),other);
+ assert.equal(s.records.get('opsAttendance/past').name,'기존 이름 · 피아노');
+ await s.service.renameStudent(input,'owner');
+ assert.equal([...s.records.values()].filter(v=>v.action==='rename-student').length,1);
+ await assert.rejects(s.service.renameStudent({...input,name:'다른 이름'},'owner'));
+ await assert.rejects(s.service.renameStudent({...input,studentId:'other',name:'잘못된 학생'},'owner'));
+ for(const name of ['', ' '.repeat(3), '가'.repeat(101),'줄\n바꿈'])await assert.rejects(s.service.renameStudent({...input,name},'owner'));
+ assert.equal([...s.records.keys()].filter(k=>k.startsWith('opsNotices/')||k.startsWith('opsPayments/')).length,0);
+});
+test('student rename also works before course setup and for legacy single accounts',async()=>{
+ const s=setup();s.records.set('students/unconfigured',{name:'미설정',instruments:['피아노']});
+ await s.service.renameStudent({sourceStudentId:'unconfigured',studentId:s.service.enrollmentId('unconfigured','피아노'),name:'이름 정정',expectedName:'미설정'},'owner');
+ assert.equal(s.records.get('students/unconfigured').name,'이름 정정');
+ await s.seed('legacy',7);
+ await s.service.renameStudent({sourceStudentId:'legacy',studentId:'legacy',name:'통합 학생',expectedName:'가상 학생'},'owner');
+ assert.equal(s.records.get('opsAccounts/legacy').name,'통합 학생');assert.equal(s.records.get('opsAccounts/legacy').remaining,7);
+});
 test('daily attendance toggles arrival direction and Korean names using corrected times with unknown times last',()=>{
  const s=setup(),{orderDailyAttendance}=s.load('attendance-order');
  const base={day:'2026-09-29',at:'2026-09-29T05:00:00Z',status:'present',source:'kiosk'};
@@ -160,7 +192,7 @@ function setup() {
       const result = tail.then(async () => {
         const writes = []; let written = false;
         const tx = {
-          get: async r => { assert.equal(written, false, 'Firestore forbids reads after writes'); return snap(r.path); },
+          get: async r => { assert.equal(written, false, 'Firestore forbids reads after writes'); return r.path ? snap(r.path) : r.get(); },
           create: (r,d) => { written = true; writes.push(['create',r.path,structuredClone(d)]); },
           set: (r,d) => { written = true; writes.push(['set',r.path,structuredClone(d)]); },
           update: (r,d) => { written = true; writes.push(['update',r.path,structuredClone(d)]); },

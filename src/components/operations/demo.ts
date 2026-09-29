@@ -25,7 +25,17 @@ export function demoAction(current: Snapshot, input: Record<string, unknown>): {
     if (a.autoBilling) enqueue(a, `billing_${id}`, 'billing');
   };
   let result: Record<string, unknown> = { ok: true };
-  if(input.action==='correctAttendanceTime'){
+  if(input.action==='renameStudent'){
+    const source=String(input.sourceStudentId),siblings=data.students.filter(s=>(s.sourceStudentId||s.id)===source),target=siblings.find(s=>s.id===input.studentId);
+    const name=typeof input.name==='string'?input.name.trim():'';
+    if(!target||!name||name.length>100||/[\r\n\u0000]/.test(name))throw Error('학생 이름을 확인해주세요.');
+    if(target.name.split(' · ')[0]!==input.expectedName||(target.courseUpdatedAt||'')!==(input.expectedUpdatedAt||''))throw Error('학생 정보가 변경됐습니다. 창을 닫고 다시 확인해주세요.');
+    const ids=new Set(siblings.map(s=>s.id));
+    const renamed=(old:string)=>[name,...old.split(' · ').slice(1)].join(' · ');
+    for(const row of siblings){row.name=renamed(row.name);row.courseUpdatedAt=at;}
+    for(const row of data.accounts.filter(a=>ids.has(a.id))){row.name=renamed(row.name);row.updatedAt=at;}
+    for(const row of [...data.attendance,...data.invoices].filter(r=>ids.has(r.studentId)))row.name=renamed(row.name);
+  } else if(input.action==='correctAttendanceTime'){
     const row=data.attendance.find(a=>a.id===input.attendanceId);
     if(!row)throw Error('출석 기록을 찾을 수 없습니다.');
     const arrivalAt=correctedArrival(row.day,input.time);

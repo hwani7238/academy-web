@@ -325,6 +325,30 @@ export async function createCurrentCycleInvoice(input:Record<string,unknown>,act
 }
 
 // Keep enrollment IDs stable so past attendance, payments and balances stay linked.
+export async function renameStudent(input:Record<string,unknown>,actor:string){
+ const sourceStudentId=key(input.sourceStudentId),id=key(input.studentId),db=database();
+ const name=typeof input.name==='string'?input.name.trim():'';
+ if(!name||name.length>100||/[\r\n\u0000]/.test(name))throw Error('학생 이름을 1~100자로 입력해주세요.');
+ await db.runTransaction(async tx=>{
+  const studentRef=db.doc(`students/${sourceStudentId}`);
+  const [studentSnap,accounts,legacy]=await Promise.all([
+   tx.get(studentRef),tx.get(db.collection('opsAccounts').where('sourceStudentId','==',sourceStudentId)),tx.get(db.doc(`opsAccounts/${sourceStudentId}`)),
+  ]);
+  const student=studentSnap.data();if(!student)throw Error('학생을 찾을 수 없습니다.');
+  if(id!==sourceStudentId&&!studentSubjects(student).some(s=>enrollmentId(sourceStudentId,s)===id)&&!accounts.docs.some(d=>d.id===id))throw Error('해당 학생의 수강 정보를 찾을 수 없습니다.');
+  if(student.name===name)return;
+  if(student.name!==input.expectedName||(student.courseUpdatedAt||'')!==(input.expectedUpdatedAt||''))throw Error('학생 정보가 변경됐습니다. 창을 닫고 다시 확인해주세요.');
+  const at=now();
+  tx.update(studentRef,{name,courseUpdatedAt:at});
+  const accountDocs=new Map<string,FirebaseFirestore.DocumentSnapshot>(accounts.docs.map(d=>[d.id,d]));if(legacy.exists)accountDocs.set(legacy.id,legacy);
+  for(const account of accountDocs.values()){
+   const suffix=String(account.data()?.name||'').split(' · ').slice(1).join(' · ');
+   tx.update(account.ref,{name:suffix?`${name} · ${suffix}`:name,updatedAt:at});
+  }
+  audit(tx,db,actor,'rename-student',sourceStudentId,{before:student.name,after:name,accountIds:[...accountDocs.keys()]});
+ });
+}
+
 export async function manageCourse(input:Record<string,unknown>,actor:string){
  const sourceStudentId=key(input.sourceStudentId),id=key(input.studentId),group=text(input.group,80),subject=text(input.subject,80);
  if(!REGISTRATION_SUBJECTS.includes(group)||!['add','change'].includes(String(input.mode)))throw Error('과목과 변경 방법을 선택해주세요.');

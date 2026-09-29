@@ -53,6 +53,7 @@ export async function GET(request: Request) {
       }
     }
     const rows = (snap: FirebaseFirestore.QuerySnapshot) => snap.docs.map(d => ({ ...d.data(), id: d.id }));
+    const namedRows = (snap: FirebaseFirestore.QuerySnapshot) => snap.docs.map(d => { const value=d.data(); return {...value,id:d.id,name:accountById.get(value.studentId)?.name||value.name}; });
     return Response.json({ day, legacyAttendance: [...legacyCells.values()].filter(Boolean), configured: noticeConfigured(), students: students.docs.flatMap<Snapshot['students'][number]>(d => {
       const raw = d.data(); const base = { courseUpdatedAt:raw.courseUpdatedAt || '', name: raw.name || '학생', phone: raw.phone || '', ...(raw.lifecycle ? { lifecycle: raw.lifecycle } : {}) };
       // Preserve existing single-account balances; do not silently duplicate them.
@@ -61,13 +62,14 @@ export async function GET(request: Request) {
       if (!subjects.length) return [{ ...base, id: d.id, lifecycle:courseLifecycle(raw,d.id), instruments: [] }];
       const known = (subjectsByStudent.get(d.id) || []);
       return [...new Set([...subjects, ...known])].map(subject => { const id = service.enrollmentId(d.id, subject); const overrideGroup=raw.operationsCourseGroups?.[subject]; const display = overrideGroup ? (overrideGroup.includes('피아노')?'피아노':overrideGroup) : accountById.get(id)?.displaySubject || subject; const groups = attendanceGroups.get(id); const attendanceGroup = overrideGroup || accountById.get(id)?.attendanceGroup || (groups?.size === 1 ? [...groups][0] : undefined); return { ...base, id, lifecycle:courseLifecycle(raw,id), sourceStudentId: d.id, subject, ...(attendanceGroup ? { attendanceGroup } : {}), name: `${base.name} · ${display}`, instruments: [display] }; });
-    }), accounts: rows(accounts), attendance: rows(attendance), invoices: rows(invoices), payments: rows(payments), notices: notices.docs.map(d => { const n = d.data(); return { id: d.id, studentId: n.studentId, name: n.name, kind: n.kind, status: n.status, createdAt: n.createdAt, requestId: n.requestId || '', error: n.error || '' }; }), devices: devices.docs.map(d => { const v = d.data(); return { id: d.id, name: v.name, active: v.active && v.expiresAt > Date.now(), createdAt: v.createdAt }; }) }, { headers: { 'Cache-Control': 'no-store' } });
+    }), accounts: rows(accounts), attendance: namedRows(attendance), invoices: namedRows(invoices), payments: rows(payments), notices: notices.docs.map(d => { const n = d.data(); return { id: d.id, studentId: n.studentId, name: n.name, kind: n.kind, status: n.status, createdAt: n.createdAt, requestId: n.requestId || '', error: n.error || '' }; }), devices: devices.docs.map(d => { const v = d.data(); return { id: d.id, name: v.name, active: v.active && v.expiresAt > Date.now(), createdAt: v.createdAt }; }) }, { headers: { 'Cache-Control': 'no-store' } });
   } catch (error) { return failure(error); }
 }
 export async function POST(request: Request) {
   try {
     sameOrigin(request); const actor = await manager(request); const input = await request.json();
     switch (input.action) {
+      case 'renameStudent': await service.renameStudent(input,actor); return Response.json({ok:true});
       case 'correctAttendanceTime': return Response.json({ok:true,changes:await service.correctAttendanceTime(input,actor)});
       case 'changeLifecycle': return Response.json({ok:true,changes:await service.changeLifecycle(input, actor)});
       case 'registerStudent': return Response.json(await service.registerStudent(input, actor));
