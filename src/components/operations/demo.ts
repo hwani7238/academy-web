@@ -1,4 +1,5 @@
 import { enrollmentState, lifecycleInput } from '@/lib/operations/lifecycle';
+import { correctedArrival } from '@/lib/operations/attendance-time';
 import { checkInName } from '@/lib/operations/course-label';
 import { REGISTRATION_SUBJECTS, registrationInput } from '@/lib/operations/registration';
 import { Snapshot, Account, integer, adjustBalance, settle, seoulDay, suffixes, validDay, attendanceInput } from '@/lib/operations/model';
@@ -24,7 +25,15 @@ export function demoAction(current: Snapshot, input: Record<string, unknown>): {
     if (a.autoBilling) enqueue(a, `billing_${id}`, 'billing');
   };
   let result: Record<string, unknown> = { ok: true };
-  if(input.action==='manageCourse'){
+  if(input.action==='correctAttendanceTime'){
+    const row=data.attendance.find(a=>a.id===input.attendanceId);
+    if(!row)throw Error('출석 기록을 찾을 수 없습니다.');
+    const arrivalAt=correctedArrival(row.day,input.time);
+    if(row.arrivalAt!==arrivalAt){
+      if(row.updatedAt!==input.expectedUpdatedAt)throw Error('다른 화면에서 기록이 변경됐습니다. 창을 닫고 다시 확인해주세요.');
+      row.arrivalAt=arrivalAt;row.updatedAt=at;
+    }
+  } else if(input.action==='manageCourse'){
     const row=data.students.find(s=>s.id===input.studentId);const group=String(input.group);if(!row||!REGISTRATION_SUBJECTS.includes(group))throw Error('과목을 확인해주세요.');
     const subject=group.includes('피아노')?'피아노':group;const siblings=data.students.filter(s=>(s.sourceStudentId||s.id)===(row.sourceStudentId||row.id));
     if(siblings.some(s=>(input.mode==='add'||s.id!==row.id)&&(s.instruments?.[0]?.includes('피아노')?'피아노':s.instruments?.[0])===subject))throw Error('이미 등록된 과목입니다.');

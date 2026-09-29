@@ -6,6 +6,28 @@ import { createRequire } from 'node:module';
 import ts from 'typescript';
 const require = createRequire(import.meta.url);
 const root = path.resolve('src/lib/operations');
+test('attendance time correction preserves attendance day, source, units, balance and original timestamp',async()=>{
+ const s=setup();await s.seed('student-a',8);
+ const day=s.load('model').seoulDay();
+ await s.service.recordAttendance({studentId:'student-a',day,status:'present',units:2,note:'기존 비고'},'owner');
+ const id=`student-a_${day}`,before=structuredClone(s.records.get(`opsAttendance/${id}`)),account=structuredClone(s.records.get('opsAccounts/student-a'));
+ const input={attendanceId:id,time:'00:05',expectedUpdatedAt:before.updatedAt};
+ const result=await s.service.correctAttendanceTime(input,'owner');
+ const row=result.attendance[0];
+ assert.equal(row.at,before.at);assert.equal(row.day,day);assert.equal(row.source,'manual');assert.equal(row.units,2);assert.equal(row.note,'기존 비고');
+ assert.equal(s.load('attendance-time').attendanceClock(row),'00:05');
+ assert.ok(s.load('attendance-order').arrivalsOnDay({attendance:[row]},day).get('student-a').time);
+ assert.deepEqual(s.records.get('opsAccounts/student-a'),account);
+ await s.service.correctAttendanceTime(input,'owner');
+ await assert.rejects(s.service.correctAttendanceTime({...input,time:'12:34',expectedUpdatedAt:'stale'},'owner'));
+ for(const time of ['24:00','12:60','3:10','',null,'12:30:00'])await assert.rejects(s.service.correctAttendanceTime({...input,time,expectedUpdatedAt:row.updatedAt},'owner'));
+ await assert.rejects(s.service.correctAttendanceTime({...input,attendanceId:'missing'},'owner'));
+ const audit=[...s.records].filter(([k,v])=>k.startsWith('opsAudit/')&&v.action==='correct-attendance-time');
+ assert.equal(audit.length,1);assert.equal(audit[0][1].detail.before,before.at);
+ assert.equal([...s.records.keys()].filter(k=>k.startsWith('opsNotices/')||k.startsWith('opsInvoices/')||k.startsWith('opsPayments/')).length,0);
+ assert.equal(s.load('attendance-time').attendanceClock(before),'');
+ assert.equal(s.load('attendance-time').attendanceClock({...before,source:'kiosk',at:new Date(`${day}T15:20:00+09:00`).toISOString()}),'15:20');
+});
 test('monthly roster sorts all rows by Korean name or selected-day arrivals without merging courses',()=>{
  const s=setup(),{arrivalsOnDay,orderAttendanceStudents}=s.load('attendance-order');
  const students=Array.from({length:195},(_,i)=>({id:`s${i}`,name:`학생${i}`,phone:''}));

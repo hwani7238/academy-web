@@ -1,5 +1,6 @@
 import { enrollmentState, lifecycleInput, courseLifecycle } from './lifecycle';
 import { checkInName } from './course-label';
+import { correctedArrival } from './attendance-time';
 import { randomUUID, randomBytes } from 'node:crypto';
 import { REGISTRATION_SUBJECTS, registrationInput } from './registration';
 import type { Transaction, Firestore } from 'firebase-admin/firestore';
@@ -144,6 +145,21 @@ export async function adjust(input: Record<string, unknown>, actor: string) {
     tx.update(ref, { remaining, openInvoiceId, updatedAt: now() });
     tx.update(attendanceRef, { units, note, updatedAt: now() });
     audit(tx, db, actor, 'adjust', account.id, { attendanceId: id, before: attendance.units, after: units, note, remaining });
+  });
+}
+export async function correctAttendanceTime(input: Record<string, unknown>, actor: string) {
+  const id = key(input.attendanceId), db = database();
+  return db.runTransaction(async tx => {
+    const ref = db.doc(`opsAttendance/${id}`);
+    const old = (await tx.get(ref)).data() as Attendance | undefined;
+    if (!old) throw Error('출석 기록을 찾을 수 없습니다.');
+    const arrivalAt = correctedArrival(old.day, input.time);
+    if (old.arrivalAt === arrivalAt) return { attendance: [old] };
+    if (old.updatedAt !== input.expectedUpdatedAt) throw Error('다른 화면에서 기록이 변경됐습니다. 창을 닫고 다시 확인해주세요.');
+    const updatedAt = now();
+    tx.update(ref, { arrivalAt, updatedAt });
+    audit(tx, db, actor, 'correct-attendance-time', old.studentId, { attendanceId: id, before: old.arrivalAt || old.at, after: arrivalAt, source: old.source || 'kiosk' });
+    return { attendance: [{ ...old, arrivalAt, updatedAt }] };
   });
 }
 export async function createInvoice(studentId: unknown, actor: string) {

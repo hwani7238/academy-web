@@ -1,5 +1,5 @@
 import type { Snapshot } from './model';
-import { seoulDay } from './model';
+import { attendanceTimeMs } from './attendance-time';
 import { compareStudents } from './student-order';
 
 export type AttendanceOrder = 'name' | 'attendance';
@@ -12,10 +12,8 @@ export function arrivalsOnDay(data: Pick<Snapshot, 'attendance' | 'legacyAttenda
     if (row.day !== day) continue;
     recorded.add(row.studentId);
     if (row.status && row.status !== 'present' && row.status !== 'makeup') continue;
-    const time = Date.parse(row.at);
-    // A manual entry's saved time is not the student's arrival time.
-    const timed = row.source !== 'manual' && Number.isFinite(time) && seoulDay(new Date(time)) === day;
-    arrivals.set(row.studentId, timed ? { time } : {});
+    const time = attendanceTimeMs(row);
+    arrivals.set(row.studentId, time === undefined ? {} : { time });
   }
   for (const row of data.legacyAttendance || []) {
     if (row.day !== day || recorded.has(row.studentId)) continue;
