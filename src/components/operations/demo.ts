@@ -1,6 +1,6 @@
 import { enrollmentState, lifecycleInput } from '@/lib/operations/lifecycle';
 import { registrationInput } from '@/lib/operations/registration';
-import { Snapshot, Account, integer, adjustBalance, settle, seoulDay, suffixes, attendanceInput } from '@/lib/operations/model';
+import { Snapshot, Account, integer, adjustBalance, settle, seoulDay, suffixes, validDay, attendanceInput } from '@/lib/operations/model';
 export function sample(): Snapshot {
   const stamp = new Date().toISOString();
   const accounts: Account[] = [
@@ -63,6 +63,11 @@ export function demoAction(current: Snapshot, input: Record<string, unknown>): {
     const student = data.students.find(s => s.id === input.studentId)!;
     const next: Account = { id: student.id, sourceStudentId: student.sourceStudentId, subject: student.subject, name: student.name, phone: String(input.phone), checkinSuffixes: suffixes(input.phones), planUnits: Number(input.planUnits), planAmount: Number(input.planAmount), remaining: account?.remaining ?? Number(input.remaining), openInvoiceId: account?.openInvoiceId || null, active: input.active !== false, autoBilling: input.autoBilling === true, updatedAt: at };
     data.accounts = [...data.accounts.filter(a => a.id !== student.id), next];
+  } else if(input.action==='currentCycleInvoice'){
+    if(!account || account.openInvoiceId)throw Error('수강권과 기존 청구를 확인해주세요.');
+    const cycleStart=validDay(input.cycleStart);if(cycleStart>seoulDay())throw Error('재등록일을 확인해주세요.');
+    const id=crypto.randomUUID();account.openInvoiceId=id;
+    data.invoices.push({id,studentId:account.id,name:account.name,units:account.planUnits,amount:account.planAmount,paid:0,status:'open',needsReview:false,createdAt:at,creditUnits:0,cycleStart});
   } else if (input.action === 'invoice') { if (!account) throw new Error('수강 설정을 저장해주세요.'); if (account.openInvoiceId) throw new Error('진행 중인 청구가 있습니다.'); invoice(account); }
   else if (input.action === 'adjust') {
     const attendance = data.attendance.find(a => a.id === input.attendanceId)!;
@@ -74,7 +79,7 @@ export function demoAction(current: Snapshot, input: Record<string, unknown>): {
     if (data.payments.some(p => p.id === input.requestId)) return { data, result };
     const i = data.invoices.find(i => i.id === input.invoiceId)!; const s = settle(i, Number(input.amount));
     i.paid = s.paid;
-    if (s.complete) { i.status = 'paid'; const a = data.accounts.find(a => a.id === i.studentId)!; a.remaining += i.units; a.openInvoiceId = null; }
+    if (s.complete) { i.status = 'paid'; const a = data.accounts.find(a => a.id === i.studentId)!; a.remaining += i.creditUnits ?? i.units; a.openInvoiceId = null; }
     data.payments.unshift({ id: String(input.requestId), invoiceId: i.id, studentId: i.studentId, amount: Number(input.amount), method: String(input.method), at, note: String(input.note || '') });
   } else if (['sendInvoice', 'cancelInvoice', 'confirmInvoice'].includes(String(input.action))) {
     const i = data.invoices.find(i => i.id === input.invoiceId)!;

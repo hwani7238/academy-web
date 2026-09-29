@@ -359,3 +359,25 @@ test('pause end date edits preserve balances and use the new expiry',async()=>{
  assert.equal(s.load('lifecycle').enrollmentState(result.lifecycle.value,'2099-01-02'),'active');
  assert.equal(s.records.get('opsAccounts/student-a').remaining,1);
 });
+
+test('current-cycle debt preserves credited lessons through partial and final payment',async()=>{
+ const s=setup();await s.seed('student-a',6);s.records.get('opsAccounts/student-a').autoBilling=true;
+ const input={studentId:'student-a',cycleStart:s.load('model').seoulDay(),expectedUpdatedAt:s.records.get('opsAccounts/student-a').updatedAt};
+ const changes=await s.service.createCurrentCycleInvoice(input,'owner');const inv=changes.invoices[0];
+ assert.equal(inv.creditUnits,0);assert.equal(inv.units,8);assert.equal(inv.cycleStart,input.cycleStart);assert.equal(changes.accounts[0].remaining,6);
+ assert.equal([...s.records.keys()].some(k=>k.startsWith('opsNotices/')),false);
+ await assert.rejects(s.service.createCurrentCycleInvoice(input,'owner'));
+ await s.service.payment({invoiceId:inv.id,requestId:'part',amount:60000,method:'현금'},'owner');
+ assert.equal(s.records.get('opsAccounts/student-a').remaining,6);
+ const final={invoiceId:inv.id,requestId:'final',amount:100000,method:'현금'};
+ await s.service.payment(final,'owner');await s.service.payment(final,'owner');
+ assert.equal(s.records.get('opsAccounts/student-a').remaining,6);assert.equal(s.records.get('opsAccounts/student-a').openInvoiceId,null);
+ await assert.rejects(s.service.createCurrentCycleInvoice(input,'owner'));
+});
+test('current-cycle invoice rejects invalid date, stale settings and existing debt',async()=>{
+ const s=setup();await s.seed();const a=s.records.get('opsAccounts/student-a');
+ for(const patch of [{cycleStart:'2999-01-01'},{cycleStart:'bad'},{expectedUpdatedAt:'stale'}])await assert.rejects(s.service.createCurrentCycleInvoice({studentId:'student-a',cycleStart:s.load('model').seoulDay(),expectedUpdatedAt:a.updatedAt,...patch},'owner'));
+ await s.service.createInvoice('student-a','owner');
+ await assert.rejects(s.service.createCurrentCycleInvoice({studentId:'student-a',cycleStart:s.load('model').seoulDay(),expectedUpdatedAt:a.updatedAt},'owner'));
+ assert.equal([...s.records.keys()].filter(k=>k.startsWith('opsInvoices/')).length,1);
+});

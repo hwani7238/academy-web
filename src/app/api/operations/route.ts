@@ -77,6 +77,7 @@ export async function POST(request: Request) {
         return Response.json({ok:true,changes});
       }
       case 'adjust': await service.adjust(input, actor); break;
+      case 'currentCycleInvoice': return Response.json({ok:true,changes:await service.createCurrentCycleInvoice(input,actor)});
       case 'invoice': await service.createInvoice(input.studentId, actor); break;
       case 'payment': await service.payment(input, actor); break;
       case 'sendInvoice': case 'cancelInvoice': case 'confirmInvoice': await service.invoiceAction(input, actor); break;

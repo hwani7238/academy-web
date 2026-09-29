@@ -3,7 +3,7 @@ import { randomUUID, randomBytes } from 'node:crypto';
 import { registrationInput } from './registration';
 import type { Transaction, Firestore } from 'firebase-admin/firestore';
 import { database, hash, HttpError } from './auth';
-import { Account, Invoice, Attendance, integer, adjustBalance, settle, suffixes, seoulDay, METHODS, attendanceInput } from './model';
+import { Account, Invoice, Attendance, integer, adjustBalance, settle, suffixes, seoulDay, METHODS, validDay, attendanceInput } from './model';
 
 const now = () => new Date().toISOString();
 const key = (id: unknown) => { if (typeof id !== 'string' || !/^[A-Za-z0-9_-]{1,160}$/.test(id)) throw new Error('잘못된 항목입니다.'); return id; };
@@ -164,7 +164,7 @@ export async function payment(input: Record<string, unknown>, actor: string) {
     const { paid, complete } = settle(invoice, input.amount as number);
     tx.create(paymentRef, { id: requestId, invoiceId: id, studentId: invoice.studentId, amount: input.amount, method, at: now(), note: text(input.note), actor });
     tx.update(invoiceRef, { paid, status: complete ? 'paid' : 'open' });
-    if (complete) tx.update(accountRef, { remaining: account.remaining + invoice.units, openInvoiceId: account.openInvoiceId === id ? null : account.openInvoiceId, updatedAt: now() });
+    if (complete) tx.update(accountRef, { remaining: account.remaining + (invoice.creditUnits ?? invoice.units), openInvoiceId: account.openInvoiceId === id ? null : account.openInvoiceId, updatedAt: now() });
     audit(tx, db, actor, 'payment', invoice.studentId, { invoiceId: id, amount: input.amount, method, complete });
   });
 }
@@ -280,4 +280,22 @@ export async function correctRemaining(input: Record<string, unknown>, actor: st
     tx.create(auditRef,{actor,action:'correct-remaining',studentId,digest,detail:{before:account.remaining,after:remaining,note},at});
     return {accounts:[updated],invoices:invoice?[invoice]:[]};
   });
+}
+
+export async function createCurrentCycleInvoice(input:Record<string,unknown>,actor:string){
+ const id=key(input.studentId),cycleStart=validDay(input.cycleStart);
+ if(cycleStart>seoulDay())throw Error('재등록일은 오늘 또는 이전 날짜로 입력해주세요.');
+ const db=database(),invoiceId=`cycle_${hash(JSON.stringify([id,cycleStart]))}`;
+ return db.runTransaction(async tx=>{
+  const ref=db.doc(`opsAccounts/${id}`),invoiceRef=db.doc(`opsInvoices/${invoiceId}`);
+  const [a,old]=await Promise.all([tx.get(ref),tx.get(invoiceRef)]);const account=a.data() as Account|undefined;
+  if(!account?.active)throw Error('수강 설정을 먼저 저장해주세요.');
+  if(old.exists)throw Error('이 재등록일의 청구가 이미 있습니다. 기존 청구를 확인해주세요.');
+  if(account.openInvoiceId)throw Error('진행 중인 청구가 있습니다. 기존 청구를 확인해주세요.');
+  if(account.updatedAt!==input.expectedUpdatedAt)throw Error('수강 정보가 변경됐습니다. 창을 닫고 다시 확인해주세요.');
+  const at=now();const invoice:Invoice={id:invoiceId,studentId:id,name:account.name,units:account.planUnits,amount:account.planAmount,paid:0,status:'open',needsReview:false,createdAt:at,creditUnits:0,cycleStart};
+  tx.create(invoiceRef,invoice);tx.update(ref,{openInvoiceId:invoiceId,updatedAt:at});
+  audit(tx,db,actor,'current-cycle-invoice',id,{invoiceId,cycleStart,amount:invoice.amount,remaining:account.remaining,creditUnits:0});
+  return {accounts:[{...account,openInvoiceId:invoiceId,updatedAt:at}],invoices:[invoice]};
+ });
 }
