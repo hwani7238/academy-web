@@ -8,17 +8,17 @@ const require = createRequire(import.meta.url);
 const root = path.resolve('src/lib/operations');
 test('pause and withdrawal preserve balances; expiry and reinstatement restore check-in',async()=>{
  const s=setup();await s.seed('student-a',8);const today=s.load('model').seoulDay();
- await s.service.changeLifecycle({sourceStudentId:'student-a',status:'paused',until:today,expectedUpdatedAt:''},'owner');
- const life=s.records.get('students/student-a').lifecycle;
+ await s.service.changeLifecycle({studentId:'student-a',sourceStudentId:'student-a',status:'paused',until:today,expectedUpdatedAt:''},'owner');
+ const life=s.records.get('students/student-a').courseLifecycles['student-a'];
  assert.equal(s.load('lifecycle').enrollmentState(life,today),'paused');
  const tomorrow=new Date(today);tomorrow.setUTCDate(tomorrow.getUTCDate()+1);
  assert.equal(s.load('lifecycle').enrollmentState(life,tomorrow.toISOString().slice(0,10)),'active');
  await assert.rejects(s.service.checkIn('student-a','1234','device'));
- await assert.rejects(s.service.changeLifecycle({sourceStudentId:'student-a',status:'active',expectedUpdatedAt:''},'owner'));
- await s.service.changeLifecycle({sourceStudentId:'student-a',status:'withdrawn',expectedUpdatedAt:life.updatedAt},'owner');
+ await assert.rejects(s.service.changeLifecycle({studentId:'student-a',sourceStudentId:'student-a',status:'active',expectedUpdatedAt:''},'owner'));
+ await s.service.changeLifecycle({studentId:'student-a',sourceStudentId:'student-a',status:'withdrawn',expectedUpdatedAt:life.updatedAt},'owner');
  await assert.rejects(s.service.checkIn('student-a','1234','device'));
  assert.equal(s.records.get('opsAccounts/student-a').remaining,8);
- await s.service.changeLifecycle({sourceStudentId:'student-a',status:'active',expectedUpdatedAt:s.records.get('students/student-a').lifecycle.updatedAt},'owner');
+ await s.service.changeLifecycle({studentId:'student-a',sourceStudentId:'student-a',status:'active',expectedUpdatedAt:s.records.get('students/student-a').courseLifecycles['student-a'].updatedAt},'owner');
  assert.equal(s.records.get('opsAccounts/student-a').remaining,8);
  await s.service.checkIn('student-a','1234','device');assert.equal(s.records.get('opsAccounts/student-a').remaining,7);
 });
@@ -301,13 +301,13 @@ test('save response contains committed attendance, balance and invoice including
  const correction=await s.service.recordAttendance({...input,status:'absent',units:0,expectedUpdatedAt:changes.attendance[0].updatedAt},'owner');
  assert.equal(correction.accounts[0].remaining,1);assert.equal(correction.invoices[0].needsReview,true);
 });
-test('confirmed patches preserve other data, update all courses, and respect selected month',async()=>{
+test('confirmed patches preserve other data, update only the selected course, and respect selected month',async()=>{
  const s=setup();await s.seed();const day=s.load('model').seoulDay();
- const changes=await s.service.changeLifecycle({sourceStudentId:'student-a',status:'paused',until:day},'owner');
- assert.deepEqual(changes.lifecycle.value,s.records.get('students/student-a').lifecycle);
- const current={day,students:[{id:'course1',sourceStudentId:'student-a'},{id:'course2',sourceStudentId:'student-a'},{id:'other'}],attendance:[],accounts:[{id:'other',remaining:8}],invoices:[{id:'paid',status:'open'}],payments:[],notices:[],legacyAttendance:[]};
+ const changes=await s.service.changeLifecycle({studentId:'student-a',sourceStudentId:'student-a',status:'paused',until:day},'owner');
+ assert.deepEqual(changes.lifecycle.value,s.records.get('students/student-a').courseLifecycles['student-a']);
+ const current={day,students:[{id:'student-a',sourceStudentId:'student-a'},{id:'course2',sourceStudentId:'student-a'},{id:'other'}],attendance:[],accounts:[{id:'other',remaining:8}],invoices:[{id:'paid',status:'open'}],payments:[],notices:[],legacyAttendance:[]};
  const next=s.load('snapshot-changes').applySnapshotChanges(current,{...changes,attendance:[{id:'past',day:'2020-01-01'}],accounts:[{id:'new',remaining:2}],invoices:[{id:'paid',status:'paid'}]});
- assert.equal(next.students[0].lifecycle.status,'paused');assert.equal(next.students[1].lifecycle.status,'paused');assert.equal(next.students[2].lifecycle,undefined);
+ assert.equal(next.students[0].lifecycle.status,'paused');assert.equal(next.students[1].lifecycle,undefined);assert.equal(next.students[2].lifecycle,undefined);
  assert.equal(next.attendance.length,0);assert.equal(next.accounts.length,2);assert.equal(next.invoices.length,0);
  assert.equal(next.legacyAttendance,current.legacyAttendance);assert.equal(next.payments,current.payments);
 });
@@ -343,17 +343,17 @@ test('remaining correction rejects invalid counts and stale balances after check
 
 test('withdrawal date is recorded and date-only changes are not ignored',async()=>{
  const s=setup();await s.seed();
- const first=await s.service.changeLifecycle({sourceStudentId:'student-a',status:'withdrawn',withdrawnOn:'2026-01-01'},'owner');
+ const first=await s.service.changeLifecycle({studentId:'student-a',sourceStudentId:'student-a',status:'withdrawn',withdrawnOn:'2026-01-01'},'owner');
  assert.equal(first.lifecycle.value.withdrawnOn,'2026-01-01');
- const next=await s.service.changeLifecycle({sourceStudentId:'student-a',status:'withdrawn',withdrawnOn:'2026-01-02',expectedUpdatedAt:first.lifecycle.value.updatedAt},'owner');
+ const next=await s.service.changeLifecycle({studentId:'student-a',sourceStudentId:'student-a',status:'withdrawn',withdrawnOn:'2026-01-02',expectedUpdatedAt:first.lifecycle.value.updatedAt},'owner');
  assert.equal(next.lifecycle.value.withdrawnOn,'2026-01-02');
  assert.equal(s.records.get('opsAccounts/student-a').remaining,1);
- for(const withdrawnOn of ['bad','2026-02-30','2999-01-01'])await assert.rejects(s.service.changeLifecycle({sourceStudentId:'student-a',status:'withdrawn',withdrawnOn},'owner'));
+ for(const withdrawnOn of ['bad','2026-02-30','2999-01-01'])await assert.rejects(s.service.changeLifecycle({studentId:'student-a',sourceStudentId:'student-a',status:'withdrawn',withdrawnOn},'owner'));
 });
 test('pause end date edits preserve balances and use the new expiry',async()=>{
  const s=setup();await s.seed();const today=s.load('model').seoulDay();
- const first=await s.service.changeLifecycle({sourceStudentId:'student-a',status:'paused',until:'2099-01-01',note:'기존 비고'},'owner');
- const result=await s.service.changeLifecycle({sourceStudentId:'student-a',status:'paused',until:today,note:'기존 비고',expectedUpdatedAt:first.lifecycle.value.updatedAt},'owner');
+ const first=await s.service.changeLifecycle({studentId:'student-a',sourceStudentId:'student-a',status:'paused',until:'2099-01-01',note:'기존 비고'},'owner');
+ const result=await s.service.changeLifecycle({studentId:'student-a',sourceStudentId:'student-a',status:'paused',until:today,note:'기존 비고',expectedUpdatedAt:first.lifecycle.value.updatedAt},'owner');
  assert.equal(result.lifecycle.value.until,today);assert.equal(result.lifecycle.value.note,'기존 비고');
  assert.equal(s.load('lifecycle').enrollmentState(result.lifecycle.value,today),'paused');
  assert.equal(s.load('lifecycle').enrollmentState(result.lifecycle.value,'2099-01-02'),'active');
@@ -403,4 +403,28 @@ test('unconfigured course can move to a campus and keeps its group when configur
  await s.service.configure({studentId:id,sourceStudentId:'person',subject:'피아노',planUnits:8,planAmount:160000,remaining:6,phone:'01000001234',phones:['1234']},'owner');
  assert.equal(s.records.get(`opsAccounts/${id}`).attendanceGroup,'어린이 피아노(1관)');
  assert.deepEqual(s.records.get('students/person').instruments,['피아노','드럼']);
+});
+
+test('withdrawing drums leaves piano active; course pause dates and reinstatement are independent',async()=>{
+ const s=setup();s.records.set('students/person',{name:'가상',instruments:['피아노','드럼']});
+ const piano=s.service.enrollmentId('person','피아노'),drums=s.service.enrollmentId('person','드럼');
+ for(const [id,subject] of [[piano,'피아노'],[drums,'드럼']])await s.service.configure({studentId:id,sourceStudentId:'person',subject,planUnits:8,planAmount:160000,remaining:6,phone:'01000001234',phones:['1234']},'owner');
+ const withdrawn=await s.service.changeLifecycle({sourceStudentId:'person',studentId:drums,status:'withdrawn'},'owner');
+ await s.service.checkIn(piano,'1234','device');await assert.rejects(s.service.checkIn(drums,'1234','device'));
+ assert.equal(s.records.get(`opsAccounts/${piano}`).remaining,5);assert.equal(s.records.get(`opsAccounts/${drums}`).remaining,6);
+ const paused=await s.service.changeLifecycle({sourceStudentId:'person',studentId:piano,status:'paused',until:s.load('model').seoulDay()},'owner');
+ await s.service.changeLifecycle({sourceStudentId:'person',studentId:drums,status:'active',expectedUpdatedAt:withdrawn.lifecycle.value.updatedAt},'owner');
+ assert.equal(s.records.get('students/person').courseLifecycles[piano].status,'paused');
+ await s.service.checkIn(drums,'1234','device');
+ await assert.rejects(s.service.checkIn(piano,'1234','device'));
+ await assert.rejects(s.service.changeLifecycle({sourceStudentId:'person',status:'withdrawn'},'owner'));
+ await assert.rejects(s.service.changeLifecycle({sourceStudentId:'person',studentId:'stranger',status:'withdrawn'},'owner'));
+});
+test('legacy whole-student withdrawal is preserved until each course is explicitly restored',async()=>{
+ const s=setup();const life={status:'withdrawn',until:'',note:'기존 기록',updatedAt:'2026-09-01T00:00:00Z'};
+ s.records.set('students/person',{name:'가상',instruments:['피아노','드럼'],lifecycle:life});
+ const piano=s.service.enrollmentId('person','피아노'),drums=s.service.enrollmentId('person','드럼');
+ await s.service.changeLifecycle({sourceStudentId:'person',studentId:piano,status:'active',expectedUpdatedAt:life.updatedAt},'owner');
+ const owner=s.records.get('students/person'),get=s.load('lifecycle').courseLifecycle;
+ assert.equal(get(owner,piano).status,'active');assert.equal(get(owner,drums).status,'withdrawn');assert.deepEqual(owner.lifecycle,life);
 });

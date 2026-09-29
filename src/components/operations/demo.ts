@@ -36,7 +36,7 @@ export function demoAction(current: Snapshot, input: Record<string, unknown>): {
     if(existing)existing.needsReview=true;
     else if(account.remaining<=0){const auto=account.autoBilling;account.autoBilling=false;invoice(account);account.autoBilling=auto;}
   } else if(input.action === 'changeLifecycle'){
-    const values=lifecycleInput(input);const rows=data.students.filter(s=>(s.sourceStudentId||s.id)===input.sourceStudentId);
+    const values=lifecycleInput(input);const rows=data.students.filter(s=>s.id===input.studentId && (s.sourceStudentId||s.id)===input.sourceStudentId);
     if(!rows.length)throw Error('학생을 찾을 수 없습니다.');
     if((rows[0].lifecycle?.updatedAt||'')!==(input.expectedUpdatedAt||''))throw Error('학생 상태가 변경됐습니다.');
     for(const row of rows)row.lifecycle={...values,updatedAt:at};

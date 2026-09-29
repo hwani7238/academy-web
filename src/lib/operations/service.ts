@@ -1,4 +1,4 @@
-import { enrollmentState, lifecycleInput } from './lifecycle';
+import { enrollmentState, lifecycleInput, courseLifecycle } from './lifecycle';
 import { randomUUID, randomBytes } from 'node:crypto';
 import { REGISTRATION_SUBJECTS, registrationInput } from './registration';
 import type { Transaction, Firestore } from 'firebase-admin/firestore';
@@ -24,17 +24,21 @@ export function enrollmentId(studentId: string, subject: string) {
   return `course_${hash(JSON.stringify([studentId, subject]))}`;
 }
 export async function changeLifecycle(input: Record<string, unknown>, actor: string) {
-  const id = key(input.sourceStudentId); const values = lifecycleInput(input); const db = database();
+  const id = key(input.sourceStudentId); const studentId=key(input.studentId); const values = lifecycleInput(input); const db = database();
   return db.runTransaction(async tx => {
     const ref = db.doc(`students/${id}`); const student = (await tx.get(ref)).data();
     if (!student) throw Error('학생을 찾을 수 없습니다.');
-    const old = student.lifecycle;
-    if (old && old.status === values.status && old.until === values.until && (old.withdrawnOn || '') === values.withdrawnOn && old.note === values.note) return { lifecycle: { sourceStudentId:id, value:old } };
+    const account=(await tx.get(db.doc(`opsAccounts/${studentId}`))).data();
+    const subjects=studentSubjects(student);
+    if(studentId===id){if(subjects.length>1)throw Error('과목별 수강권을 먼저 분리해주세요.');}
+    else if(!subjects.some(subject=>enrollmentId(id,subject)===studentId) && !(account?.sourceStudentId===id))throw Error('해당 학생의 과목을 찾을 수 없습니다.');
+    const old = courseLifecycle(student,studentId);
+    if (old && old.status === values.status && old.until === values.until && (old.withdrawnOn || '') === values.withdrawnOn && old.note === values.note) return { lifecycle: { studentId, value:old } };
     if ((old?.updatedAt || '') !== (input.expectedUpdatedAt || '')) throw Error('학생 상태가 변경됐습니다. 새로고침 후 다시 확인해주세요.');
-    const value = { ...values, updatedAt: now() };
-    tx.update(ref, { lifecycle: value });
-    audit(tx, db, actor, 'student-lifecycle', id, { before: old || null, ...values });
-    return { lifecycle: { sourceStudentId:id, value } };
+    const value = { ...values, updatedAt: new Date(Math.max(Date.now(),Date.parse(old?.updatedAt||'')+1||0)).toISOString() };
+    tx.update(ref, { courseLifecycles: {...student.courseLifecycles,[studentId]:value} });
+    audit(tx, db, actor, 'course-lifecycle', studentId, { sourceStudentId:id, before: old || null, ...values });
+    return { lifecycle: { studentId, value } };
   });
 }
 export async function registerStudent(input: Record<string, unknown>, actor: string) {
@@ -102,7 +106,7 @@ export async function checkIn(studentId: string, digits: string, actor: string) 
     const account = accountSnap.data() as Account | undefined;
     if (!account?.active || !account.checkinSuffixes.includes(digits)) throw new HttpError(404, '등록된 학생을 찾을 수 없습니다.');
     const owner = (await tx.get(db.doc(`students/${account.sourceStudentId || id}`))).data();
-    if (!owner || enrollmentState(owner.lifecycle) !== 'active') throw new HttpError(409, '휴원·퇴원 상태입니다. 선생님께 복귀 처리를 요청해주세요.');
+    if (!owner || enrollmentState(courseLifecycle(owner,id)) !== 'active') throw new HttpError(409, '휴원·퇴원 상태입니다. 선생님께 복귀 처리를 요청해주세요.');
     if (!attended.exists && account.importId && account.openingAsOf === day) {
       const imported = (await tx.get(db.doc(`opsImports/${account.importId}`))).data();
       if (imported?.history?.some((h: { cells?: { day: string }[] }) => h.cells?.some(c => c.day === day))) {

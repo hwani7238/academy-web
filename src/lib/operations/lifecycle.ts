@@ -14,3 +14,7 @@ export function lifecycleInput(input: Record<string, unknown>) {
   if (withdrawnOn && withdrawnOn > seoulDay()) throw Error('퇴원일은 오늘 또는 이전 날짜로 선택해주세요.');
   return {status,until,withdrawnOn,note};
 }
+
+export function courseLifecycle(student: { lifecycle?: Lifecycle; courseLifecycles?: Record<string,Lifecycle> }, id: string): Lifecycle | undefined {
+  return student.courseLifecycles?.[id] ?? student.lifecycle;
+}
