@@ -6,6 +6,23 @@ import { createRequire } from 'node:module';
 import ts from 'typescript';
 const require = createRequire(import.meta.url);
 const root = path.resolve('src/lib/operations');
+test('attendance cancellation restores all deducted units once, preserves history and rejects stale edits',async()=>{
+ const s=setup();await s.seed('student-a',2);
+ const day=s.load('model').seoulDay();
+ await s.service.recordAttendance({studentId:'student-a',day,status:'present',units:2,note:'',expectedUpdatedAt:''},'owner');
+ const id=`student-a_${day}`,before=s.records.get(`opsAttendance/${id}`);
+ const input={studentId:'student-a',day,status:'cancelled',units:0,note:'잘못 선택',expectedUpdatedAt:before.updatedAt};
+ const cancelled=await s.service.recordAttendance(input,'owner');
+ assert.equal(cancelled.accounts[0].remaining,2);
+ assert.equal(cancelled.attendance[0].status,'cancelled');
+ assert.equal(cancelled.attendance[0].at,before.at);
+ assert.equal(cancelled.attendance[0].note,'잘못 선택');
+ assert.equal(cancelled.invoices[0].needsReview,true);
+ await s.service.recordAttendance(input,'owner');
+ assert.equal(s.records.get('opsAccounts/student-a').remaining,2);
+ await assert.rejects(s.service.recordAttendance({...input,status:'present',units:1,expectedUpdatedAt:'stale'},'owner'));
+ assert.equal([...s.records.keys()].filter(k=>k.startsWith('opsNotices/')).length,0);
+});
 test('check-in labels use the registered piano group and preserve separate siblings',()=>{
  const s=setup(),{checkInName}=s.load('course-label');
  const a={name:'가상 유민 · 피아노',subject:'피아노'};
