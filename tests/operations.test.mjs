@@ -6,6 +6,40 @@ import { createRequire } from 'node:module';
 import ts from 'typescript';
 const require = createRequire(import.meta.url);
 const root = path.resolve('src/lib/operations');
+test('lesson sequence follows imported counts, rolls per course and recalculates corrections chronologically',()=>{
+ const {attendanceSequence: sequence}=setup().load('attendance-sequence');
+ const accounts=[{id:'piano',planUnits:8},{id:'drums',planUnits:4}];
+ const legacy=[{studentId:'piano',day:'2026-09-18',value:'5',color:''},{studentId:'piano',day:'2026-09-19',value:'6',color:'FFCCCCCC'}];
+ const row=(studentId,day,units=1,status='present')=>({studentId,day,units,status});
+ const records=[row('piano','2026-09-30'),row('piano','2026-09-20'),row('piano','2026-09-22',0,'absent'),row('piano','2026-09-23',2,'makeup'),row('drums','2026-09-20')];
+ const result=sequence(accounts,records,legacy);
+ assert.equal(result.labels.get('piano_2026-09-20'),'6');
+ assert.equal(result.labels.get('piano_2026-09-23'),'7·8');
+ assert.equal(result.labels.get('piano_2026-09-30'),'1');
+ assert.equal(result.labels.has('piano_2026-09-22'),false);
+ assert.equal(result.labels.get('drums_2026-09-20'),'1');
+ const cancelled=records.map(r=>r.day==='2026-09-20'&&r.studentId==='piano'?{...r,units:0,status:'cancelled'}:r);
+ assert.equal(sequence(accounts,cancelled,legacy).labels.get('piano_2026-09-30'),'8');
+ // A backdated lesson updates later numbers; input array order does not matter.
+ assert.equal(sequence(accounts,[...records,row('piano','2026-09-21')],legacy).labels.get('piano_2026-09-23'),'8·1');
+ // Zero-charge makeup and illness do not advance a course; charged late cancellation does.
+ const extra=[row('drums','2026-09-21',0,'makeup'),row('drums','2026-09-22',0,'sick'),row('drums','2026-09-23',1,'late_cancel')];
+ assert.equal(sequence(accounts,[...records,...extra],legacy).labels.get('drums_2026-09-23'),'2');
+});
+test('lesson sequence carries across months and explicit renewal dates, independent of payments and balances',()=>{
+ const {attendanceSequence: sequence}=setup().load('attendance-sequence');
+ const accounts=[{id:'p',planUnits:8,remaining:100}];
+ const prior=sequence(accounts,[{studentId:'p',day:'2026-09-30',units:1}], [{studentId:'p',day:'2026-09-29',value:'5',color:''}]);
+ const rows=[{studentId:'p',day:'2026-10-01',units:1},{studentId:'p',day:'2026-10-03',units:1}];
+ const context={positions:prior.positions,cycleStarts:[{studentId:'p',day:'2026-10-02'}]};
+ const result=sequence(accounts,rows,[],context);
+ assert.equal(result.labels.get('p_2026-10-01'),'7');
+ assert.equal(result.labels.get('p_2026-10-03'),'1');
+ assert.deepEqual(sequence([{...accounts[0],remaining:0}],rows,[],context),result);
+ assert.equal(context.positions.p,6);
+ // A modern cancelled record overrides an imported cell on the same date.
+ assert.equal(sequence(accounts,[{studentId:'p',day:'2026-09-29',units:0,status:'cancelled'},rows[0]], [{studentId:'p',day:'2026-09-29',value:'5',color:''}]).labels.get('p_2026-10-01'),'1');
+});
 test('student rename updates all owned course accounts while keeping identities, balances and historical records',async()=>{
  const s=setup();
  s.records.set('students/person',{name:'기존 이름',instruments:['피아노','드럼'],phone:'01000001234'});

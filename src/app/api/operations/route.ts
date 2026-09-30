@@ -1,3 +1,5 @@
+import { attendanceSequence } from '@/lib/operations/attendance-sequence';
+import type { Account, Attendance } from '@/lib/operations/model';
 import { courseLifecycle } from '@/lib/operations/lifecycle';
 import { importSources } from '@/lib/operations/import-cache';
 import { database, manager, sameOrigin, failure } from '@/lib/operations/auth';
@@ -13,12 +15,14 @@ export async function GET(request: Request) {
     const day = new URL(request.url).searchParams.get('day') || seoulDay();
     validDay(day);
     const month = day.slice(0, 7); const end = new Date(`${month}-01T00:00:00Z`); end.setUTCMonth(end.getUTCMonth() + 1);
-    const [students, accounts, attendance, invoices, payments, notices, devices, imports] = await Promise.all([
+    const [students, accounts, attendance, invoices, payments, notices, devices, imports, priorAttendance, cycleInvoices] = await Promise.all([
       db.collection('students').select('name', 'phone', 'instruments', 'instrument', 'lifecycle', 'courseLifecycles', 'operationsCourseGroups', 'courseUpdatedAt').get(), db.collection('opsAccounts').get(),
       db.collection('opsAttendance').where('day', '>=', `${month}-01`).where('day', '<', end.toISOString().slice(0, 10)).get(),
       db.collection('opsInvoices').where('status', '==', 'open').get(),
       db.collection('opsPayments').orderBy('at', 'desc').limit(100).get(),
       db.collection('opsNotices').orderBy('createdAt', 'desc').limit(50).get(), db.collection('opsDevices').get(), importSources(),
+      db.collection('opsAttendance').where('day', '<', `${month}-01`).select('studentId', 'day', 'units', 'status').get(),
+      db.collection('opsInvoices').where('creditUnits', '==', 0).select('studentId', 'cycleStart', 'status').get(),
     ]);
     const studentById = new Map(students.docs.map(d => [d.id, d]));
     const accountById = new Map(accounts.docs.map(d => [d.id, d.data()]));
@@ -45,7 +49,7 @@ export async function GET(request: Request) {
       }
       for (const history of source.history) {
         for (const cell of history.cells || []) {
-          if (typeof cell.day !== 'string' || !cell.day.startsWith(`${month}-`) || cell.day > (source.attendanceCutoffs?.[month] || source.asOf)) continue;
+          if (typeof cell.day !== 'string' || cell.day >= end.toISOString().slice(0, 10) || cell.day > (source.attendanceCutoffs?.[cell.day.slice(0, 7)] || source.asOf)) continue;
           const key = `${studentId}_${cell.day}`;
           if (legacyCells.has(key)) { legacyCells.set(key, null); continue; }
           legacyCells.set(key, { studentId, day: cell.day, value: String(cell.value), color: String(cell.color || '') });
@@ -54,7 +58,11 @@ export async function GET(request: Request) {
     }
     const rows = (snap: FirebaseFirestore.QuerySnapshot) => snap.docs.map(d => ({ ...d.data(), id: d.id }));
     const namedRows = (snap: FirebaseFirestore.QuerySnapshot) => snap.docs.map(d => { const value=d.data(); return {...value,id:d.id,name:accountById.get(value.studentId)?.name||value.name}; });
-    return Response.json({ day, legacyAttendance: [...legacyCells.values()].filter(Boolean), configured: noticeConfigured(), students: students.docs.flatMap<Snapshot['students'][number]>(d => {
+    const allLegacy = [...legacyCells.values()].filter((v): v is NonNullable<typeof v> => Boolean(v));
+    const cycleStarts = cycleInvoices.docs.map(d=>d.data()).filter(v=>v.status!=='cancelled' && typeof v.cycleStart==='string').map(v=>({studentId:String(v.studentId),day:String(v.cycleStart)}));
+    const beforeMonth = `${month}-01`;
+    const sequenceContext = { positions: attendanceSequence(accounts.docs.map(d=>({...d.data(),id:d.id}) as Account), priorAttendance.docs.map(d=>d.data() as Attendance), allLegacy.filter(r=>r.day<beforeMonth), {positions:{},cycleStarts:cycleStarts.filter(r=>r.day<beforeMonth)}).positions, cycleStarts:cycleStarts.filter(r=>r.day>=beforeMonth && r.day<end.toISOString().slice(0,10)) };
+    return Response.json({ day, sequenceContext, legacyAttendance: allLegacy.filter(r=>r.day.startsWith(`${month}-`)), configured: noticeConfigured(), students: students.docs.flatMap<Snapshot['students'][number]>(d => {
       const raw = d.data(); const base = { courseUpdatedAt:raw.courseUpdatedAt || '', name: raw.name || '학생', phone: raw.phone || '', ...(raw.lifecycle ? { lifecycle: raw.lifecycle } : {}) };
       // Preserve existing single-account balances; do not silently duplicate them.
       if (accountById.has(d.id)) return [{ ...base, id: d.id, lifecycle:courseLifecycle(raw,d.id), instruments: service.studentSubjects(raw) }];

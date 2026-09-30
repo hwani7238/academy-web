@@ -12,7 +12,7 @@ export function sample(): Snapshot {
   ];
   accounts.push({ ...accounts[2], id: 'demo-c-vocal', subject: '보컬', name: '김하린 · 보컬', planUnits: 4, planAmount: 180000, remaining: 2 });
   accounts[0].attendanceGroup = '어린이 피아노(1관)';
-  return { accounts, students: accounts.map(({ id, name, phone, sourceStudentId, subject, attendanceGroup }) => ({ id, name, phone, sourceStudentId, subject, attendanceGroup, instruments: subject ? [subject] : [] })), attendance: [], invoices: [], payments: [], notices: [], devices: [], day: seoulDay(), configured: false };
+  return { sequenceContext: {positions:Object.fromEntries(accounts.map(a=>[a.id, a.planUnits-a.remaining])),cycleStarts:[]}, accounts, students: accounts.map(({ id, name, phone, sourceStudentId, subject, attendanceGroup }) => ({ id, name, phone, sourceStudentId, subject, attendanceGroup, instruments: subject ? [subject] : [] })), attendance: [], invoices: [], payments: [], notices: [], devices: [], day: seoulDay(), configured: false };
 }
 export function demoAction(current: Snapshot, input: Record<string, unknown>): { data: Snapshot; result: Record<string, unknown> } {
   const data = structuredClone(current); const at = new Date().toISOString();
@@ -94,6 +94,8 @@ export function demoAction(current: Snapshot, input: Record<string, unknown>): {
     if(!account || account.openInvoiceId)throw Error('수강권과 기존 청구를 확인해주세요.');
     const cycleStart=validDay(input.cycleStart);if(cycleStart>seoulDay())throw Error('재등록일을 확인해주세요.');
     const id=crypto.randomUUID();account.openInvoiceId=id;
+    data.sequenceContext ||= {positions:{},cycleStarts:[]};
+    data.sequenceContext.cycleStarts.push({studentId:account.id,day:cycleStart});
     data.invoices.push({id,studentId:account.id,name:account.name,units:account.planUnits,amount:account.planAmount,paid:0,status:'open',needsReview:false,createdAt:at,creditUnits:0,cycleStart});
   } else if (input.action === 'invoice') { if (!account) throw new Error('수강 설정을 저장해주세요.'); if (account.openInvoiceId) throw new Error('진행 중인 청구가 있습니다.'); invoice(account); }
   else if (input.action === 'adjust') {
