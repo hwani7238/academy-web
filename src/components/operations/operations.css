@@ -48,3 +48,7 @@
 .whee-ops .time-wheel-option.selected{color:#244ce6;font-weight:800;font-size:24px}
 .whee-ops .time-wheel-hint{font-size:12px;color:#63718a;text-align:center;margin-top:12px}
 .whee-ops .time-wheel-value{display:block;text-align:center;font-size:18px;font-weight:750;color:#1736aa;margin-top:12px}
+
+/* Follow the displayed order, including filtered and attendance-sorted rosters. */
+.whee-ops .monthly-table tbody > tr:nth-child(5n) > th,
+.whee-ops .monthly-table tbody > tr:nth-child(5n) > td{border-bottom:6px solid #fff1b8}
