@@ -2,8 +2,8 @@ import { hash } from './auth';
 import { seoulDay, type Account, type Attendance, type Invoice } from './model';
 export type BalanceAudit = {id:string;studentId?:string;action:string;at:string;detail:Record<string,unknown>};
 type Cell={day:string;value:string;color:string};
-export type BalanceSource={id:string;asOf:string;attendanceAsOf?:string;attendanceRevision?:number;attendanceCutoffs?:Record<string,string>;remainingCandidate:number;planUnits:number;history?:{cells?:Cell[]}[]};
-export type BalanceReview={id:string;name:string;group:string;current:number;expected:number|null;ledger:number|null;status:'correct'|'verified'|'confirmed'|'review';reason:string;missingDays:string[];fingerprint:string;updatedAt:string;evidence:{openingDay:string;openingRemaining:number|null;lastCorrection:string;lastOrdinal:string;events:{at:string;action:string;detail:Record<string,unknown>}[];legacy:Cell[];attendance:Pick<Attendance,'day'|'status'|'units'>[]}};
+export type BalanceSource={id:string;asOf:string;attendanceAsOf?:string;attendanceRevision?:number;attendanceCutoffs?:Record<string,string>;remainingCandidate:number;planUnits:number;openingHistory?:{cells?:Cell[]}[];history?:{cells?:Cell[]}[]};
+export type BalanceReview={id:string;name:string;group:string;current:number;expected:number|null;ledger:number|null;status:'correct'|'verified'|'confirmed'|'review';reason:string;missingDays:string[];fingerprint:string;updatedAt:string;evidence:{planUnits:number;openingSnapshot:Cell[];invoices:Pick<Invoice,'id'|'units'|'creditUnits'|'cycleStart'|'status'>[];openingDay:string;openingRemaining:number|null;lastCorrection:string;lastOrdinal:string;events:{at:string;action:string;detail:Record<string,unknown>}[];legacy:Cell[];attendance:Pick<Attendance,'day'|'status'|'units'>[]}};
 const ignored=new Set(['invoice','cancelInvoice','confirmInvoice','sendInvoice','correct-attendance-time','attendance-range','course-lifecycle','lifecycle','lesson-schedule','move-lesson','manage-course','notice-config-retry','current-cycle-invoice']);
 const gray=new Set(['FFCCCCCC','FFD9D9D9','FFB7B7B7']);
 export function reviewBalance(account:Account,source:BalanceSource|undefined,audits:BalanceAudit[],attendance:Attendance[],invoices:Invoice[]):BalanceReview{
@@ -13,8 +13,9 @@ export function reviewBalance(account:Account,source:BalanceSource|undefined,aud
  const baseline=correction || events.find(a=>['import-opening-balance','register-student','configure'].includes(a.action)&&Number.isSafeInteger(a.detail.remaining));
  const records=attendance.filter(a=>a.studentId===account.id);
  const cells=(source?.history||[]).flatMap(h=>h.cells||[]).filter(c=>c.day.slice(0,7)>=(account.openingAsOf||'').slice(0,7)&&c.day<=(source?.attendanceCutoffs?.[c.day.slice(0,7)]||source?.asOf||'')&&c.day<=seoulDay()).sort((a,b)=>a.day.localeCompare(b.day));
- const fingerprint=hash(JSON.stringify([account.id,account.updatedAt,account.remaining,account.planUnits,source?.attendanceRevision,source?.attendanceAsOf,cells,events,records,invoices.filter(i=>i.studentId===account.id)]));
- const evidence={openingDay:account.openingAsOf||'',openingRemaining:source?.remainingCandidate??null,lastCorrection:correction?.at||'',lastOrdinal:'',events:events.filter(e=>!ignored.has(e.action)).map(e=>({at:e.at,action:e.action,detail:e.detail})),legacy:cells,attendance:records.map(r=>({day:r.day,status:r.status,units:r.units}))};
+ const openingCells=(source?.openingHistory||source?.history||[]).flatMap(h=>h.cells||[]).filter(c=>c.day<=(account.openingAsOf||'') && c.day.slice(0,7)>=(account.openingAsOf||'').slice(0,7)).sort((a,b)=>a.day.localeCompare(b.day));
+ const fingerprint=hash(JSON.stringify([account.id,account.updatedAt,account.remaining,account.planUnits,source?.attendanceRevision,source?.attendanceAsOf,cells,openingCells,events,records,invoices.filter(i=>i.studentId===account.id)]));
+ const evidence={planUnits:account.planUnits,openingSnapshot:openingCells,invoices:invoices.filter(i=>i.studentId===account.id).map(i=>({id:i.id,units:i.units,creditUnits:i.creditUnits,cycleStart:i.cycleStart,status:i.status})),openingDay:account.openingAsOf||'',openingRemaining:source?.remainingCandidate??null,lastCorrection:correction?.at||'',lastOrdinal:'',events:events.filter(e=>!ignored.has(e.action)).map(e=>({at:e.at,action:e.action,detail:e.detail})),legacy:cells,attendance:records.map(r=>({day:r.day,status:r.status,units:r.units}))};
  const result:BalanceReview={id:account.id,name:account.name,group:account.attendanceGroup||account.subject||'',current:account.remaining,expected:null,ledger:null,status:'review',reason:'',missingDays:[],fingerprint,updatedAt:account.updatedAt,evidence};
  const stop=(reason:string)=>({...result,status:'review' as const,reason});
  if(!baseline)return stop('잔여 횟수의 시작 근거가 없어 확인이 필요합니다.');
@@ -38,20 +39,24 @@ export function reviewBalance(account:Account,source:BalanceSource|undefined,aud
  }
  result.ledger=ledger;
  if(ledger!==account.remaining)return stop(`변경 이력 계산 ${ledger}회와 현재 ${account.remaining}회가 달라 별도 정정 근거 확인이 필요합니다.`);
+ if(correction && cells.some(c=>c.day>seoulDay(new Date(correction.at))&&!gray.has(c.color)&&Number(c.value)>0&&!records.some(r=>r.day===c.day)))return stop('직접 정정 이후 장부에 추가된 출석을 확인해주세요.');
  if(correction){result.expected=ledger;result.status='confirmed';result.reason=`${seoulDay(new Date(correction.at))} 직접 정정한 잔여를 기준으로 이후 출석·수납이 일치합니다.`;return result;}
  if(!account.importId){result.expected=ledger;result.status='verified';result.reason='등록 이후 출석·수납 변경 이력과 일치합니다.';return result;}
  if(!source || !account.openingAsOf || baseline.action!=='import-opening-balance')return stop('최초 이관 기준과 장부 연결을 확인해주세요.');
  if(source.planUnits!==account.planUnits)return stop('이관 후 수강권 횟수가 변경되어 장부 회차 기준을 확인해야 합니다.');
  if(source.remainingCandidate!==baseline.detail.remaining || baseline.detail.asOf!==account.openingAsOf)return stop('이관 기준 잔여 또는 날짜가 일치하지 않습니다.');
- const initial=cells.filter(c=>c.day<=account.openingAsOf!&&!gray.has(c.color)&&c.color!=='FFFF9900'&&Number.isSafeInteger(Number(c.value))&&Number(c.value)>0).at(-1);
+ const initial=openingCells.filter(c=>c.day<=account.openingAsOf!&&!gray.has(c.color)&&c.color!=='FFFF9900'&&Number.isSafeInteger(Number(c.value))&&Number(c.value)>0).at(-1);
  let ordinal=initial?Number(initial.value):0;
  if(source.planUnits-ordinal!==source.remainingCandidate)return stop('이관 당시 회차와 잔여 후보가 일치하지 않아 원본 확인이 필요합니다.');
- const recent=cells.filter(c=>c.day>account.openingAsOf!);
+ if(initial && !cells.some(c=>c.day===initial.day&&c.value===initial.value&&c.color===initial.color))return stop('최초 이관 기준 회차가 원본에서 변경되어 확인이 필요합니다.');
+ const recent=cells.filter(c=>c.day>(initial?.day||account.openingAsOf!));
+ let paidRenewals=[...credited].filter(id=>{const i=invoices.find(i=>i.id===id)!;return (i.creditUnits??i.units)===account.planUnits;}).length;
  if(new Set(recent.map(c=>c.day)).size!==recent.length)return stop('같은 날짜의 장부 행이 여러 개입니다.');
  for(const c of recent){
   if(gray.has(c.color)||!c.value.trim())continue;
   const n=Number(c.value);
   if(!Number.isSafeInteger(n)||n<1){if(/^(결석|여행|병가|휴원|취소)$/.test(c.value.trim()))continue;return stop(`${c.day} 장부의 ‘${c.value}’ 차감 여부 확인이 필요합니다.`);}
+  if(n===1 && ordinal===source.planUnits && paidRenewals>0){ordinal=0;paidRenewals--;}
   if(n!==ordinal+1||n>source.planUnits)return stop(`${c.day} 장부 회차 ${ordinal}→${n}: 재등록·보강 여부를 확인해야 합니다.`);
   ordinal=n;result.evidence.lastOrdinal=`${c.day} ${n}회차`;
   const modern=records.find(r=>r.day===c.day);

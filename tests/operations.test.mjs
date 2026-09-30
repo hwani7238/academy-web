@@ -789,3 +789,17 @@ test('reconciliation rechecks evidence atomically and cannot apply the same miss
  assert.equal(s.records.get('opsAccounts/p').remaining,3);assert.equal(report().status,'confirmed');
  assert.equal([...s.records.keys()].filter(k=>k.startsWith('opsNotices/')||k.startsWith('opsAttendance/')).length,0);
 });
+test('balance review uses archived opening history for late entries before the import cutoff and paid renewal cycles',()=>{
+ const {reviewBalance}=setup().load('balance-review');
+ const cell=(day,n)=>({day,value:String(n),color:'FF000000'});
+ const source={id:'i',asOf:'2026-09-21',attendanceCutoffs:{'2026-09':'2026-09-23'},remainingCandidate:1,planUnits:12,openingHistory:[{cells:[cell('2026-09-18',11)]}],history:[{cells:[cell('2026-09-18',11),cell('2026-09-21',12),cell('2026-09-23',1)]}]};
+ const a={id:'p',name:'학생',planUnits:12,remaining:12,openingAsOf:'2026-09-21',importId:'i',updatedAt:'u'};
+ const audits=[{id:'a',studentId:'p',action:'import-opening-balance',at:'2026-09-21T00:00:00Z',detail:{remaining:1,asOf:'2026-09-21'}},{id:'b',studentId:'p',action:'check-in',at:'2026-09-28T00:00:00Z',detail:{units:1,remaining:0}},{id:'c',studentId:'p',action:'payment',at:'2026-09-30T00:00:00Z',detail:{complete:true,invoiceId:'paid'}}];
+ const records=[{studentId:'p',day:'2026-09-28',units:1,status:'present'}];
+ const r=reviewBalance(a,source,audits,records,[{id:'paid',studentId:'p',status:'paid',units:12}]);
+ assert.equal(r.status,'correct');assert.equal(r.expected,10);assert.deepEqual(r.missingDays,['2026-09-21','2026-09-23']);
+ const noPayment=reviewBalance({...a,remaining:0},source,audits.slice(0,2),records,[]);assert.equal(noPayment.status,'review');
+ const single={...source,planUnits:8,remainingCandidate:5,openingHistory:[{cells:[cell('2026-09-19',3)]}],history:[{cells:[cell('2026-09-19',3),cell('2026-09-21',4)]}]};
+ const b={...a,planUnits:8,remaining:5};const events=[{...audits[0],detail:{remaining:5,asOf:'2026-09-21'}}];
+ assert.equal(reviewBalance(b,single,events,[],[]).expected,4);
+});

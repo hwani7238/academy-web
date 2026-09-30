@@ -322,13 +322,14 @@ export async function correctRemaining(input: Record<string, unknown>, actor: st
     }
     if(account.updatedAt!==input.expectedUpdatedAt || account.remaining!==input.expectedRemaining)throw Error('다른 화면에서 잔여 횟수가 변경됐습니다. 새로고침 후 다시 수정해주세요.');
     if(input.reconciliationFingerprint){
-      const [source,events,records,invoices]=await Promise.all([
+      const [source,original,events,records,invoices]=await Promise.all([
         account.importId?tx.get(db.doc(`opsImports/${account.importId}`)):Promise.resolve(null),
+        account.importId?tx.get(db.doc(`opsImports/${account.importId}/revisions/1`)):Promise.resolve(null),
         tx.get(db.collection('opsAudit').where('studentId','==',studentId)),
         tx.get(db.collection('opsAttendance').where('studentId','==',studentId)),
         tx.get(db.collection('opsInvoices').where('studentId','==',studentId)),
       ]);
-      const report=reviewBalance(account,source?.exists?{...source.data(),id:source.id} as BalanceSource:undefined,events.docs.map(d=>({...d.data(),id:d.id}) as BalanceAudit),records.docs.map(d=>({...d.data(),id:d.id}) as Attendance),invoices.docs.map(d=>({...d.data(),id:d.id}) as Invoice));
+      const report=reviewBalance(account,source?.exists?{...source.data(),id:source.id,...(original?.exists?{openingHistory:original.data()?.history}:{})} as BalanceSource:undefined,events.docs.map(d=>({...d.data(),id:d.id}) as BalanceAudit),records.docs.map(d=>({...d.data(),id:d.id}) as Attendance),invoices.docs.map(d=>({...d.data(),id:d.id}) as Invoice));
       if(report.fingerprint!==input.reconciliationFingerprint || report.status!=='correct' || report.expected!==remaining)throw Error('점검 이후 근거가 변경됐습니다. 다시 점검해주세요.');
     }
 
