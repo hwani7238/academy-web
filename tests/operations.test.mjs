@@ -34,7 +34,8 @@ test('lesson sequence carries across months and explicit renewal dates, independ
  const context={positions:prior.positions,cycleStarts:[{studentId:'p',day:'2026-10-02'}]};
  const result=sequence(accounts,rows,[],context);
  assert.equal(result.labels.get('p_2026-10-01'),'7');
- assert.equal(result.labels.get('p_2026-10-03'),'1');
+ assert.equal(result.labels.get('p_2026-10-03'),'2');
+ assert.equal(sequence(accounts,[{studentId:'p',day:'2026-10-02',units:1},...rows],[],context).labels.get('p_2026-10-03'),'2');
  assert.deepEqual(sequence([{...accounts[0],remaining:0}],rows,[],context),result);
  assert.equal(context.positions.p,6);
  // A modern cancelled record overrides an imported cell on the same date.

@@ -34,6 +34,10 @@ export function attendanceSequence(accounts: Pick<Account, 'id' | 'planUnits'>[]
         numbers.push(positions[id]);
       }
       labels.set(`${id}_${e.day}`, numbers.join('·'));
+    } else if (e.start) {
+      // The billing form explicitly records the first lesson date, even when
+      // that day's attendance has not been copied into the new system.
+      positions[id] = 1;
     } else if (e.legacy && !['FFCCCCCC', 'FFD9D9D9', 'FFB7B7B7'].includes(e.legacy.color)) {
       const value = Number(e.legacy.value);
       if (Number.isSafeInteger(value) && value > 0) positions[id] = value;
