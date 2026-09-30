@@ -98,7 +98,9 @@ export async function configure(input: Record<string, unknown>, actor: string) {
     const saved = { id, ...(old?.schedule ? {schedule:old.schedule} : {}), ...(old?.importId ? { importId: old.importId, openingAsOf: old.openingAsOf } : {}), ...(old?.attendanceGroup ? { attendanceGroup: old.attendanceGroup } : {}), ...(old?.displaySubject ? { displaySubject: old.displaySubject } : {}), ...(subject ? { sourceStudentId, subject } : {}), name: subject ? `${student.data()?.name || '학생'} · ${subject}` : student.data()?.name || '학생', phone, checkinSuffixes: codes, planUnits, planAmount, remaining, openInvoiceId: old?.openInvoiceId || null, active: input.active !== false, autoBilling: input.autoBilling === true, updatedAt: now(), ...(overrideGroup?{attendanceGroup:overrideGroup,displaySubject:overrideSubject,name:`${student.data()?.name} · ${overrideSubject}`}:{}) };
     tx.set(ref, saved);
     audit(tx, db, actor, 'configure', id, { planUnits, planAmount, remaining, active: input.active !== false, autoBilling: input.autoBilling === true });
-    return { accounts: [saved as Account] };
+    // A changed plan length also changes historical sequence positions.
+    // Let that case rebuild the chronology; fee/contact edits need only this row.
+    return old && old.planUnits === planUnits ? { accounts: [saved as Account] } : undefined;
   });
 }
 export async function checkIn(studentId: string, digits: string, actor: string) {
