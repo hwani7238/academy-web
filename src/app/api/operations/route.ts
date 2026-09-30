@@ -1,3 +1,4 @@
+import { courseGroup, type Imported } from '@/lib/operations/course-label';
 import { attendanceSequence } from '@/lib/operations/attendance-sequence';
 import type { Account, Attendance } from '@/lib/operations/model';
 import { courseLifecycle } from '@/lib/operations/lifecycle';
@@ -28,7 +29,11 @@ export async function GET(request: Request) {
     const accountById = new Map(accounts.docs.map(d => [d.id, d.data()]));
     const subjectsByStudent = new Map<string, string[]>();
     for (const a of accounts.docs) { const v = a.data(); if (v.sourceStudentId && v.subject) subjectsByStudent.set(v.sourceStudentId, [...(subjectsByStudent.get(v.sourceStudentId) || []), v.subject]); }
-    const attendanceGroups = new Map<string, Set<string>>();
+    const sourcesByStudent = new Map<string, Imported[]>();
+    for (const doc of imports.docs) {
+      const source = doc.data();
+      sourcesByStudent.set(source.matchedStudentId, [...(sourcesByStudent.get(source.matchedStudentId) || []), source]);
+    }
     const legacyCells = new Map<string, { studentId: string; day: string; value: string; color: string } | null>();
     for (const doc of imports.docs) {
       const source = doc.data();
@@ -38,15 +43,6 @@ export async function GET(request: Request) {
       const matching = service.resolveImportedSubjects(subjects, source.subject);
       if (matching.length !== 1) continue;
       const studentId = service.enrollmentId(person.id, matching[0]);
-      const currentHistory = source.history.filter((h: { cells?: { day: string }[] }) => h.cells?.some(c => c.day.startsWith(source.asOf.slice(0, 7))));
-      for (const history of currentHistory) {
-        const section = String(history.section || '').replace(/\s/g, '');
-        let group = String(source.subject || '');
-        if (group === '어린이 피아노') {
-          group = section.includes('2관') ? '어린이 피아노(2관)' : section === '피아노(어린이)' || section.includes('1관') ? '어린이 피아노(1관)' : '어린이 피아노(관 미확인)';
-        }
-        const groups = attendanceGroups.get(studentId) || new Set<string>(); groups.add(group); attendanceGroups.set(studentId, groups);
-      }
       for (const history of source.history) {
         for (const cell of history.cells || []) {
           if (typeof cell.day !== 'string' || cell.day >= end.toISOString().slice(0, 10) || cell.day > (source.attendanceCutoffs?.[cell.day.slice(0, 7)] || source.asOf)) continue;
@@ -65,11 +61,11 @@ export async function GET(request: Request) {
     return Response.json({ day, sequenceContext, legacyAttendance: allLegacy.filter(r=>r.day.startsWith(`${month}-`)), configured: noticeConfigured(), students: students.docs.flatMap<Snapshot['students'][number]>(d => {
       const raw = d.data(); const base = { courseUpdatedAt:raw.courseUpdatedAt || '', name: raw.name || '학생', phone: raw.phone || '', ...(raw.lifecycle ? { lifecycle: raw.lifecycle } : {}) };
       // Preserve existing single-account balances; do not silently duplicate them.
-      if (accountById.has(d.id)) return [{ ...base, id: d.id, lifecycle:courseLifecycle(raw,d.id), instruments: service.studentSubjects(raw) }];
+      if (accountById.has(d.id)) { const account = accountById.get(d.id)!; const attendanceGroup = courseGroup({ ...account, name: account.name || base.name }, raw, sourcesByStudent.get(d.id)); return [{ ...base, id: d.id, lifecycle:courseLifecycle(raw,d.id), instruments: service.studentSubjects(raw), ...(attendanceGroup ? { attendanceGroup } : {}) }]; }
       const subjects = service.studentSubjects(raw);
       if (!subjects.length) return [{ ...base, id: d.id, lifecycle:courseLifecycle(raw,d.id), instruments: [] }];
       const known = (subjectsByStudent.get(d.id) || []);
-      return [...new Set([...subjects, ...known])].map(subject => { const id = service.enrollmentId(d.id, subject); const overrideGroup=raw.operationsCourseGroups?.[subject]; const display = overrideGroup ? (overrideGroup.includes('피아노')?'피아노':overrideGroup) : accountById.get(id)?.displaySubject || subject; const groups = attendanceGroups.get(id); const attendanceGroup = overrideGroup || accountById.get(id)?.attendanceGroup || (groups?.size === 1 ? [...groups][0] : undefined); return { ...base, id, lifecycle:courseLifecycle(raw,id), sourceStudentId: d.id, subject, ...(attendanceGroup ? { attendanceGroup } : {}), name: `${base.name} · ${display}`, instruments: [display] }; });
+      return [...new Set([...subjects, ...known])].map(subject => { const id = service.enrollmentId(d.id, subject); const overrideGroup=raw.operationsCourseGroups?.[subject]; const display = overrideGroup ? (overrideGroup.includes('피아노')?'피아노':overrideGroup) : accountById.get(id)?.displaySubject || subject; const attendanceGroup = courseGroup({ ...accountById.get(id), subject, name: base.name }, raw, sourcesByStudent.get(d.id)); return { ...base, id, lifecycle:courseLifecycle(raw,id), sourceStudentId: d.id, subject, ...(attendanceGroup ? { attendanceGroup } : {}), name: `${base.name} · ${display}`, instruments: [display] }; });
     }), accounts: rows(accounts), attendance: namedRows(attendance), invoices: namedRows(invoices), payments: rows(payments), notices: notices.docs.map(d => { const n = d.data(); return { id: d.id, studentId: n.studentId, name: n.name, kind: n.kind, status: n.status, createdAt: n.createdAt, requestId: n.requestId || '', error: n.error || '' }; }), devices: devices.docs.map(d => { const v = d.data(); return { id: d.id, name: v.name, active: v.active && v.expiresAt > Date.now(), createdAt: v.createdAt }; }) }, { headers: { 'Cache-Control': 'no-store' } });
   } catch (error) { return failure(error); }
 }

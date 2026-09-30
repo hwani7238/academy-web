@@ -3,7 +3,7 @@ import { database, sameOrigin, device, failure } from '@/lib/operations/auth';
 import { pair, checkIn } from '@/lib/operations/service';
 import { after } from 'next/server';
 import { processNotices } from '@/lib/operations/notices';
-import { checkInName } from '@/lib/operations/course-label';
+import { checkInName, courseGroup } from '@/lib/operations/course-label';
 import type { Account } from '@/lib/operations/model';
 export const runtime = 'nodejs';
 export const maxDuration = 60;
@@ -23,9 +23,9 @@ export async function POST(request: Request) {
         const account = { ...d.data(), id: d.id } as Account;
         const owner = (await database().doc(`students/${account.sourceStudentId || d.id}`).get()).data();
         if (!owner || enrollmentState(courseLifecycle(owner,d.id)) !== 'active') return null;
-        const source = account.importId && !account.attendanceGroup && !owner.operationsCourseGroups?.[account.subject || '']
-          ? (await database().doc(`opsImports/${account.importId}`).get()).data() : undefined;
-        return { id:d.id, name:checkInName(account, owner, source) };
+        const sources = courseGroup(account, owner) ? []
+          : (await database().collection('opsImports').where('matchedStudentId', '==', account.sourceStudentId || d.id).get()).docs.map(source => source.data());
+        return { id:d.id, name:checkInName(account, owner, sources) };
       }));
       return Response.json({ matches: available.filter(Boolean) }, { headers: { 'Cache-Control': 'no-store' } });
     }

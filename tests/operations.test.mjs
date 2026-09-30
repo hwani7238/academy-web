@@ -203,7 +203,7 @@ test('check-in success and duplicate responses use the same imported campus with
  const s=setup();await s.seed('student-a',6);
  const account=s.records.get('opsAccounts/student-a');
  Object.assign(account,{name:'가상 학생 · 피아노',subject:'피아노',importId:'source'});
- s.records.set('opsImports/source',{subject:'어린이 피아노',asOf:'2026-09-23',history:[{section:'피아노(어린이)2관',cells:[{day:'2026-09-01'}]}]});
+ s.records.set('opsImports/source',{matchedStudentId:'student-a',subject:'어린이 피아노',asOf:'2026-09-23',history:[{section:'피아노(어린이)2관',cells:[{day:'2026-09-01'}]}]});
  const result=await s.service.checkIn('student-a','1234','device');
  assert.equal(result.name,'가상 학생 · 어린이 피아노 (2관)');
  assert.equal((await s.service.checkIn('student-a','1234','device')).name,result.name);
@@ -304,7 +304,10 @@ function setup() {
   const routeExports={};
   const routeCode=fs.readFileSync('src/app/api/operations/import/route.ts','utf8');
   new Function('require','exports',ts.transpileModule(routeCode,{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText)(id=>id.endsWith('/auth')?{database:()=>db,manager:async()=> 'owner',sameOrigin:()=>{},failure:e=>Response.json({error:e.message},{status:400}),hash:v=>require('node:crypto').createHash('sha256').update(v).digest('hex')}:id.endsWith('/service')?service:id.endsWith('/refresh-import')?load('refresh-import'):id.endsWith('/import-cache')?{invalidateImportCache:()=>{}}:load('model'),routeExports);
-  return { records, service, load, seed, importPost:body=>routeExports.POST(new Request('https://test/api/operations/import',{method:'POST',body:JSON.stringify(body)})) };
+  const checkInRoute={};
+  const checkInCode=fs.readFileSync('src/app/api/check-in/route.ts','utf8');
+  new Function('require','exports',ts.transpileModule(checkInCode,{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText)(id=>id==='next/server'?{after:()=>{}}:id.endsWith('/auth')?{database:()=>db,device:async()=> 'device',sameOrigin:()=>{},failure:e=>Response.json({error:e.message},{status:400})}:load(id.split('/').at(-1)),checkInRoute);
+  return { records, service, load, seed, checkInPost:body=>checkInRoute.POST(new Request('https://test/api/check-in',{method:'POST',body:JSON.stringify(body)})), importPost:body=>routeExports.POST(new Request('https://test/api/operations/import',{method:'POST',body:JSON.stringify(body)})) };
 }
 test('concurrent duplicate check-ins deduct once and create one invoice/outbox', async () => {
   const s = setup(); await s.seed();
@@ -802,4 +805,37 @@ test('balance review uses archived opening history for late entries before the i
  const single={...source,planUnits:8,remainingCandidate:5,openingHistory:[{cells:[cell('2026-09-19',3)]}],history:[{cells:[cell('2026-09-19',3),cell('2026-09-21',4)]}]};
  const b={...a,planUnits:8,remaining:5};const events=[{...audits[0],detail:{remaining:5,asOf:'2026-09-21'}}];
  assert.equal(reviewBalance(b,single,events,[],[]).expected,4);
+});
+
+test('all matched imports resolve kiosk groups without a balance importId, with course and student isolation',async()=>{
+ const s=setup();await s.seed('student-a',6);await s.seed('student-b',7);
+ Object.assign(s.records.get('students/student-a'),{instruments:['피아노','드럼']});
+ Object.assign(s.records.get('opsAccounts/student-a'),{subject:'피아노',name:'가상 학생 · 피아노'});
+ const source={matchedStudentId:'student-a',subject:'어린이 피아노',asOf:'2026-09-23',history:[{section:'피아노(어린이)',cells:[{day:'2026-09-01'}]}]};
+ s.records.set('opsImports/unlinked',source);
+ s.records.set('opsImports/sibling',{...source,matchedStudentId:'student-b',history:[{section:'피아노(어린이)2관',cells:[{day:'2026-09-01'}]}]});
+ const {courseGroup,checkInName}=s.load('course-label');
+ const owner=s.records.get('students/student-a'),account=s.records.get('opsAccounts/student-a');
+ assert.equal(courseGroup(account,owner,[source]),'어린이 피아노(1관)');
+ assert.equal(checkInName({...account,subject:'드럼'},owner,[source]),'가상 학생 · 드럼');
+ const lookup=await (await s.checkInPost({action:'lookup',digits:'1234'})).json();
+ assert.equal(lookup.matches.find(m=>m.id==='student-a').name,'가상 학생 · 어린이 피아노 (1관)');
+ const result=await s.service.checkIn('student-a','1234','device');
+ assert.equal(result.name,'가상 학생 · 어린이 피아노 (1관)');
+ assert.equal((await s.service.checkIn('student-a','1234','device')).name,result.name);
+ assert.equal(s.records.get('opsAccounts/student-a').remaining,5);
+ assert.equal(s.records.get('opsAccounts/student-b').remaining,7);
+ owner.operationsCourseGroups={피아노:'어린이 피아노(2관)'};
+ assert.equal((await s.service.checkIn('student-a','1234','device')).name,'가상 학생 · 어린이 피아노 (2관)');
+ assert.equal(s.records.get('opsAccounts/student-a').remaining,5);
+});
+test('conflicting import campuses remain unresolved and explicit manager assignments win',()=>{
+ const s=setup(),{courseGroup,checkInName}=s.load('course-label');
+ const account={subject:'피아노',name:'가상 학생 · 피아노'},owner={instruments:['피아노']};
+ const source=section=>({subject:'어린이 피아노',asOf:'2026-09-23',history:[{section,cells:[{day:'2026-09-01'}]}]});
+ const sources=[source('피아노(어린이)'),source('피아노(어린이)2관')];
+ assert.equal(courseGroup(account,owner,sources),undefined);
+ assert.equal(checkInName(account,owner,sources),'가상 학생 · 피아노 · 반 확인 필요');
+ assert.equal(checkInName(account,{...owner,operationsCourseGroups:{피아노:'어린이 피아노(1관)'}},sources),'가상 학생 · 어린이 피아노 (1관)');
+ assert.equal(courseGroup(account,{instruments:['피아노','어린이 피아노']},[sources[0]]),undefined);
 });
