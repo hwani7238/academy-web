@@ -20,3 +20,16 @@ export function attendancePaymentDue(row: Pick<Attendance, 'day' | 'status' | 'u
   const created = new Date(invoice.createdAt);
   return Boolean(account && account.remaining < 0 && Number.isFinite(created.getTime()) && row.day > seoulDay(created));
 }
+
+export function paidFirstLesson(sequence: string | undefined, status: Attendance['status'], paymentDue: boolean) {
+  return !paymentDue && ['present', 'makeup'].includes(status || 'present') && Boolean(sequence?.split('·').some(value => Number(value) === 1));
+}
+
+export function importedAttendanceAppearance(row: Legacy, account?: Account, invoice?: Invoice) {
+  const appearance = legacyAttendanceAppearance(row);
+  const status = appearance.tone === 'payment-due' ? 'present' : appearance.tone as Attendance['status'];
+  const due = attendancePaymentDue({ day: row.day, status, units: 1 }, account, invoice);
+  if (due) return { tone: 'payment-due', label: '결제 필요' };
+  if (paidFirstLesson(row.value, status, false)) return { tone: 'paid-first', label: appearance.tone === 'makeup' ? '보강' : '결제 완료' };
+  return appearance;
+}

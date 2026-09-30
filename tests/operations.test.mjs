@@ -931,3 +931,22 @@ test('monthly payment color excludes completed passes and clears when settled',(
  assert.equal(due(row('2026-09-30','makeup',0),a,current),false);
  assert.equal(due(row('2026-09-30'),a,undefined),false);
 });
+
+test('paid first lessons are pink while unpaid first lessons stay purple',()=>{
+ const {paidFirstLesson:first,importedAttendanceAppearance:appearance}=setup().load('attendance-appearance');
+ assert.equal(first('1','present',false),true);
+ assert.equal(first('8·1','present',false),true);
+ assert.equal(first('1','makeup',false),true);
+ assert.equal(first('1','present',true),false);
+ assert.equal(first('11','present',false),false);
+ assert.equal(first(undefined,'present',false),false);
+ for(const status of ['absent','late_cancel','cancelled','travel','sick'])assert.equal(first('1',status,false),false);
+ const row={studentId:'p',day:'2026-09-15',value:'1.0',color:'FFFF00FF'};
+ const inv={status:'open',amount:230000,paid:100000,cycleStart:'2026-09-15',createdAt:'2026-09-15T00:00:00Z'};
+ assert.equal(appearance(row,{remaining:11},inv).tone,'payment-due');
+ assert.equal(appearance(row,{remaining:11},{...inv,status:'paid',paid:230000}).tone,'paid-first');
+ assert.equal(appearance(row,{remaining:11},undefined).tone,'paid-first');
+ assert.equal(appearance(row,{remaining:11},{...inv,cycleStart:'2026-09-30'}).tone,'paid-first');
+ assert.equal(appearance({...row,color:'FFD9D9D9'},{remaining:11},inv).tone,'absent');
+ assert.equal(appearance({...row,value:'2',color:'FFFF9900'},{remaining:11},undefined).tone,'makeup');
+});
