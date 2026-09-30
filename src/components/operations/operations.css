@@ -52,3 +52,17 @@
 /* Follow the displayed order, including filtered and attendance-sorted rosters. */
 .whee-ops .monthly-table tbody > tr:nth-child(5n) > th,
 .whee-ops .monthly-table tbody > tr:nth-child(5n) > td{border-bottom:6px solid #fff1b8}
+
+/* Imported attendance keeps its status colors even though it is read-only. */
+.whee-ops .monthly-table .attendance-cell.imported:disabled{opacity:1}
+.whee-ops .monthly-table .attendance-cell.present{background:#fff;color:#111}
+.whee-ops .monthly-table .attendance-cell.makeup{background:#fff0d9;color:#b45309}
+.whee-ops .monthly-table .attendance-cell.absent,.whee-ops .monthly-table .attendance-cell.late_cancel{background:#f0f1f4;color:#566174}
+.whee-ops .monthly-table .attendance-cell.payment-due{background:#f1e4ff;color:#7e22ce;border-color:#dec3f5}
+.whee-ops .monthly-table .attendance-cell small{color:inherit}
+.whee-ops .month-color-legend{display:flex;flex-wrap:wrap;gap:8px;padding:0 24px 16px;font-size:12px}
+.whee-ops .month-color-legend span{padding:3px 9px;border-radius:4px}
+.whee-ops .month-color-legend .present{color:#111;border:1px solid #dfe5ee}
+.whee-ops .month-color-legend .makeup{background:#fff0d9;color:#b45309}
+.whee-ops .month-color-legend .absent{background:#f0f1f4;color:#566174}
+.whee-ops .month-color-legend .payment-due{background:#f1e4ff;color:#7e22ce}

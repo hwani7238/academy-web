@@ -899,3 +899,35 @@ test('a payment racing an invoice edit cannot settle using obsolete terms',async
  assert.equal(results[0].status,'fulfilled');assert.equal(results[1].status,'rejected');
  assert.equal(s.records.get(`opsInvoices/${id}`).paid,0);assert.equal(s.records.get('opsAccounts/student-a').remaining,0);
 });
+
+test('monthly attendance restores imported status colors without dimming normal lessons',()=>{
+ const {legacyAttendanceAppearance: appearance}=setup().load('attendance-appearance');
+ const row=(color,value='3')=>({studentId:'p',day:'2026-09-30',value,color});
+ assert.equal(appearance(row('FF000000')).tone,'present');
+ assert.equal(appearance(row('')).tone,'present');
+ for(const color of ['FFCCCCCC','FFD9D9D9','FFB7B7B7'])assert.equal(appearance(row(color)).tone,'absent');
+ assert.equal(appearance(row('FFFF9900')).tone,'makeup');
+ for(const color of ['FFFF00FF','FF9900FF'])assert.equal(appearance(row(color)).tone,'payment-due');
+ assert.equal(appearance(row('','결석')).tone,'absent');
+ assert.equal(appearance(row('','보강')).tone,'makeup');
+});
+test('monthly payment color excludes completed passes and clears when settled',()=>{
+ const {attendancePaymentDue: due}=setup().load('attendance-appearance');
+ const a={remaining:-2};
+ const inv={status:'open',amount:230000,paid:0,createdAt:'2026-09-28T15:30:00Z'};
+ const row=(day,status='present',units=1)=>({day,status,units});
+ assert.equal(due(row('2026-09-28'),a,inv),false);
+ assert.equal(due(row('2026-09-29'),a,inv),false); // Last paid lesson, in Seoul time.
+ assert.equal(due(row('2026-09-30'),a,inv),true);
+ assert.equal(due(row('2026-09-30'),{remaining:3},inv),false); // Advance renewal.
+ assert.equal(due(row('2026-09-30'),a,{...inv,paid:100000}),true);
+ assert.equal(due(row('2026-09-30'),a,{...inv,status:'paid',paid:230000}),false);
+ assert.equal(due(row('2026-09-30'),a,{...inv,status:'cancelled'}),false);
+ const current={...inv,creditUnits:0,cycleStart:'2026-09-30'};
+ assert.equal(due(row('2026-09-29'),{remaining:11},current),false);
+ assert.equal(due(row('2026-09-30'),{remaining:11},current),true);
+ assert.equal(due(row('2026-09-30','makeup'),{remaining:11},current),true);
+ for(const status of ['absent','late_cancel','sick','travel','cancelled'])assert.equal(due(row('2026-09-30',status),a,current),false);
+ assert.equal(due(row('2026-09-30','makeup',0),a,current),false);
+ assert.equal(due(row('2026-09-30'),a,undefined),false);
+});
