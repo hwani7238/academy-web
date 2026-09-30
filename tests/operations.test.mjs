@@ -6,6 +6,54 @@ import { createRequire } from 'node:module';
 import ts from 'typescript';
 const require = createRequire(import.meta.url);
 const root = path.resolve('src/lib/operations');
+test('future leave ranges are atomic, idempotent, course-scoped and do not charge or send notices',async()=>{
+ const s=setup();await s.seed('piano',8);await s.seed('drums',4);
+ const input={studentId:'piano',start:'2998-12-30',end:'2999-01-02',status:'travel',rangeId:'trip-1',note:'가족 여행',revisions:{}};
+ const before=structuredClone(s.records.get('opsAccounts/piano'));
+ const result=await s.service.recordAttendanceRange(input,'owner');assert.equal(result.attendance.length,4);
+ for(const r of result.attendance){assert.equal(r.status,'travel');assert.equal(r.units,0);assert.equal(r.range.id,'trip-1');}
+ await s.service.recordAttendanceRange(input,'owner');
+ assert.equal([...s.records.values()].filter(r=>r.action==='attendance-range').length,1);
+ assert.deepEqual(s.records.get('opsAccounts/piano'),before);assert.equal(s.records.get('opsAccounts/drums').remaining,4);
+ assert.equal([...s.records.keys()].filter(k=>k.startsWith('opsNotices/')||k.startsWith('opsInvoices/')).length,0);
+ const day='2999-01-01',old=s.records.get(`opsAttendance/piano_${day}`);
+ await s.service.recordAttendance({studentId:'piano',day,status:'sick',units:0,expectedUpdatedAt:old.updatedAt},'owner');
+ assert.equal(s.records.get(`opsAttendance/piano_${day}`).range,undefined);
+ await s.service.recordAttendanceRange({...input,status:'cancelled'},'owner');
+ assert.equal(s.records.get(`opsAttendance/piano_${day}`).status,'sick');
+ assert.equal(s.records.get('opsAttendance/piano_2998-12-30').status,'cancelled');
+ await s.service.recordAttendanceRange({...input,status:'cancelled'},'owner');
+ assert.equal([...s.records.values()].filter(r=>r.action==='attendance-range').length,2);
+});
+test('range conflicts reject every write and preserve charged and imported records',async()=>{
+ const s=setup();await s.seed('student-a',8);
+ const input={studentId:'student-a',start:'2026-09-01',end:'2026-09-03',status:'absent',rangeId:'absence-1',revisions:{}};
+ await s.service.recordAttendance({studentId:'student-a',day:'2026-09-02',status:'present',units:1},'owner');
+ await assert.rejects(s.service.recordAttendanceRange(input,'owner'),/출석/);
+ assert.equal(s.records.has('opsAttendance/student-a_2026-09-01'),false);assert.equal(s.records.get('opsAccounts/student-a').remaining,7);
+ const r=s.records.get('opsAttendance/student-a_2026-09-02');
+ await s.service.recordAttendance({studentId:'student-a',day:r.day,status:'cancelled',units:0,expectedUpdatedAt:r.updatedAt},'owner');
+ await assert.rejects(s.service.recordAttendanceRange(input,'owner'),/변경/);
+ const revision=s.records.get('opsAttendance/student-a_2026-09-02').updatedAt;
+ s.records.get('opsAccounts/student-a').importId='import-a';
+ s.records.set('opsImports/import-a',{matchedStudentId:'student-a',asOf:'2026-09-03',history:[{cells:[{day:'2026-09-03',value:'3'}]}]});
+ await assert.rejects(s.service.recordAttendanceRange({...input,revisions:{'2026-09-02':revision}},'owner'),/이전 장부/);
+ assert.equal(s.records.has('opsAttendance/student-a_2026-09-01'),false);
+ for(const patch of [{start:'invalid'},{end:'2026-08-31'},{end:'2027-09-01'},{status:'present'},{rangeId:''}])await assert.rejects(s.service.recordAttendanceRange({...input,...patch},'owner'));
+});
+test('cancelled leave and mistaken attendance allow checking in again without duplicate notices',async()=>{
+ const s=setup();await s.seed('student-a',8);const day=s.load('model').seoulDay();
+ await s.service.recordAttendance({studentId:'student-a',day,status:'travel',units:0},'owner');
+ let old=s.records.get(`opsAttendance/student-a_${day}`);
+ await s.service.recordAttendance({studentId:'student-a',day,status:'cancelled',units:0,expectedUpdatedAt:old.updatedAt},'owner');
+ await s.service.checkIn('student-a','1234','device');
+ assert.equal(s.records.get('opsAccounts/student-a').remaining,7);
+ old=s.records.get(`opsAttendance/student-a_${day}`);
+ await s.service.recordAttendance({studentId:'student-a',day,status:'cancelled',units:0,expectedUpdatedAt:old.updatedAt},'owner');
+ await s.service.checkIn('student-a','1234','device');
+ assert.equal(s.records.get('opsAccounts/student-a').remaining,7);
+ assert.equal([...s.records.keys()].filter(k=>k.startsWith('opsNotices/attendance_')).length,1);
+});
 test('lesson sequence follows imported counts, rolls per course and recalculates corrections chronologically',()=>{
  const {attendanceSequence: sequence}=setup().load('attendance-sequence');
  const accounts=[{id:'piano',planUnits:8},{id:'drums',planUnits:4}];
@@ -356,9 +404,9 @@ test('manual absence, makeup and repeated saves preserve lesson balances', async
  assert.equal(s.records.get('opsAccounts/student-a').remaining,1);
  assert.equal([...s.records.values()].filter(x=>x.needsReview).length,1);
 });
-test('invalid, future and nonzero cancelled attendance is rejected', async()=>{
+test('invalid dates, future charged attendance and nonzero cancellation are rejected', async()=>{
  const s=setup();await s.seed();const input={studentId:'student-a',day:'2026-02-30',status:'absent',units:0,note:'test'};
- for(const patch of [{},{day:'2999-01-01'},{day:s.load('model').seoulDay(),status:'cancelled',units:1},{day:s.load('model').seoulDay(),status:'invalid'}]) await assert.rejects(s.service.recordAttendance({...input,...patch},'owner'));
+ for(const patch of [{},{day:'2999-01-01',status:'present',units:1},{day:'2999-01-01',status:'absent',units:1},{day:s.load('model').seoulDay(),status:'cancelled',units:1},{day:s.load('model').seoulDay(),status:'invalid'}]) await assert.rejects(s.service.recordAttendance({...input,...patch},'owner'));
  assert.equal(s.records.get('opsAccounts/student-a').remaining,1);
 });
 test('kiosk does not report absence as successful attendance',async()=>{

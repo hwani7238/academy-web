@@ -84,6 +84,7 @@ export async function POST(request: Request) {
       case 'correctRemaining': return Response.json({ok:true,changes:await service.correctRemaining(input,actor)});
       case 'manageCourse': await service.manageCourse(input,actor); return Response.json({ok:true});
       case 'configure': await service.configure(input, actor); break;
+      case 'recordAttendanceRange': return Response.json({ok:true,changes:await service.recordAttendanceRange(input,actor)});
       case 'recordAttendance': {
         const changes=await service.recordAttendance(input, actor);
         after(async()=>{try{await processNotices();}catch{console.error('Notification worker failed');}});

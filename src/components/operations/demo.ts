@@ -1,3 +1,4 @@
+import { rangeAttendance } from '@/lib/operations/attendance-range';
 import { enrollmentState, lifecycleInput } from '@/lib/operations/lifecycle';
 import { correctedArrival } from '@/lib/operations/attendance-time';
 import { checkInName } from '@/lib/operations/course-label';
@@ -67,6 +68,10 @@ export function demoAction(current: Snapshot, input: Record<string, unknown>): {
     if(data.students.some(s=>s.name.split(' · ')[0].replace(/\s/g,'')===v.name.replace(/\s/g,'')&&s.phone.replace(/\D/g,'')===v.phone))throw Error('이미 등록된 학생입니다.');
     const a:Account={id,sourceStudentId:id,subject:v.subject,name:`${v.name} · ${v.subject}`,phone:v.phone,checkinSuffixes:[...new Set([v.phone.slice(-4),...(v.personalPhone?[v.personalPhone.slice(-4)]:[])])],planUnits:v.planUnits,planAmount:v.planAmount,remaining:v.remaining,openInvoiceId:null,autoBilling:false,active:true,updatedAt:at};
     data.accounts.push(a);data.students.push({id,name:a.name,phone:v.phone,sourceStudentId:id,subject:v.subject,instruments:[v.subject],attendanceGroup:v.group});
+  } else if (input.action === 'recordAttendanceRange') {
+    if(!account)throw Error('먼저 수강 설정을 저장해주세요.');
+    const changes=rangeAttendance(input,account,data.attendance.filter(r=>r.studentId===account.id),new Set((data.legacyAttendance||[]).filter(r=>r.studentId===account.id).map(r=>r.day)),at);
+    const ids=new Set(changes.map(r=>r.id));data.attendance=[...data.attendance.filter(r=>!ids.has(r.id)),...changes];
   } else if (input.action === 'recordAttendance') {
     const values = attendanceInput(input);
     if (!account) throw new Error('먼저 수강 설정을 저장해주세요.');
@@ -74,17 +79,19 @@ export function demoAction(current: Snapshot, input: Record<string, unknown>): {
     account.remaining = adjustBalance(account.remaining, old?.units || 0, values.units);
     data.attendance = data.attendance.filter(a => a.id !== id);
     data.attendance.push({ ...old, ...values, id, studentId: account.id, name: account.name, at: old?.at || at, source: old?.source || 'manual', updatedAt: at });
+    delete data.attendance[data.attendance.length-1].range;
     if (account.remaining <= 0 && values.units > (old?.units || 0)) invoice(account);
     if (account.remaining > 0) { const open = data.invoices.find(i => i.id === account.openInvoiceId); if (open) open.needsReview = true; }
   } else if (input.action === 'demoCheckIn') {
     if (!account?.active || enrollmentState(data.students.find(s=>s.id===account.id)?.lifecycle)!=='active') throw new Error('학생 설정을 확인해주세요.');
     const existing = data.attendance.find(a => a.studentId === account.id && a.day === seoulDay());
-    if (existing?.status && existing.status !== 'present' && existing.status !== 'makeup') throw new Error('오늘 결석·취소 기록이 있습니다. 선생님께 출석 변경을 요청해주세요.');
-    if (existing) return { data, result: { duplicate: true, name: checkInName(account, {}) } };
+    if (existing?.status && existing.status !== 'cancelled' && existing.status !== 'present' && existing.status !== 'makeup') throw new Error('오늘 결석·취소 기록이 있습니다. 선생님께 출석 변경을 요청해주세요.');
+    if (existing && existing.status !== 'cancelled') return { data, result: { duplicate: true, name: checkInName(account, {}) } };
     const id = `${account.id}_${seoulDay()}`;
     account.remaining = adjustBalance(account.remaining, 0, 1);
+    data.attendance=data.attendance.filter(r=>r.id!==id);
     data.attendance.unshift({ id, studentId: account.id, name: account.name, day: seoulDay(), at, units: 1, note: '', updatedAt: at });
-    enqueue(account, `attendance_${id}`, 'attendance'); if (account.remaining <= 0) invoice(account);
+    if(!data.notices.some(n=>n.id===`attendance_${id}`))enqueue(account, `attendance_${id}`, 'attendance'); if (account.remaining <= 0) invoice(account);
     result = { name: checkInName(account, {}), duplicate: false };
   } else if (input.action === 'configure') {
     const student = data.students.find(s => s.id === input.studentId)!;

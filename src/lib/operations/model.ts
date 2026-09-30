@@ -8,7 +8,7 @@ export type Account = {
 };
 export const ATTENDANCE_LABELS = { present: "출석", absent: "결석", makeup: "보강", late_cancel: "당일 취소", travel: "여행", sick: "병가", cancelled: "취소" } as const;
 export type AttendanceStatus = keyof typeof ATTENDANCE_LABELS;
-export type Attendance = { arrivalAt?: string; status?: AttendanceStatus; source?: "kiosk" | "manual"; relatedDay?: string; id: string; studentId: string; name: string; day: string; at: string; units: number; note: string; updatedAt: string };
+export type Attendance = { range?: {id:string;start:string;end:string}; arrivalAt?: string; status?: AttendanceStatus; source?: "kiosk" | "manual"; relatedDay?: string; id: string; studentId: string; name: string; day: string; at: string; units: number; note: string; updatedAt: string };
 export type Invoice = { creditUnits?: number; cycleStart?: string; id: string; studentId: string; name: string; units: number; amount: number; paid: number; status: 'open' | 'paid' | 'cancelled'; needsReview: boolean; createdAt: string };
 export type Payment = { id: string; invoiceId: string; studentId: string; amount: number; method: string; at: string; note: string };
 export type Notice = { id: string; studentId: string; name: string; kind: 'attendance' | 'billing'; status: string; createdAt: string; requestId?: string; error?: string };
@@ -42,10 +42,10 @@ export function validDay(value: unknown): string {
 }
 export function attendanceInput(input: Record<string, unknown>) {
   const day = validDay(input.day);
-  if (day > seoulDay()) throw new Error('미래 날짜의 출결은 기록할 수 없습니다.');
   const status = input.status as AttendanceStatus;
   if (!Object.hasOwn(ATTENDANCE_LABELS, status)) throw new Error('출결 상태를 선택해주세요.');
   const units = integer(input.units, 0, 10, '차감 횟수');
+  if (day > seoulDay() && !(units === 0 && ['travel','absent','sick','cancelled'].includes(status))) throw new Error('미래 날짜에는 차감 없는 여행·결석·병가만 미리 표시할 수 있습니다.');
   if (status === 'cancelled' && units !== 0) throw new Error('취소 기록은 0회 차감으로 저장해주세요.');
   const note = typeof input.note === 'string' ? input.note.trim().slice(0, 500) : '';
   const relatedDay = status === 'makeup' && input.relatedDay ? validDay(input.relatedDay) : '';

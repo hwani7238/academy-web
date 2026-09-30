@@ -1,3 +1,4 @@
+import { attendanceDays, rangeAttendance } from './attendance-range';
 import { enrollmentState, lifecycleInput, courseLifecycle } from './lifecycle';
 import { checkInName } from './course-label';
 import { correctedArrival } from './attendance-time';
@@ -116,16 +117,17 @@ export async function checkIn(studentId: string, digits: string, actor: string) 
         return { duplicate: true, name };
       }
     }
-    if (attended.exists) {
+    if (attended.exists && attended.data()?.status !== 'cancelled') {
       const status = attended.data()?.status || 'present';
       if (status !== 'present' && status !== 'makeup') throw new HttpError(409, '오늘 결석·취소 기록이 있습니다. 선생님께 출석 변경을 요청해주세요.');
       return { duplicate: true, name };
     }
+    const previousNotice = attended.exists ? await tx.get(db.doc(`opsNotices/attendance_${attendanceId}`)) : null;
     const remaining = adjustBalance(account.remaining, 0, 1);
     const openInvoiceId = remaining <= 0 && !account.openInvoiceId ? newInvoice(tx, db, account, invoiceId, '수업 횟수 소진') : account.openInvoiceId;
-    tx.create(attendanceRef, { id: attendanceId, studentId: id, name: account.name, day, at: now(), units: 1, status: 'present', source: 'kiosk', note: '', updatedAt: now() });
+    tx.set(attendanceRef, { id: attendanceId, studentId: id, name: account.name, day, at: now(), units: 1, status: 'present', source: 'kiosk', note: '', updatedAt: now() });
     tx.update(ref, { remaining, openInvoiceId, updatedAt: now() });
-    enqueue(tx, db, `attendance_${attendanceId}`, account, 'attendance', { student_name: account.name, attendance_time: new Date().toLocaleTimeString('ko-KR', { timeZone: 'Asia/Seoul', hour: '2-digit', minute: '2-digit', hour12: false }) });
+    if (!previousNotice?.exists) enqueue(tx, db, `attendance_${attendanceId}`, account, 'attendance', { student_name: account.name, attendance_time: new Date().toLocaleTimeString('ko-KR', { timeZone: 'Asia/Seoul', hour: '2-digit', minute: '2-digit', hour12: false }) });
     audit(tx, db, actor, 'check-in', id, { attendanceId, units: 1, remaining });
     return { duplicate: false, name };
   });
@@ -245,6 +247,32 @@ export async function releaseBlocked(actor: string) {
   });
 }
 
+// A whole date range is validated before any writes; marking leave never changes balances.
+export async function recordAttendanceRange(input:Record<string,unknown>,actor:string) {
+ const studentId=key(input.studentId),days=attendanceDays(input.start,input.end),db=database();
+ return db.runTransaction(async tx=>{
+  const account=(await tx.get(db.doc(`opsAccounts/${studentId}`))).data() as Account|undefined;
+  if(!account)throw Error('먼저 수강 설정을 저장해주세요.');
+  const [records,imports]=await Promise.all([
+   Promise.all(days.map(day=>tx.get(db.doc(`opsAttendance/${studentId}_${day}`)))),
+   tx.get(db.collection('opsImports').where('matchedStudentId','==',account.sourceStudentId || studentId)),
+  ]);
+  const legacyDays=new Set<string>();
+  for(const doc of imports.docs){
+   const source=doc.data();
+   if(doc.id!==account.importId && (!account.subject || !resolveImportedSubjects([account.subject],source.subject).length))continue;
+   for(const history of source.history || [])for(const cell of history.cells || []){
+    if(typeof cell.day==='string' && days.includes(cell.day) && cell.day<=(source.attendanceCutoffs?.[cell.day.slice(0,7)] || source.asOf))legacyDays.add(cell.day);
+   }
+  }
+  const previous=records.filter(d=>d.exists).map(d=>d.data() as Attendance);
+  const attendance=rangeAttendance(input,account,previous,legacyDays,now());
+  for(const row of attendance)tx.set(db.doc(`opsAttendance/${row.id}`),row);
+  if(attendance.length)audit(tx,db,actor,'attendance-range',studentId,{start:input.start,end:input.end,status:input.status,rangeId:input.rangeId,days:attendance.map(r=>r.day),before:previous});
+  return {attendance:attendance.length?attendance:previous};
+ });
+}
+
 // Manual records never send an arrival notification. Absolute units and revision
 // checks prevent a retry or another open tab from deducting twice.
 export async function recordAttendance(input: Record<string, unknown>, actor: string) {
@@ -264,6 +292,7 @@ export async function recordAttendance(input: Record<string, unknown>, actor: st
     const openInvoiceId = remaining <= 0 && values.units > (old?.units || 0) && !account.openInvoiceId ? newInvoice(tx, db, account, invoiceId, '수동 출결 기록 후 소진', stamp) : account.openInvoiceId;
     if (remaining > 0 && currentInvoice?.exists) tx.update(currentInvoice.ref, { needsReview: true });
     const attendance:Attendance={ ...old, ...values, id, studentId, name: account.name, source: old?.source || 'manual', at: old?.at || stamp, updatedAt: stamp };
+    delete attendance.range;
     const updatedAccount={...account,remaining,openInvoiceId,updatedAt:stamp};
     tx.set(ref, attendance);
     tx.update(accountRef, { remaining, openInvoiceId, updatedAt: stamp });
