@@ -749,3 +749,43 @@ test('returning an individually moved lesson after changing weekdays preserves t
  s=moveLesson(s,{from:'2026-10-02',to:'2026-10-01',expectedUpdatedAt:'c'},[],'d',today);
  assert.ok(plannedLesson(s,'2026-10-01'));assert.equal(plannedLesson(s,'2026-10-02'),null);
 });
+
+test('balance review detects missing imported lessons without double deducting live attendance or prepaid credits',()=>{
+ const {reviewBalance}=setup().load('balance-review');
+ const a={id:'p',name:'피아노',planUnits:12,remaining:15,openingAsOf:'2026-09-21',importId:'i',updatedAt:'u'};
+ const source={id:'i',asOf:'2026-09-21',attendanceAsOf:'2026-09-23',attendanceCutoffs:{'2026-09':'2026-09-23'},remainingCandidate:4,planUnits:12,history:[{cells:[{day:'2026-09-19',value:'8',color:''},{day:'2026-09-23',value:'9',color:''}]}]};
+ const audits=[{id:'a',studentId:'p',action:'import-opening-balance',at:'2026-09-21T00:00:00Z',detail:{remaining:4,asOf:'2026-09-21'}},{id:'b',studentId:'p',action:'payment',at:'2026-09-24T00:00:00Z',detail:{complete:true,invoiceId:'invoice'}},{id:'c',studentId:'p',action:'check-in',at:'2026-09-29T00:00:00Z',detail:{units:1,remaining:15}}];
+ const records=[{studentId:'p',day:'2026-09-29',units:1,status:'present'}],invoices=[{id:'invoice',studentId:'p',units:12,status:'paid'}];
+ let r=reviewBalance(a,source,audits,records,invoices);assert.equal(r.status,'correct');assert.equal(r.expected,14);assert.deepEqual(r.missingDays,['2026-09-23']);
+ // A live record on the imported date is already included in the audit deductions.
+ r=reviewBalance(a,source,audits,[{...records[0],day:'2026-09-23'}],invoices);assert.equal(r.status,'verified');assert.equal(r.expected,15);
+});
+test('balance review preserves explicit corrections and refuses ambiguous gaps, renewals and changed plans',()=>{
+ const {reviewBalance}=setup().load('balance-review');
+ const a={id:'p',name:'학생',planUnits:12,remaining:4,openingAsOf:'2026-09-21',importId:'i',updatedAt:'u'};
+ const source={id:'i',asOf:'2026-09-23',remainingCandidate:4,planUnits:12,history:[{cells:[{day:'2026-09-19',value:'8',color:''},{day:'2026-09-23',value:'9',color:''}]}]};
+ const audit={id:'a',studentId:'p',action:'import-opening-balance',at:'2026-09-21T00:00:00Z',detail:{remaining:4,asOf:'2026-09-21'}};
+ const corrected={id:'b',studentId:'p',action:'correct-remaining',at:'2026-09-29T00:00:00Z',detail:{before:4,after:20,note:'원장 확인'}};
+ const r=reviewBalance({...a,remaining:20},source,[audit,corrected],[],[]);assert.equal(r.status,'confirmed');assert.equal(r.expected,20);
+ for(const value of ['1','11','보강','8']){const other=structuredClone(source);other.history[0].cells[1].value=value;assert.equal(reviewBalance(a,other,[audit],[],[]).status,'review');}
+ assert.equal(reviewBalance({...a,planUnits:8},source,[audit],[],[]).status,'review');
+ assert.equal(reviewBalance(a,source,[audit],[{studentId:'p',day:'2026-09-23',units:0,status:'cancelled'}],[]).status,'review');
+ assert.equal(reviewBalance({...a,remaining:3},source,[audit],[],[]).status,'review');
+});
+test('reconciliation rechecks evidence atomically and cannot apply the same missing lesson twice',async()=>{
+ const s=setup();await s.seed('p',4);
+ const a=s.records.get('opsAccounts/p');Object.assign(a,{planUnits:12,openingAsOf:'2026-09-21',importId:'i'});
+ s.records.set('opsAudit/opening',{studentId:'p',action:'import-opening-balance',at:'2026-09-21T00:00:00Z',detail:{remaining:4,asOf:'2026-09-21'}});
+ // Remove seed configure audit so the fixture starts at its real opening event.
+ for(const [k,v] of s.records)if(k.startsWith('opsAudit/')&&v.action==='configure')s.records.delete(k);
+ const source={asOf:'2026-09-23',remainingCandidate:4,planUnits:12,attendanceRevision:1,history:[{cells:[{day:'2026-09-19',value:'8',color:''},{day:'2026-09-23',value:'9',color:''}]}]};s.records.set('opsImports/i',source);
+ const report=()=>s.load('balance-review').reviewBalance(s.records.get('opsAccounts/p'),{...s.records.get('opsImports/i'),id:'i'},[...s.records].filter(([k])=>k.startsWith('opsAudit/')).map(([k,v])=>({...v,id:k.split('/')[1]})),[],[]);
+ const r=report(),input={studentId:'p',remaining:3,expectedRemaining:4,expectedUpdatedAt:a.updatedAt,requestId:'reconcile-1',reconciliationFingerprint:r.fingerprint,note:r.reason};
+ assert.equal(r.status,'correct');
+ s.records.get('opsImports/i').attendanceRevision=2;
+ await assert.rejects(s.service.correctRemaining(input,'owner'),/근거가 변경/);
+ input.reconciliationFingerprint=report().fingerprint;
+ await s.service.correctRemaining(input,'owner');await s.service.correctRemaining(input,'owner');
+ assert.equal(s.records.get('opsAccounts/p').remaining,3);assert.equal(report().status,'confirmed');
+ assert.equal([...s.records.keys()].filter(k=>k.startsWith('opsNotices/')||k.startsWith('opsAttendance/')).length,0);
+});

@@ -1,3 +1,4 @@
+import { reviewBalance, type BalanceAudit, type BalanceSource } from './balance-review';
 import { changeSchedule, moveLesson } from './schedule';
 import { attendanceDays, rangeAttendance } from './attendance-range';
 import { enrollmentState, lifecycleInput, courseLifecycle } from './lifecycle';
@@ -320,6 +321,17 @@ export async function correctRemaining(input: Record<string, unknown>, actor: st
       return {accounts:[account],invoices:invoiceSnap?.exists?[invoiceSnap.data() as Invoice]:[]};
     }
     if(account.updatedAt!==input.expectedUpdatedAt || account.remaining!==input.expectedRemaining)throw Error('다른 화면에서 잔여 횟수가 변경됐습니다. 새로고침 후 다시 수정해주세요.');
+    if(input.reconciliationFingerprint){
+      const [source,events,records,invoices]=await Promise.all([
+        account.importId?tx.get(db.doc(`opsImports/${account.importId}`)):Promise.resolve(null),
+        tx.get(db.collection('opsAudit').where('studentId','==',studentId)),
+        tx.get(db.collection('opsAttendance').where('studentId','==',studentId)),
+        tx.get(db.collection('opsInvoices').where('studentId','==',studentId)),
+      ]);
+      const report=reviewBalance(account,source?.exists?{...source.data(),id:source.id} as BalanceSource:undefined,events.docs.map(d=>({...d.data(),id:d.id}) as BalanceAudit),records.docs.map(d=>({...d.data(),id:d.id}) as Attendance),invoices.docs.map(d=>({...d.data(),id:d.id}) as Invoice));
+      if(report.fingerprint!==input.reconciliationFingerprint || report.status!=='correct' || report.expected!==remaining)throw Error('점검 이후 근거가 변경됐습니다. 다시 점검해주세요.');
+    }
+
     const at=new Date(Math.max(Date.now(),Date.parse(account.updatedAt)+1)).toISOString();
     let invoice=invoiceSnap?.data() as Invoice|undefined;
     let openInvoiceId=account.openInvoiceId;

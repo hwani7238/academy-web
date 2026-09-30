@@ -1,4 +1,5 @@
 'use client';
+import { BalanceReview } from './BalanceReview';
 import { ScheduleDialog } from './ScheduleDialog';
 import { scheduleLabel } from '@/lib/operations/schedule';
 import { CloseButton } from './CloseButton';
@@ -35,6 +36,7 @@ export function Operations({ demo = false }: { demo?: boolean }) {
   const [user, setUser] = useState<User | null>(null); const [authReady, setAuthReady] = useState(demo);
   const [tab, setTab] = useState(demo ? 'today' : 'monthly'); const [day, setDay] = useState(seoulDay()); const [search, setSearch] = useState('');
   const [lifecycleTarget,setLifecycleTarget]=useState<{student:Snapshot['students'][number];status:'paused'|'withdrawn'}|null>(null);
+  const [reviewingBalances,setReviewingBalances]=useState(false);
   const [scheduleAccount,setScheduleAccount]=useState<Account|null>(null);
   const [loadedDay, setLoadedDay] = useState('');
   const [todayDate,setTodayDate]=useState(seoulDay());
@@ -138,6 +140,7 @@ export function Operations({ demo = false }: { demo?: boolean }) {
       {data.devices.map(d => <div className="invoice-row" key={d.id}><div><strong>{d.name}</strong><p>{time(d.createdAt)} 등록 · {d.active ? '사용 중' : '중지됨'}</p></div>{d.active && <button disabled={busy} onClick={() => { if (window.confirm('이 기기의 출석 권한을 중지할까요?')) click({ action: 'revoke', deviceId: d.id }); }}>사용 중지</button>}</div>)}{!data.devices.length && <div className="empty">등록된 출석 기기가 없습니다.</div>}</>}
     </section>{demo && tab === 'today' && <aside><CheckIn demo={{ lookup: digits => data.accounts.filter(a => a.active && activeIds.has(a.id) && a.checkinSuffixes.includes(digits)).map(a => ({ id: a.id, name: checkInName(a, {}) })), checkIn: id => act({ action: 'demoCheckIn', studentId: id }) }} /></aside>}</div>
     </main>
+    {reviewingBalances && user && <BalanceReview user={user} save={act} close={()=>setReviewingBalances(false)}/>}
     {scheduleAccount && <ScheduleDialog account={scheduleAccount} save={act} close={()=>setScheduleAccount(null)}/>}
     {timeAttendance && <AttendanceTimeDialog attendance={timeAttendance} busy={busy} save={act} close={() => setTimeAttendance(null)} />}
     {lifecycleTarget && <LifecycleDialog {...lifecycleTarget} save={act} close={()=>setLifecycleTarget(null)}/>}
