@@ -349,7 +349,9 @@ test('overpayment and duplicate id with changed amount fail without writes', asy
 });
 test('changing plan does not reset balance or alter existing invoice price', async () => {
   const s=setup();await s.seed();await s.service.createInvoice('student-a','owner'); const invoiceId=s.records.get('opsAccounts/student-a').openInvoiceId;
-  await s.service.configure({studentId:'student-a',planUnits:12,planAmount:210000,remaining:99,phone:'01000005678',phones:['5678']},'owner');
+  const changes = await s.service.configure({studentId:'student-a',planUnits:12,planAmount:210000,remaining:99,phone:'01000005678',phones:['5678']},'owner');
+  assert.deepEqual(changes.accounts, [s.records.get('opsAccounts/student-a')]);
+  assert.deepEqual(Object.keys(changes), ['accounts']);
   assert.equal(s.records.get('opsAccounts/student-a').remaining,1);assert.equal(s.records.get(`opsInvoices/${invoiceId}`).amount,160000);
 });
 test('prepayment adds units without losing remaining lessons', async () => {

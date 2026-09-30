@@ -2,6 +2,7 @@ import type { Snapshot, Attendance, Account, Invoice } from './model';
 import type { Lifecycle } from './lifecycle';
 export type SnapshotChanges = { lifecycle?: { studentId: string; value: Lifecycle }; attendance?: Attendance[]; accounts?: Account[]; invoices?: Invoice[] };
 function merge<T extends {id:string}>(old:T[], changed:T[] = []) {
+  if (!changed.length) return old;
   const updates = new Map(changed.map(row=>[row.id,row]));
   return [...old.filter(row=>!updates.has(row.id)), ...changed];
 }
@@ -14,4 +15,18 @@ export function applySnapshotChanges(current: Snapshot, changes: SnapshotChanges
     accounts: merge(current.accounts, changes.accounts),
     invoices: merge(current.invoices, changes.invoices).filter(i=>i.status==='open'),
   };
+}
+
+// Preserve unchanged sections across polls: a notice update should not rebuild
+// thousands of calendar cells or reset memoized attendance calculations.
+export function reconcileSnapshot(current: Snapshot | null, next: Snapshot): Snapshot {
+  if (!current) return next;
+  let changed = false;
+  const result = { ...next };
+  for (const key of Object.keys(next) as (keyof Snapshot)[]) {
+    if (JSON.stringify(current[key]) === JSON.stringify(next[key])) {
+      Object.assign(result, { [key]: current[key] });
+    } else { changed = true; }
+  }
+  return changed || Object.keys(current).length !== Object.keys(next).length ? result : current;
 }

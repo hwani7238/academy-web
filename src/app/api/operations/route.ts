@@ -3,27 +3,40 @@ import { attendanceSequence } from '@/lib/operations/attendance-sequence';
 import type { Account, Attendance } from '@/lib/operations/model';
 import { courseLifecycle } from '@/lib/operations/lifecycle';
 import { importSources } from '@/lib/operations/import-cache';
-import { database, manager, sameOrigin, failure } from '@/lib/operations/auth';
+import { database, manager, sameOrigin, failure, hash } from '@/lib/operations/auth';
 import * as service from '@/lib/operations/service';
 import { noticeConfigured, processNotices } from '@/lib/operations/notices';
 import { seoulDay, validDay, type Snapshot } from '@/lib/operations/model';
 import { after } from 'next/server';
+import { serverTiming } from '@/lib/operations/server-timing';
 export const runtime = 'nodejs';
 export const maxDuration = 60;
 export async function GET(request: Request) {
   try {
-    await manager(request); const db = database();
+    const timing = serverTiming();
+    await timing.measure('auth', () => manager(request)); const db = database();
     const day = new URL(request.url).searchParams.get('day') || seoulDay();
     validDay(day);
+    const params = new URL(request.url).searchParams;
+    // Older clients can still request an unconditional snapshot.
+    let revision: string | undefined;
+    if (params.get('sync') === '1') {
+      const latest = await timing.measure('revision', () => db.collection('opsAttendance').orderBy('updatedAt', 'desc').limit(1).select('updatedAt').get());
+      revision = hash(JSON.stringify(latest.docs.map(d => [d.id, d.data().updatedAt, d.updateTime])));
+      if (params.get('since') === revision) return Response.json({ unchanged: true, revision }, { headers: { 'Cache-Control': 'no-store', 'Server-Timing': timing.header() } });
+    }
     const month = day.slice(0, 7); const end = new Date(`${month}-01T00:00:00Z`); end.setUTCMonth(end.getUTCMonth() + 1);
     const [students, accounts, attendance, invoices, payments, notices, devices, imports, priorAttendance, cycleInvoices] = await Promise.all([
-      db.collection('students').select('name', 'phone', 'instruments', 'instrument', 'lifecycle', 'courseLifecycles', 'operationsCourseGroups', 'courseUpdatedAt').get(), db.collection('opsAccounts').get(),
-      db.collection('opsAttendance').where('day', '>=', `${month}-01`).where('day', '<', end.toISOString().slice(0, 10)).get(),
-      db.collection('opsInvoices').where('status', '==', 'open').get(),
-      db.collection('opsPayments').orderBy('at', 'desc').limit(100).get(),
-      db.collection('opsNotices').orderBy('createdAt', 'desc').limit(50).get(), db.collection('opsDevices').get(), importSources(),
-      db.collection('opsAttendance').where('day', '<', `${month}-01`).select('studentId', 'day', 'units', 'status').get(),
-      db.collection('opsInvoices').where('creditUnits', '==', 0).select('studentId', 'cycleStart', 'status').get(),
+      timing.measure('students', () => db.collection('students').select('name', 'phone', 'instruments', 'instrument', 'lifecycle', 'courseLifecycles', 'operationsCourseGroups', 'courseUpdatedAt').get()),
+      timing.measure('accounts', () => db.collection('opsAccounts').get()),
+      timing.measure('attendance', () => db.collection('opsAttendance').where('day', '>=', `${month}-01`).where('day', '<', end.toISOString().slice(0, 10)).get()),
+      timing.measure('invoices', () => db.collection('opsInvoices').where('status', '==', 'open').get()),
+      timing.measure('payments', () => db.collection('opsPayments').orderBy('at', 'desc').limit(100).get()),
+      timing.measure('notices', () => db.collection('opsNotices').orderBy('createdAt', 'desc').limit(50).get()),
+      timing.measure('devices', () => db.collection('opsDevices').get()),
+      timing.measure('imports', importSources),
+      timing.measure('history', () => db.collection('opsAttendance').where('day', '<', `${month}-01`).select('studentId', 'day', 'units', 'status').get()),
+      timing.measure('cycles', () => db.collection('opsInvoices').where('creditUnits', '==', 0).select('studentId', 'cycleStart', 'status').get()),
     ]);
     const studentById = new Map(students.docs.map(d => [d.id, d]));
     const accountById = new Map(accounts.docs.map(d => [d.id, d.data()]));
@@ -58,7 +71,7 @@ export async function GET(request: Request) {
     const cycleStarts = cycleInvoices.docs.map(d=>d.data()).filter(v=>v.status!=='cancelled' && typeof v.cycleStart==='string').map(v=>({studentId:String(v.studentId),day:String(v.cycleStart)}));
     const beforeMonth = `${month}-01`;
     const sequenceContext = { positions: attendanceSequence(accounts.docs.map(d=>({...d.data(),id:d.id}) as Account), priorAttendance.docs.map(d=>d.data() as Attendance), allLegacy.filter(r=>r.day<beforeMonth), {positions:{},cycleStarts:cycleStarts.filter(r=>r.day<beforeMonth)}).positions, cycleStarts:cycleStarts.filter(r=>r.day>=beforeMonth && r.day<end.toISOString().slice(0,10)) };
-    return Response.json({ day, sequenceContext, legacyAttendance: allLegacy.filter(r=>r.day.startsWith(`${month}-`)), configured: noticeConfigured(), students: students.docs.flatMap<Snapshot['students'][number]>(d => {
+    return Response.json({ ...(revision ? { revision } : {}), day, sequenceContext, legacyAttendance: allLegacy.filter(r=>r.day.startsWith(`${month}-`)), configured: noticeConfigured(), students: students.docs.flatMap<Snapshot['students'][number]>(d => {
       const raw = d.data(); const base = { courseUpdatedAt:raw.courseUpdatedAt || '', name: raw.name || '학생', phone: raw.phone || '', ...(raw.lifecycle ? { lifecycle: raw.lifecycle } : {}) };
       // Preserve existing single-account balances; do not silently duplicate them.
       if (accountById.has(d.id)) { const account = accountById.get(d.id)!; const attendanceGroup = courseGroup({ ...account, name: account.name || base.name }, raw, sourcesByStudent.get(d.id)); return [{ ...base, id: d.id, lifecycle:courseLifecycle(raw,d.id), instruments: service.studentSubjects(raw), ...(attendanceGroup ? { attendanceGroup } : {}) }]; }
@@ -66,7 +79,7 @@ export async function GET(request: Request) {
       if (!subjects.length) return [{ ...base, id: d.id, lifecycle:courseLifecycle(raw,d.id), instruments: [] }];
       const known = (subjectsByStudent.get(d.id) || []);
       return [...new Set([...subjects, ...known])].map(subject => { const id = service.enrollmentId(d.id, subject); const overrideGroup=raw.operationsCourseGroups?.[subject]; const display = overrideGroup ? (overrideGroup.includes('피아노')?'피아노':overrideGroup) : accountById.get(id)?.displaySubject || subject; const attendanceGroup = courseGroup({ ...accountById.get(id), subject, name: base.name }, raw, sourcesByStudent.get(d.id)); return { ...base, id, lifecycle:courseLifecycle(raw,id), sourceStudentId: d.id, subject, ...(attendanceGroup ? { attendanceGroup } : {}), name: `${base.name} · ${display}`, instruments: [display] }; });
-    }), accounts: rows(accounts), attendance: namedRows(attendance), invoices: namedRows(invoices), payments: rows(payments), notices: notices.docs.map(d => { const n = d.data(); return { id: d.id, studentId: n.studentId, name: n.name, kind: n.kind, status: n.status, createdAt: n.createdAt, requestId: n.requestId || '', error: n.error || '' }; }), devices: devices.docs.map(d => { const v = d.data(); return { id: d.id, name: v.name, active: v.active && v.expiresAt > Date.now(), createdAt: v.createdAt }; }) }, { headers: { 'Cache-Control': 'no-store' } });
+    }), accounts: rows(accounts), attendance: namedRows(attendance), invoices: namedRows(invoices), payments: rows(payments), notices: notices.docs.map(d => { const n = d.data(); return { id: d.id, studentId: n.studentId, name: n.name, kind: n.kind, status: n.status, createdAt: n.createdAt, requestId: n.requestId || '', error: n.error || '' }; }), devices: devices.docs.map(d => { const v = d.data(); return { id: d.id, name: v.name, active: v.active && v.expiresAt > Date.now(), createdAt: v.createdAt }; }) }, { headers: { 'Cache-Control': 'no-store', 'Server-Timing': timing.header() } });
   } catch (error) { return failure(error); }
 }
 export async function POST(request: Request) {
@@ -80,7 +93,7 @@ export async function POST(request: Request) {
       case 'registerStudent': return Response.json(await service.registerStudent(input, actor));
       case 'correctRemaining': return Response.json({ok:true,changes:await service.correctRemaining(input,actor)});
       case 'manageCourse': await service.manageCourse(input,actor); return Response.json({ok:true});
-      case 'configure': await service.configure(input, actor); break;
+      case 'configure': return Response.json({ok:true,changes:await service.configure(input, actor)});
       case 'recordAttendanceRange': return Response.json({ok:true,changes:await service.recordAttendanceRange(input,actor)});
       case 'recordAttendance': {
         const changes=await service.recordAttendance(input, actor);

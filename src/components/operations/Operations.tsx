@@ -4,12 +4,12 @@ import { ScheduleDialog } from './ScheduleDialog';
 import { scheduleLabel } from '@/lib/operations/schedule';
 import { CloseButton } from './CloseButton';
 import { PaymentAmountInput } from './PaymentAmountInput';
-import { applySnapshotChanges, type SnapshotChanges } from '@/lib/operations/snapshot-changes';
+import { applySnapshotChanges, reconcileSnapshot, type SnapshotChanges } from '@/lib/operations/snapshot-changes';
 import { autoRefresh, ATTENDANCE_POLL_MS } from '@/lib/operations/auto-refresh';
 import { enrollmentState } from '@/lib/operations/lifecycle';
 import { LifecycleDialog } from './LifecycleDialog';
 
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { User } from 'firebase/auth';
 import { Account, Attendance, Invoice, Snapshot, METHODS, seoulDay, ATTENDANCE_LABELS } from '@/lib/operations/model';
 import { AttendanceTimeDialog } from './AttendanceTimeDialog';
@@ -53,27 +53,40 @@ export function Operations({ demo = false }: { demo?: boolean }) {
   const [inactiveSubject, setInactiveSubject] = useState('');
   const [busy, setBusy] = useState(false); const [error, setError] = useState(''); const [message, setMessage] = useState(''); const [panel, setPanel] = useState<Panel>(null); const [pairCode, setPairCode] = useState('');
   useEffect(() => { if (demo) return; let stopped = false; let off: (() => void) | undefined;
-    void Promise.all([import('@/lib/firebase'), import('firebase/auth')]).then(([f, a]) => { if (!stopped) off = a.onAuthStateChanged(f.auth, u => { setUser(u); setAuthReady(true); }); });
+    void Promise.all([import('@/lib/firebase-auth'), import('firebase/auth')]).then(([f, a]) => { if (!stopped) off = a.onAuthStateChanged(f.auth, u => { setUser(u); setAuthReady(true); }); });
     return () => { stopped = true; off?.(); };
   }, [demo]);
-  const api = async (body?: Record<string, unknown>) => {
+  const api = useCallback(async (body?: Record<string, unknown>, since?: string | null) => {
     if (!user) throw new Error('원장 계정으로 로그인해주세요.');
-    const response = await fetch(`/api/operations?day=${day}`, { method: body ? 'POST' : 'GET', cache: 'no-store', ...(!body ? { signal: AbortSignal.timeout(20000) } : {}), headers: { 'Authorization': `Bearer ${await user.getIdToken()}`, ...(body ? { 'Content-Type': 'application/json' } : {}) }, ...(body ? { body: JSON.stringify(body) } : {}) });
+    const response = await fetch(`/api/operations?day=${day}${body || since === null ? '' : `&sync=1${since ? `&since=${encodeURIComponent(since)}` : ''}`}`, { method: body ? 'POST' : 'GET', cache: 'no-store', ...(!body ? { signal: AbortSignal.timeout(20000) } : {}), headers: { 'Authorization': `Bearer ${await user.getIdToken()}`, ...(body ? { 'Content-Type': 'application/json' } : {}) }, ...(body ? { body: JSON.stringify(body) } : {}) });
     const result = await response.json(); if (!response.ok) throw new Error(result.error); return result;
-  };
-  const refresh = async (force = false) => { if (mutation.current && !force) { pendingRefresh.current = true; return false; } const version = ++refreshVersion.current; try { const next = await api(); if (version !== refreshVersion.current) return false; if (JSON.stringify(dataRef.current) !== JSON.stringify(next)) { setData(next); dataRef.current = next; } setLoadedDay(day); setError(''); return true; } catch (e) { if (version === refreshVersion.current) setError(e instanceof Error ? e.message : '불러오지 못했습니다.'); return false; } };
+  }, [user, day]);
+  const refresh = useCallback(async (force = false, since?: string) => {
+    if (mutation.current && !force) { pendingRefresh.current = true; return false as const; }
+    const version = ++refreshVersion.current;
+    try {
+      const result = await api(undefined, force ? null : since);
+      if (version !== refreshVersion.current) return false as const;
+      if (!result.unchanged) {
+        const snapshot = { ...result };
+        delete snapshot.revision;
+        const next = reconcileSnapshot(dataRef.current, snapshot as Snapshot);
+        if (next !== dataRef.current) { setData(next); dataRef.current = next; }
+        setLoadedDay(day);
+      }
+      setError('');
+      return { revision: result.revision as string, refreshed: !result.unchanged };
+    } catch (e) {
+      if (version === refreshVersion.current) setError(e instanceof Error ? e.message : '불러오지 못했습니다.');
+      return false as const;
+    }
+  }, [api, day]);
   latestRefresh.current = () => { void refresh(); };
   useEffect(() => {
     if (demo || !user) return;
-    const controller = new AbortController();
     const live = autoRefresh({
       visible: () => document.visibilityState === 'visible',
-      refresh: () => refresh(),
-      revision: async () => {
-        const response = await fetch('/api/operations/revision', { cache: 'no-store', signal: AbortSignal.any([controller.signal, AbortSignal.timeout(10000)]), headers: { Authorization: `Bearer ${await user.getIdToken()}` } });
-        if (!response.ok) throw new Error('출석 변경 확인 실패');
-        return (await response.json()).revision as string;
-      },
+      refresh: since => refresh(false, since),
     });
     const resume = () => { void live.check(true); };
     resume();
@@ -83,15 +96,14 @@ export function Operations({ demo = false }: { demo?: boolean }) {
     window.addEventListener('online', resume);
     const invalidateRefresh = () => { refreshVersion.current++; };
     return () => {
-      live.stop(); controller.abort(); clearInterval(timer); invalidateRefresh();
+      live.stop(); clearInterval(timer); invalidateRefresh();
       document.removeEventListener('visibilitychange', resume);
       window.removeEventListener('focus', resume);
       window.removeEventListener('online', resume);
     };
   // Reconnect only when the user or selected date changes; keep forms and filters mounted.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [demo, user, day]);
-  const act = async (input: Record<string, unknown>) => {
+  }, [demo, user, day, refresh]);
+  const act = useCallback(async (input: Record<string, unknown>) => {
     if (mutation.current) throw new Error('앞선 저장이 처리 중입니다.');
     mutation.current = true; refreshVersion.current++;
     setBusy(true); setError(''); setMessage('');
@@ -108,7 +120,7 @@ export function Operations({ demo = false }: { demo?: boolean }) {
       setMessage(input.action === 'process' ? (demo ? '체험에서는 실제 메시지를 보내지 않습니다.' : '발송 대기 항목을 처리했습니다. 결과를 확인해주세요.') : '저장했습니다.');
       return result;
     } catch (e) { setError(e instanceof Error ? e.message : '처리하지 못했습니다.'); throw e; } finally { mutation.current = false; setBusy(false); if (pendingRefresh.current) { pendingRefresh.current = false; latestRefresh.current(); } }
-  };
+  }, [api, demo, refresh]);
   const click = (input: Record<string, unknown>) => { void act(input).catch(() => {}); };
   const submit = (e: React.FormEvent<HTMLFormElement>, action: string, extra: Record<string, unknown>) => {
     e.preventDefault(); const f = new FormData(e.currentTarget); const values = Object.fromEntries(f.entries());

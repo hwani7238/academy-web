@@ -86,7 +86,7 @@ export async function configure(input: Record<string, unknown>, actor: string) {
   if (!codes.length || codes.length > 5) throw new Error('출석 번호를 1~5개 등록해주세요.');
   const phone = text(input.phone, 30).replace(/[^0-9]/g, '');
   if (!/^0[0-9]{8,10}$/.test(phone)) throw new Error('알림 수신 전화번호를 확인해주세요.');
-  await db.runTransaction(async tx => {
+  return db.runTransaction(async tx => {
     const [existing, student] = await Promise.all([tx.get(ref), tx.get(db.doc(`students/${sourceStudentId}`))]);
     if (!student.exists) throw new Error('학생을 찾을 수 없습니다.');
     if (subject && !studentSubjects(student.data() || {}).includes(subject)) throw new Error('등록된 과목을 확인해주세요.');
@@ -95,8 +95,10 @@ export async function configure(input: Record<string, unknown>, actor: string) {
     const overrideGroup=student.data()?.operationsCourseGroups?.[subject] as string|undefined;
     const overrideSubject=overrideGroup?(overrideGroup.includes('피아노')?'피아노':overrideGroup):undefined;
     const remaining = old ? old.remaining : integer(input.remaining, -1000, 1000, '현재 남은 횟수');
-    tx.set(ref, { id, ...(old?.schedule ? {schedule:old.schedule} : {}), ...(old?.importId ? { importId: old.importId, openingAsOf: old.openingAsOf } : {}), ...(old?.attendanceGroup ? { attendanceGroup: old.attendanceGroup } : {}), ...(old?.displaySubject ? { displaySubject: old.displaySubject } : {}), ...(subject ? { sourceStudentId, subject } : {}), name: subject ? `${student.data()?.name || '학생'} · ${subject}` : student.data()?.name || '학생', phone, checkinSuffixes: codes, planUnits, planAmount, remaining, openInvoiceId: old?.openInvoiceId || null, active: input.active !== false, autoBilling: input.autoBilling === true, updatedAt: now(), ...(overrideGroup?{attendanceGroup:overrideGroup,displaySubject:overrideSubject,name:`${student.data()?.name} · ${overrideSubject}`}:{}) });
+    const saved = { id, ...(old?.schedule ? {schedule:old.schedule} : {}), ...(old?.importId ? { importId: old.importId, openingAsOf: old.openingAsOf } : {}), ...(old?.attendanceGroup ? { attendanceGroup: old.attendanceGroup } : {}), ...(old?.displaySubject ? { displaySubject: old.displaySubject } : {}), ...(subject ? { sourceStudentId, subject } : {}), name: subject ? `${student.data()?.name || '학생'} · ${subject}` : student.data()?.name || '학생', phone, checkinSuffixes: codes, planUnits, planAmount, remaining, openInvoiceId: old?.openInvoiceId || null, active: input.active !== false, autoBilling: input.autoBilling === true, updatedAt: now(), ...(overrideGroup?{attendanceGroup:overrideGroup,displaySubject:overrideSubject,name:`${student.data()?.name} · ${overrideSubject}`}:{}) };
+    tx.set(ref, saved);
     audit(tx, db, actor, 'configure', id, { planUnits, planAmount, remaining, active: input.active !== false, autoBilling: input.autoBilling === true });
+    return { accounts: [saved as Account] };
   });
 }
 export async function checkIn(studentId: string, digits: string, actor: string) {
