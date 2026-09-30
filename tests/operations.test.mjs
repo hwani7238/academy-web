@@ -691,3 +691,61 @@ test('announcement delivery lookup distinguishes provider acceptance from delive
  const draft=await s.noticeService.saveAnnouncement(s.input,'owner');await s.noticeService.sendAnnouncement({id:draft.id,confirmed:true},'owner');
  const result=await s.noticeService.refreshAnnouncement(draft.id);assert.equal(result.status,'partial');assert.deepEqual(result.recipients.map(r=>r.status),['delivered','failed']);assert.equal(sends,1);
 });
+
+test('effective-dated weekday changes preserve history, scheduled changes and one-off moves',()=>{
+ const {changeSchedule,plannedLesson,ruleOn,moveLesson}=setup().load('schedule');
+ const today='2026-09-30';
+ let s=changeSchedule(undefined,{start:'2026-10-01',weekdays:[2,4]},'a',today);
+ assert.deepEqual(ruleOn(s,'2026-10-06').weekdays,[2,4]);
+ assert.ok(plannedLesson(s,'2026-10-01'));assert.equal(plannedLesson(s,'2026-10-02'),null);
+ s=moveLesson(s,{from:'2026-10-01',to:'2026-10-02',expectedUpdatedAt:'a'},[],'b',today);
+ assert.equal(plannedLesson(s,'2026-10-01'),null);assert.equal(plannedLesson(s,'2026-10-02').origin,'2026-10-01');
+ s=changeSchedule(s,{start:'2026-10-12',weekdays:[1,3,5],expectedUpdatedAt:'b'},'c',today);
+ s=changeSchedule(s,{start:'2026-11-01',weekdays:[2,4],expectedUpdatedAt:'c'},'d',today);
+ assert.deepEqual(ruleOn(s,'2026-10-08').weekdays,[2,4]);assert.deepEqual(ruleOn(s,'2026-10-15').weekdays,[1,3,5]);assert.deepEqual(ruleOn(s,'2026-11-03').weekdays,[2,4]);
+ assert.equal(plannedLesson(s,'2026-10-02').origin,'2026-10-01');
+ s=changeSchedule(s,{start:'2026-10-12',remove:true,expectedUpdatedAt:'d'},'e',today);
+ assert.deepEqual(ruleOn(s,'2026-10-15').weekdays,[2,4]);assert.deepEqual(ruleOn(s,'2026-11-03').weekdays,[2,4]);
+ s=moveLesson(s,{from:'2026-10-02',to:'2026-10-01',expectedUpdatedAt:'e'},[],'f',today);
+ assert.equal(s.moves.length,0);assert.equal(plannedLesson(s,'2026-10-01').moved,false);
+ assert.throws(()=>changeSchedule(s,{start:'2026-09-01',weekdays:[1],expectedUpdatedAt:'f'},'x',today),/지난 일정/);
+ assert.throws(()=>changeSchedule(s,{start:'2026-10-01',weekdays:[7],expectedUpdatedAt:'f'},'x',today),/요일/);
+ assert.throws(()=>changeSchedule(s,{start:'2026-10-01',weekdays:[1],expectedUpdatedAt:'old'},'x',today),/변경/);
+});
+test('moving planned lessons rejects occupied, attended, unavailable or stale dates without changing the schedule',()=>{
+ const {changeSchedule,moveLesson}=setup().load('schedule'),today='2026-09-30';
+ const old=changeSchedule(undefined,{start:'2026-10-01',weekdays:[2,4]},'a',today);
+ const input={from:'2026-10-01',to:'2026-10-02',expectedUpdatedAt:'a'};
+ for(const patch of [{to:'2026-10-06'},{from:'2026-10-03'},{to:'2026-09-29'},{to:'2026-10-01'},{expectedUpdatedAt:'stale'}])assert.throws(()=>moveLesson(old,{...input,...patch},[],'b',today));
+ assert.throws(()=>moveLesson(old,input,[{day:input.from,status:'present',units:1}],'b',today),/출석/);
+ assert.throws(()=>moveLesson(old,input,[{day:input.to,status:'travel',units:0}],'b',today),/여행/);
+ const next=moveLesson(old,input,[{day:input.from,status:'travel',units:0}],'b',today);
+ assert.equal(next.moves.length,1);assert.equal(old.moves.length,0);
+});
+test('schedule service is course-scoped, audited, concurrency-safe and preserved by tuition configuration',async()=>{
+ const s=setup();await s.seed('piano',8);await s.seed('drums',4);
+ const {seoulDay}=s.load('model');const start='2999-01-01';
+ await s.service.saveSchedule({action:'saveSchedule',studentId:'piano',start,weekdays:[0,1,2,3,4,5,6]},'owner');
+ let a=s.records.get('opsAccounts/piano');const revision=a.schedule.updatedAt;
+ assert.equal(a.remaining,8);assert.equal(a.planUnits,8);assert.equal(a.planAmount,160000);assert.equal(s.records.get('opsAccounts/drums').schedule,undefined);
+ const move={action:'moveLesson',studentId:'piano',from:start,to:seoulDay(),expectedUpdatedAt:revision};
+ const results=await Promise.allSettled([s.service.saveSchedule(move,'owner'),s.service.saveSchedule(move,'owner')]);
+ assert.equal(results.filter(r=>r.status==='fulfilled').length,1);
+ a=s.records.get('opsAccounts/piano');assert.equal(a.schedule.moves.length,1);
+ assert.equal([...s.records.keys()].filter(k=>/^ops(Attendance|Invoices|Payments|Notices)\//.test(k)).length,0);
+ const schedule=structuredClone(a.schedule);
+ await s.service.configure({studentId:'piano',planUnits:12,planAmount:210000,remaining:99,phone:'01000001234',phones:['1234']},'owner');
+ assert.deepEqual(s.records.get('opsAccounts/piano').schedule,schedule);assert.equal(s.records.get('opsAccounts/piano').remaining,8);
+ const changes={accounts:[s.records.get('opsAccounts/piano')]};
+ const applied=s.load('snapshot-changes').applySnapshotChanges({day:'2026-10-01',accounts:[],students:[],attendance:[],invoices:[]},changes);
+ assert.deepEqual(applied.accounts[0].schedule,schedule);
+ assert.equal([...s.records.values()].filter(v=>['lesson-schedule','move-lesson'].includes(v.action)).length,2);
+});
+test('returning an individually moved lesson after changing weekdays preserves the lesson',()=>{
+ const {changeSchedule,moveLesson,plannedLesson}=setup().load('schedule'),today='2026-09-30';
+ let s=changeSchedule(undefined,{start:'2026-10-01',weekdays:[4]},'a',today);
+ s=moveLesson(s,{from:'2026-10-01',to:'2026-10-02',expectedUpdatedAt:'a'},[],'b',today);
+ s=changeSchedule(s,{start:'2026-10-01',weekdays:[1],expectedUpdatedAt:'b'},'c',today);
+ s=moveLesson(s,{from:'2026-10-02',to:'2026-10-01',expectedUpdatedAt:'c'},[],'d',today);
+ assert.ok(plannedLesson(s,'2026-10-01'));assert.equal(plannedLesson(s,'2026-10-02'),null);
+});

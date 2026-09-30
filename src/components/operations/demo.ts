@@ -1,3 +1,4 @@
+import { changeSchedule, moveLesson } from '@/lib/operations/schedule';
 import { rangeAttendance } from '@/lib/operations/attendance-range';
 import { enrollmentState, lifecycleInput } from '@/lib/operations/lifecycle';
 import { correctedArrival } from '@/lib/operations/attendance-time';
@@ -26,7 +27,11 @@ export function demoAction(current: Snapshot, input: Record<string, unknown>): {
     if (a.autoBilling) enqueue(a, `billing_${id}`, 'billing');
   };
   let result: Record<string, unknown> = { ok: true };
-  if(input.action==='renameStudent'){
+  if(input.action==='saveSchedule'||input.action==='moveLesson'){
+    if(!account)throw Error('먼저 수강 등록을 완료해주세요.');
+    const stamp=new Date(Math.max(Date.now(),Date.parse(account.schedule?.updatedAt||'')+1||0)).toISOString();
+    account.schedule=input.action==='moveLesson'?moveLesson(account.schedule,input,data.attendance.filter(r=>r.studentId===account.id),stamp):changeSchedule(account.schedule,input,stamp);
+  } else if(input.action==='renameStudent'){
     const source=String(input.sourceStudentId),siblings=data.students.filter(s=>(s.sourceStudentId||s.id)===source),target=siblings.find(s=>s.id===input.studentId);
     const name=typeof input.name==='string'?input.name.trim():'';
     if(!target||!name||name.length>100||/[\r\n\u0000]/.test(name))throw Error('학생 이름을 확인해주세요.');
@@ -95,7 +100,7 @@ export function demoAction(current: Snapshot, input: Record<string, unknown>): {
     result = { name: checkInName(account, {}), duplicate: false };
   } else if (input.action === 'configure') {
     const student = data.students.find(s => s.id === input.studentId)!;
-    const next: Account = { id: student.id, sourceStudentId: student.sourceStudentId, subject: student.subject, name: student.name, phone: String(input.phone), checkinSuffixes: suffixes(input.phones), planUnits: Number(input.planUnits), planAmount: Number(input.planAmount), remaining: account?.remaining ?? Number(input.remaining), openInvoiceId: account?.openInvoiceId || null, active: input.active !== false, autoBilling: input.autoBilling === true, updatedAt: at };
+    const next: Account = { ...(account?.schedule?{schedule:account.schedule}:{}), id: student.id, sourceStudentId: student.sourceStudentId, subject: student.subject, name: student.name, phone: String(input.phone), checkinSuffixes: suffixes(input.phones), planUnits: Number(input.planUnits), planAmount: Number(input.planAmount), remaining: account?.remaining ?? Number(input.remaining), openInvoiceId: account?.openInvoiceId || null, active: input.active !== false, autoBilling: input.autoBilling === true, updatedAt: at };
     data.accounts = [...data.accounts.filter(a => a.id !== student.id), next];
   } else if(input.action==='currentCycleInvoice'){
     if(!account || account.openInvoiceId)throw Error('수강권과 기존 청구를 확인해주세요.');

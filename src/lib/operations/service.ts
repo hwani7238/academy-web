@@ -1,3 +1,4 @@
+import { changeSchedule, moveLesson } from './schedule';
 import { attendanceDays, rangeAttendance } from './attendance-range';
 import { enrollmentState, lifecycleInput, courseLifecycle } from './lifecycle';
 import { checkInName } from './course-label';
@@ -96,7 +97,7 @@ export async function configure(input: Record<string, unknown>, actor: string) {
     const overrideGroup=student.data()?.operationsCourseGroups?.[subject] as string|undefined;
     const overrideSubject=overrideGroup?(overrideGroup.includes('피아노')?'피아노':overrideGroup):undefined;
     const remaining = old ? old.remaining : integer(input.remaining, -1000, 1000, '현재 남은 횟수');
-    tx.set(ref, { id, ...(old?.importId ? { importId: old.importId, openingAsOf: old.openingAsOf } : {}), ...(old?.attendanceGroup ? { attendanceGroup: old.attendanceGroup } : {}), ...(old?.displaySubject ? { displaySubject: old.displaySubject } : {}), ...(subject ? { sourceStudentId, subject } : {}), name: subject ? `${student.data()?.name || '학생'} · ${subject}` : student.data()?.name || '학생', phone, checkinSuffixes: codes, planUnits, planAmount, remaining, openInvoiceId: old?.openInvoiceId || null, active: input.active !== false, autoBilling: input.autoBilling === true, updatedAt: now(), ...(overrideGroup?{attendanceGroup:overrideGroup,displaySubject:overrideSubject,name:`${student.data()?.name} · ${overrideSubject}`}:{}) });
+    tx.set(ref, { id, ...(old?.schedule ? {schedule:old.schedule} : {}), ...(old?.importId ? { importId: old.importId, openingAsOf: old.openingAsOf } : {}), ...(old?.attendanceGroup ? { attendanceGroup: old.attendanceGroup } : {}), ...(old?.displaySubject ? { displaySubject: old.displaySubject } : {}), ...(subject ? { sourceStudentId, subject } : {}), name: subject ? `${student.data()?.name || '학생'} · ${subject}` : student.data()?.name || '학생', phone, checkinSuffixes: codes, planUnits, planAmount, remaining, openInvoiceId: old?.openInvoiceId || null, active: input.active !== false, autoBilling: input.autoBilling === true, updatedAt: now(), ...(overrideGroup?{attendanceGroup:overrideGroup,displaySubject:overrideSubject,name:`${student.data()?.name} · ${overrideSubject}`}:{}) });
     audit(tx, db, actor, 'configure', id, { planUnits, planAmount, remaining, active: input.active !== false, autoBilling: input.autoBilling === true });
   });
 }
@@ -401,5 +402,31 @@ export async function manageCourse(input:Record<string,unknown>,actor:string){
    if(account)tx.update(ref,{attendanceGroup:group,displaySubject,name:`${student.name} · ${displaySubject}`,updatedAt:at});
   }
   audit(tx,db,actor,'manage-course',id,{mode:input.mode,subject,before:groups[subject]||subject,group});
+ });
+}
+
+// Schedule edits never change attendance, balances, invoices or notifications.
+export async function saveSchedule(input: Record<string, unknown>, actor: string) {
+ const id=key(input.studentId),db=database(),ref=db.doc(`opsAccounts/${id}`);
+ return db.runTransaction(async tx=>{
+  const account=(await tx.get(ref)).data() as Account|undefined;
+  if(!account)throw Error('먼저 수강 등록을 완료해주세요.');
+  const stamp=new Date(Math.max(Date.now(),Date.parse(account.schedule?.updatedAt||'')+1||0)).toISOString();
+  let schedule;
+  if(input.action==='moveLesson'){
+   const from=validDay(input.from),to=validDay(input.to);
+   const records=(await Promise.all([from,to].map(day=>tx.get(db.doc(`opsAttendance/${id}_${day}`))))).filter(d=>d.exists).map(d=>d.data() as Attendance);
+   const imports=await tx.get(db.collection('opsImports').where('matchedStudentId','==',account.sourceStudentId||id));
+   for(const doc of imports.docs){const source=doc.data();
+    if(doc.id!==account.importId && (!account.subject || !resolveImportedSubjects([account.subject],source.subject).length))continue;
+    for(const history of source.history||[])for(const cell of history.cells||[]){
+     if([from,to].includes(cell.day) && cell.day<=(source.attendanceCutoffs?.[cell.day.slice(0,7)]||source.asOf) && !records.some(r=>r.day===cell.day && r.status==='cancelled'))throw Error('이전 장부 기록이 있는 날짜는 옮길 수 없습니다.');
+    }
+   }
+   schedule=moveLesson(account.schedule,input,records,stamp);
+  }else schedule=changeSchedule(account.schedule,input,stamp);
+  tx.update(ref,{schedule});
+  audit(tx,db,actor,input.action==='moveLesson'?'move-lesson':'lesson-schedule',id,{before:account.schedule||null,after:schedule});
+  return {accounts:[{...account,id,schedule}]};
  });
 }
