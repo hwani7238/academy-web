@@ -950,3 +950,51 @@ test('paid first lessons are pink while unpaid first lessons stay purple',()=>{
  assert.equal(appearance({...row,color:'FFD9D9D9'},{remaining:11},inv).tone,'absent');
  assert.equal(appearance({...row,value:'2',color:'FFFF9900'},{remaining:11},undefined).tone,'makeup');
 });
+
+test('October forecasts follow weekday rules and academy operating exceptions without changing balances',()=>{
+ const {attendanceForecast:forecast}=setup().load('attendance-forecast');
+ const schedule={rules:[{start:'2026-10-01',weekdays:[1,3,5,6]}],moves:[],updatedAt:'a'};
+ const a={id:'p',active:true,planUnits:8,remaining:2,schedule};
+ const dates=Array.from({length:31},(_,i)=>`2026-10-${String(i+1).padStart(2,'0')}`);
+ const context={positions:{p:6},cycleStarts:[]};
+ const before=structuredClone(a);
+ const result=forecast([a],[],[],context,dates,'2026-09-30');
+ assert.equal(result.get('p_2026-10-02'),'7');
+ assert.equal(result.get('p_2026-10-03'),'8');
+ assert.equal(result.has('p_2026-10-05'),false);
+ assert.equal(result.get('p_2026-10-07'),'1');
+ assert.equal(result.has('p_2026-10-09'),false);
+ assert.equal(result.get('p_2026-10-10'),'2');
+ assert.deepEqual(a,before);assert.deepEqual(context.positions,{p:6});
+ assert.equal(forecast([{...a,schedule:undefined}],[],[],context,dates,'2026-09-30').size,0);
+ assert.equal(forecast([{...a,active:false}],[],[],context,dates,'2026-09-30').size,0);
+ const changed={...a,schedule:{...schedule,rules:[schedule.rules[0],{start:'2026-10-12',weekdays:[2,4]}],moves:[{from:'2026-10-02',to:'2026-10-01'}]}};
+ const moved=forecast([changed],[],[],context,dates,'2026-09-30');
+ assert.equal(moved.get('p_2026-10-01'),'7');assert.equal(moved.has('p_2026-10-02'),false);
+ assert.equal(moved.has('p_2026-10-12'),false);assert.equal(moved.has('p_2026-10-13'),true);
+});
+test('actual attendance replaces forecasts and later forecasts use real deductions, leave, and renewal dates',()=>{
+ const s=setup(),{attendanceForecast:forecast}=s.load('attendance-forecast'),{attendanceSequence:sequence}=s.load('attendance-sequence');
+ const a={id:'p',active:true,planUnits:8,remaining:2,schedule:{rules:[{start:'2026-10-01',weekdays:[1,3,5,6]}],moves:[]}};
+ const dates=Array.from({length:15},(_,i)=>`2026-10-${String(i+1).padStart(2,'0')}`),context={positions:{p:6},cycleStarts:[]};
+ const row=(day,units,status)=>({studentId:'p',day,units,status});
+ const records=[row('2026-10-02',2,'present'),row('2026-10-03',0,'absent'),row('2026-10-07',0,'travel')];
+ const result=forecast([a],records,[],context,dates,'2026-10-02');
+ for(const r of records)assert.equal(result.has(`p_${r.day}`),false);
+ assert.equal(sequence([a],records,[],context).labels.get('p_2026-10-02'),'7·8');
+ assert.equal(result.get('p_2026-10-10'),'1');
+ // Unrecorded past lessons are never counted as if the student attended.
+ assert.equal(forecast([a],[],[],context,dates,'2026-10-10').get('p_2026-10-10'),'7');
+ const renewed=forecast([a],records,[],{...context,cycleStarts:[{studentId:'p',day:'2026-10-12'}]},dates,'2026-10-02');
+ assert.equal(renewed.get('p_2026-10-12'),'1');
+ const imported=forecast([a],[],[{studentId:'p',day:'2026-10-02',value:'4',color:''}],context,dates,'2026-10-02');
+ assert.equal(imported.has('p_2026-10-02'),false);assert.equal(imported.get('p_2026-10-03'),'5');
+});
+test('academy closure suppresses even moved lessons and rejects new moves to closed days',()=>{
+ const {plannedLesson,moveLesson}=setup().load('schedule');
+ const schedule={rules:[{start:'2026-10-01',weekdays:[1,4,6]}],moves:[],updatedAt:'a'};
+ assert.ok(plannedLesson(schedule,'2026-10-03'));
+ assert.equal(plannedLesson(schedule,'2026-10-05'),null);
+ assert.equal(plannedLesson({...schedule,moves:[{from:'2026-10-01',to:'2026-10-05'}]},'2026-10-05'),null);
+ assert.throws(()=>moveLesson(schedule,{from:'2026-10-01',to:'2026-10-05',expectedUpdatedAt:'a'},[],'b','2026-09-30'),/휴원/);
+});

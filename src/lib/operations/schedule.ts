@@ -1,4 +1,5 @@
 import { seoulDay, validDay, type Attendance } from './model';
+import { academyClosed } from './academy-calendar';
 export type ScheduleRule = { start: string; weekdays: number[] };
 export type LessonSchedule = { rules: ScheduleRule[]; moves: { from: string; to: string }[]; updatedAt: string };
 export const WEEKDAYS = ['일', '월', '화', '수', '목', '금', '토'];
@@ -11,7 +12,7 @@ export function scheduleLabel(schedule: LessonSchedule | undefined, day: string)
   return rule ? rule.weekdays.length ? `주 ${rule.weekdays.length}회 · ${WEEK_ORDER.filter(n=>rule.weekdays.includes(n)).map(n=>WEEKDAYS[n]).join('·')}` : '정규 수업 없음' : '요일 설정';
 }
 export function plannedLesson(schedule: LessonSchedule | undefined, day: string): { origin: string; moved: boolean } | null {
-  if (!schedule) return null;
+  if (!schedule || academyClosed(day)) return null;
   const moved = schedule.moves.find(m=>m.to===day);
   if (moved) return { origin: moved.from, moved: true };
   if (schedule.moves.some(m=>m.from===day)) return null;
@@ -34,6 +35,7 @@ export function moveLesson(old: LessonSchedule | undefined, input: Record<string
   const from=validDay(input.from),to=validDay(input.to);
   if (from<today || to<today) throw Error('오늘 이후 수업만 옮길 수 있습니다.');
   if (from===to) throw Error('옮길 날짜를 다르게 선택해주세요.');
+  if (academyClosed(to)) throw Error('학원 휴원일에는 수업을 옮길 수 없습니다. 다른 날짜를 선택해주세요.');
   const lesson=plannedLesson(old,from);
   if (!lesson) throw Error('옮길 수업이 없습니다.');
   if (plannedLesson(old,to)) throw Error('그 날짜에는 이미 수업이 예정되어 있습니다. 다른 날짜를 선택해주세요.');

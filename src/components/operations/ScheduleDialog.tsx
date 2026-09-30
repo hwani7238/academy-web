@@ -21,7 +21,7 @@ export function ScheduleDialog({account,save,close}:Props){
    <label>적용 시작일<input type="date" min={today} value={start} onInput={e=>setStart(e.currentTarget.value)} required/></label>
    <div className="weekday-options" role="group" aria-label="정규 수업 요일 선택">{WEEK_ORDER.map(n=><button type="button" key={n} aria-label={`${WEEKDAYS[n]}요일`} aria-pressed={weekdays.includes(n)} disabled={busy} onClick={()=>setWeekdays(v=>v.includes(n)?v.filter(d=>d!==n):[...v,n])}>{WEEKDAYS[n]}</button>)}</div>
    <p className="schedule-summary"><strong>{weekdays.length?`주 ${weekdays.length}회`:'정규 수업 없음'}</strong>{weekdays.length>0 && ` · 4주 기준 ${weekdays.length*4}회`}</p>
-   <p className="subtle">적용일 전의 요일은 유지합니다. 이후에 예약한 다른 요일 변경이 있으면 그 전날까지 적용됩니다. 공휴일도 요일대로 표시되므로 휴강 여부를 확인해주세요.</p>
+   <p className="subtle">적용일 전의 요일은 유지합니다. 이후에 예약한 다른 요일 변경이 있으면 그 전날까지 적용됩니다. 학원 휴원일은 예정 수업에서 제외됩니다. 그 외 공휴일은 운영 여부를 확인해주세요.</p>
    <p className="notice">이 설정은 오는 날만 바꿉니다. 현재 수강권·잔여 횟수·수강료는 그대로이며, 다음 수강권 조건은 ‘설정 수정’에서 별도로 변경해주세요. 개별 이동한 수업은 유지됩니다.</p>
    <button className="primary" disabled={busy||!start}>{busy?'저장 중…':'수업 요일 저장'}</button>
   </form>
