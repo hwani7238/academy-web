@@ -186,12 +186,43 @@ export async function payment(input: Record<string, unknown>, actor: string) {
       return;
     }
     const invoice = snap.data() as Invoice | undefined; if (!invoice) throw new Error('청구를 찾을 수 없습니다.');
+    if ((invoice.updatedAt || '') !== (input.expectedInvoiceUpdatedAt || '')) throw new Error('청구 내용이 변경됐습니다. 창을 닫고 다시 수납해주세요.');
     const accountRef = db.doc(`opsAccounts/${invoice.studentId}`); const account = (await tx.get(accountRef)).data() as Account;
     const { paid, complete } = settle(invoice, input.amount as number);
     tx.create(paymentRef, { id: requestId, invoiceId: id, studentId: invoice.studentId, amount: input.amount, method, at: now(), note: text(input.note), actor });
     tx.update(invoiceRef, { paid, status: complete ? 'paid' : 'open' });
     if (complete) tx.update(accountRef, { remaining: account.remaining + (invoice.creditUnits ?? invoice.units), openInvoiceId: account.openInvoiceId === id ? null : account.openInvoiceId, updatedAt: now() });
     audit(tx, db, actor, 'payment', invoice.studentId, { invoiceId: id, amount: input.amount, method, complete });
+  });
+}
+export async function editInvoice(input: Record<string, unknown>, actor: string) {
+  const id = key(input.invoiceId), db = database();
+  const units = integer(input.units, 1, 200, '수강 횟수');
+  const amount = integer(input.amount, 1, 100000000, '청구 금액');
+  if (!['next', 'current'].includes(String(input.kind))) throw Error('횟수 반영 방법을 선택해주세요.');
+  const cycleStart = input.kind === 'current' ? validDay(input.cycleStart) : '';
+  if (cycleStart > seoulDay()) throw Error('재등록일은 오늘 또는 이전 날짜로 입력해주세요.');
+  await db.runTransaction(async tx => {
+    const ref = db.doc(`opsInvoices/${id}`), old = (await tx.get(ref)).data() as Invoice | undefined;
+    if (!old || old.status !== 'open' || old.paid !== 0) throw Error('아직 수납하지 않은 청구만 수정할 수 있습니다.');
+    if ((old.updatedAt || '') !== (input.expectedUpdatedAt || '')) throw Error('청구 내용이 변경됐습니다. 창을 닫고 다시 확인해주세요.');
+    const account = (await tx.get(db.doc(`opsAccounts/${old.studentId}`))).data() as Account | undefined;
+    if (!account || account.openInvoiceId !== id) throw Error('현재 청구 연결을 확인해주세요.');
+    const noticeRef = db.doc(`opsNotices/billing_${id}`), notice = (await tx.get(noticeRef)).data();
+    if (notice && !['queued', 'blocked', 'review', 'cancelled'].includes(notice.status)) throw Error('결제 안내 처리 기록이 있어 수정할 수 없습니다. 발송 결과를 먼저 확인해주세요.');
+    const creditUnits = input.kind === 'current' ? 0 : units;
+    if (cycleStart) {
+      const cycles = await tx.get(db.collection('opsInvoices').where('studentId', '==', old.studentId));
+      if (cycles.docs.some(d => d.id !== id && d.data().status !== 'cancelled' && d.data().cycleStart === cycleStart)) throw Error('이 재등록일의 청구가 이미 있습니다. 기존 청구를 확인해주세요.');
+    }
+    if (old.units === units && old.amount === amount && (old.creditUnits ?? old.units) === creditUnits && (old.cycleStart || '') === cycleStart && !old.needsReview) return;
+    const updatedAt = new Date(Math.max(Date.now(), Date.parse(old.updatedAt || '') + 1 || 0)).toISOString();
+    tx.update(ref, { units, amount, creditUnits, cycleStart, needsReview: false, updatedAt });
+    if (notice && notice.status !== 'cancelled') tx.update(noticeRef, { parameters: { ...notice.parameters, amount: String(amount), lesson_count: String(units) } });
+    audit(tx, db, actor, 'edit-invoice', old.studentId, {
+      invoiceId: id, before: { units: old.units, amount: old.amount, creditUnits: old.creditUnits ?? old.units, cycleStart: old.cycleStart || '' },
+      after: { units, amount, creditUnits, cycleStart }, remaining: account.remaining, note: text(input.note),
+    });
   });
 }
 export async function invoiceAction(input: Record<string, unknown>, actor: string) {
@@ -356,6 +387,8 @@ export async function createCurrentCycleInvoice(input:Record<string,unknown>,act
   const [a,old]=await Promise.all([tx.get(ref),tx.get(invoiceRef)]);const account=a.data() as Account|undefined;
   if(!account?.active)throw Error('수강 설정을 먼저 저장해주세요.');
   if(old.exists)throw Error('이 재등록일의 청구가 이미 있습니다. 기존 청구를 확인해주세요.');
+  const cycles=await tx.get(db.collection('opsInvoices').where('studentId','==',id));
+  if(cycles.docs.some(d=>d.data().status!=='cancelled' && d.data().cycleStart===cycleStart))throw Error('이 재등록일의 청구가 이미 있습니다. 기존 청구를 확인해주세요.');
   if(account.openInvoiceId)throw Error('진행 중인 청구가 있습니다. 기존 청구를 확인해주세요.');
   if(account.updatedAt!==input.expectedUpdatedAt)throw Error('수강 정보가 변경됐습니다. 창을 닫고 다시 확인해주세요.');
   const at=now();const invoice:Invoice={id:invoiceId,studentId:id,name:account.name,units:account.planUnits,amount:account.planAmount,paid:0,status:'open',needsReview:false,createdAt:at,creditUnits:0,cycleStart};
