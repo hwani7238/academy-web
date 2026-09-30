@@ -5,6 +5,7 @@ import { scheduleLabel } from '@/lib/operations/schedule';
 import { CloseButton } from './CloseButton';
 import { PaymentAmountInput } from './PaymentAmountInput';
 import { applySnapshotChanges, type SnapshotChanges } from '@/lib/operations/snapshot-changes';
+import { autoRefresh, ATTENDANCE_POLL_MS } from '@/lib/operations/auto-refresh';
 import { enrollmentState } from '@/lib/operations/lifecycle';
 import { LifecycleDialog } from './LifecycleDialog';
 
@@ -55,13 +56,37 @@ export function Operations({ demo = false }: { demo?: boolean }) {
   }, [demo]);
   const api = async (body?: Record<string, unknown>) => {
     if (!user) throw new Error('원장 계정으로 로그인해주세요.');
-    const response = await fetch(`/api/operations?day=${day}`, { method: body ? 'POST' : 'GET', cache: 'no-store', headers: { 'Authorization': `Bearer ${await user.getIdToken()}`, ...(body ? { 'Content-Type': 'application/json' } : {}) }, ...(body ? { body: JSON.stringify(body) } : {}) });
+    const response = await fetch(`/api/operations?day=${day}`, { method: body ? 'POST' : 'GET', cache: 'no-store', ...(!body ? { signal: AbortSignal.timeout(20000) } : {}), headers: { 'Authorization': `Bearer ${await user.getIdToken()}`, ...(body ? { 'Content-Type': 'application/json' } : {}) }, ...(body ? { body: JSON.stringify(body) } : {}) });
     const result = await response.json(); if (!response.ok) throw new Error(result.error); return result;
   };
-  const refresh = async (force = false) => { if (mutation.current && !force) { pendingRefresh.current = true; return; } const version = ++refreshVersion.current; try { const next = await api(); if (version !== refreshVersion.current) return; if (JSON.stringify(dataRef.current) !== JSON.stringify(next)) { setData(next); dataRef.current = next; } setLoadedDay(day); setError(''); } catch (e) { if (version === refreshVersion.current) setError(e instanceof Error ? e.message : '불러오지 못했습니다.'); } };
+  const refresh = async (force = false) => { if (mutation.current && !force) { pendingRefresh.current = true; return false; } const version = ++refreshVersion.current; try { const next = await api(); if (version !== refreshVersion.current) return false; if (JSON.stringify(dataRef.current) !== JSON.stringify(next)) { setData(next); dataRef.current = next; } setLoadedDay(day); setError(''); return true; } catch (e) { if (version === refreshVersion.current) setError(e instanceof Error ? e.message : '불러오지 못했습니다.'); return false; } };
   latestRefresh.current = () => { void refresh(); };
-  useEffect(() => { if (demo || !user) return; void refresh(); const timer = setInterval(() => { if (document.visibilityState === 'visible') void refresh(); }, 30000); return () => { clearInterval(timer); refreshVersion.current++; };
-  // Re-fetch only when the user or selected date changes.
+  useEffect(() => {
+    if (demo || !user) return;
+    const controller = new AbortController();
+    const live = autoRefresh({
+      visible: () => document.visibilityState === 'visible',
+      refresh: () => refresh(),
+      revision: async () => {
+        const response = await fetch('/api/operations/revision', { cache: 'no-store', signal: AbortSignal.any([controller.signal, AbortSignal.timeout(10000)]), headers: { Authorization: `Bearer ${await user.getIdToken()}` } });
+        if (!response.ok) throw new Error('출석 변경 확인 실패');
+        return (await response.json()).revision as string;
+      },
+    });
+    const resume = () => { void live.check(true); };
+    resume();
+    const timer = setInterval(() => { void live.check(); }, ATTENDANCE_POLL_MS);
+    document.addEventListener('visibilitychange', resume);
+    window.addEventListener('focus', resume);
+    window.addEventListener('online', resume);
+    const invalidateRefresh = () => { refreshVersion.current++; };
+    return () => {
+      live.stop(); controller.abort(); clearInterval(timer); invalidateRefresh();
+      document.removeEventListener('visibilitychange', resume);
+      window.removeEventListener('focus', resume);
+      window.removeEventListener('online', resume);
+    };
+  // Reconnect only when the user or selected date changes; keep forms and filters mounted.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [demo, user, day]);
   const act = async (input: Record<string, unknown>) => {
@@ -115,7 +140,7 @@ export function Operations({ demo = false }: { demo?: boolean }) {
   return <div className="whee-ops operations">
     {demo && <div className="demo-banner">가상 학생 체험 · 실제 학생 정보와 연결되지 않으며 메시지·결제가 발생하지 않습니다. <button onClick={() => { const next = sample(); dataRef.current = next; setData(next); setPanel(null); setMessage('체험을 초기화했습니다.'); }}>체험 초기화</button></div>}
     <header className="ops-header"><div><p className="brand">WHEE MUSIC</p><h1>출석·수납 관리</h1></div><div className="header-actions"><span className="subtle">{demo ? '원장님 화면 체험' : user?.email}</span><a href={demo ? '/check-in/demo' : '/check-in'} target="_blank" rel="noreferrer">출석 화면 ↗</a></div></header>
-    <main className="ops-main"><div className="section-head"><div><h2>조회 날짜 · {day}</h2><p>출석 기록을 보는 날짜입니다. 아이폰 출석은 한국 시간의 오늘 날짜로 자동 저장됩니다.</p></div><div className="header-actions"><label>출석 조회일<input type="date" value={day} disabled={busy} onInput={e => { if (e.currentTarget.value) setDay(e.currentTarget.value); }} /></label><button disabled={busy} onClick={() => setDay(seoulDay())}>오늘</button></div></div><div className="summary-grid">
+    <main className="ops-main"><div className="section-head"><div><h2>조회 날짜 · {day}</h2><p>출석 기록을 보는 날짜입니다. 아이폰 출석은 한국 시간의 오늘 날짜로 자동 저장됩니다.{!demo && ' 출석 현황은 자동으로 업데이트됩니다.'}</p></div><div className="header-actions"><label>출석 조회일<input type="date" value={day} disabled={busy} onInput={e => { if (e.currentTarget.value) setDay(e.currentTarget.value); }} /></label><button disabled={busy} onClick={() => setDay(seoulDay())}>오늘</button></div></div><div className="summary-grid">
       <div><span>{day === seoulDay() ? '오늘 출석' : `${day} 출석`}</span><strong>{presentCount}<small>명</small></strong></div>
       <div><span>결제 요청 대상</span><strong>{open.length}<small>명</small></strong></div>
       <div><span>미납 합계</span><strong>{won(open.reduce((s, i) => s + i.amount - i.paid, 0))}</strong></div>
