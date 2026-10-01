@@ -95,6 +95,7 @@ export async function POST(request: Request) {
       case 'correctLegacyAttendance': return Response.json(await service.correctLegacyAttendance(input,actor));
       case 'deleteEnrollment': case 'restoreEnrollment': return Response.json({ok:true,changes:await service.deleteEnrollment(input,actor)});
       case 'saveSchedule': case 'moveLesson': return Response.json({ok:true,changes:await service.saveSchedule(input,actor)});
+      case 'saveStudentInfo': await service.saveStudentInfo(input,actor); return Response.json({ok:true});
       case 'updateStudentPhone': return Response.json({ok:true,changes:await service.updateStudentPhone(input,actor)});
       case 'renameStudent': await service.renameStudent(input,actor); return Response.json({ok:true});
       case 'correctAttendanceTime': return Response.json({ok:true,changes:await service.correctAttendanceTime(input,actor)});

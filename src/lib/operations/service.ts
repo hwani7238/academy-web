@@ -525,6 +525,57 @@ export async function createCurrentCycleInvoice(input:Record<string,unknown>,act
  });
 }
 
+// One transaction prevents a failed course edit from leaving a half-saved profile.
+export async function saveStudentInfo(input: Record<string, unknown>, actor: string) {
+ const sourceStudentId = key(input.sourceStudentId), id = key(input.studentId), db = database();
+ const name = Object.hasOwn(input, 'name') ? (typeof input.name === 'string' ? input.name.trim() : '') : undefined;
+ if (name !== undefined && (!name || name.length > 100 || /[\r\n\u0000]/.test(name))) throw Error('학생 이름을 1~100자로 입력해주세요.');
+ const phone = Object.hasOwn(input, 'phone') ? guardianPhone(input.phone) : undefined;
+ const changeCourse = Object.hasOwn(input, 'group'), group = text(input.group, 80), subject = text(input.subject, 80);
+ if (changeCourse && (!REGISTRATION_SUBJECTS.includes(group) || !['add','change'].includes(String(input.mode)))) throw Error('과목과 변경 방법을 선택해주세요.');
+ await db.runTransaction(async tx => {
+  const studentRef = db.doc(`students/${sourceStudentId}`);
+  const [person, courses, legacy] = await Promise.all([tx.get(studentRef), tx.get(db.collection('opsAccounts').where('sourceStudentId', '==', sourceStudentId)), tx.get(db.doc(`opsAccounts/${sourceStudentId}`))]);
+  const student = person.data(); if (!student) throw Error('학생을 찾을 수 없습니다.');
+  const subjects = studentSubjects(student), groups = student.operationsCourseGroups || {};
+  if (id !== sourceStudentId && !subjects.some(s => enrollmentId(sourceStudentId, s) === id) && !courses.docs.some(d => d.id === id)) throw Error('해당 학생의 수강 정보를 찾을 수 없습니다.');
+  const documents = new Map<string, FirebaseFirestore.DocumentSnapshot>(courses.docs.map(d => [d.id, d]));
+  if (legacy.exists) documents.set(legacy.id, legacy);
+  const accounts = [...documents.values()].map(d => ({ ...d.data(), id: d.id }) as Account);
+  const rename = name !== undefined && name !== student.name;
+  const updatePhone = phone !== undefined && (phone !== student.phone || student.phoneLast4 !== phone.slice(-4) || accounts.some(a => a.phone !== phone || !a.checkinSuffixes.includes(phone.slice(-4))));
+  if ((rename || changeCourse) && (student.name !== input.expectedName || (student.courseUpdatedAt || '') !== (input.expectedCourseUpdatedAt || ''))) throw Error('학생 정보가 다른 화면에서 변경됐습니다. 창을 닫고 다시 확인해주세요.');
+  if (updatePhone && (String(student.phone || '').replace(/\D/g, '') !== String(input.expectedPhone ?? '').replace(/\D/g, '') || (student.phoneUpdatedAt || '') !== (input.expectedPhoneUpdatedAt || ''))) throw Error('보호자 번호가 다른 화면에서 변경됐습니다. 창을 닫고 다시 확인해주세요.');
+  const canonical = (v: string) => v.includes('피아노') ? '피아노' : v, displaySubject = canonical(group);
+  if (changeCourse) {
+   if (legacy.exists) throw Error('통합 수강권은 과목별 분리 확인이 필요합니다.');
+   if (id !== enrollmentId(sourceStudentId, subject) || !subjects.includes(subject)) throw Error('학생의 과목 정보를 확인해주세요.');
+   if (subjects.some(s => (input.mode === 'add' || s !== subject) && canonical(groups[s] || s) === displaySubject)) throw Error('이미 등록된 과목입니다. 해당 과목에서 반을 변경해주세요.');
+   if (input.mode === 'add' && subjects.includes(displaySubject)) throw Error('기존 과목 기록이 있어 같은 과목을 추가할 수 없습니다.');
+  }
+  if (!rename && !updatePhone && !changeCourse) return;
+  const at = new Date(Math.max(Date.now(), ...[student.courseUpdatedAt, student.phoneUpdatedAt, ...accounts.map(a => a.updatedAt)].map(v => (Date.parse(v || '') || 0) + 1))).toISOString();
+  const patch: Record<string, unknown> = {};
+  if (rename) patch.name = name;
+  if (rename || changeCourse) patch.courseUpdatedAt = at;
+  if (updatePhone) Object.assign(patch, { phone, phoneLast4: phone!.slice(-4), phoneUpdatedAt: at });
+  if (changeCourse) {
+   patch.operationsCourseGroups = { ...groups, [input.mode === 'add' ? displaySubject : subject]: group };
+   if (input.mode === 'add') patch.instruments = [...subjects, displaySubject];
+  }
+  // Validate every account before scheduling any write.
+  const updates = accounts.filter(a => rename || updatePhone || (changeCourse && input.mode === 'change' && a.id === id)).map(a => {
+   const updated = updatePhone ? contactAccount(a, String(student.phone || ''), phone!, at) : { ...a, updatedAt: at };
+   if (rename) updated.name = [name!, ...a.name.split(' · ').slice(1)].join(' · ');
+   if (changeCourse && input.mode === 'change' && a.id === id) Object.assign(updated, { attendanceGroup: group, displaySubject, name: `${name ?? student.name} · ${displaySubject}` });
+   return updated;
+  });
+  tx.update(studentRef, patch);
+  for (const a of updates) tx.update(documents.get(a.id)!.ref, { name: a.name, phone: a.phone, checkinSuffixes: a.checkinSuffixes, updatedAt: at, ...(changeCourse && input.mode === 'change' && a.id === id ? { attendanceGroup: group, displaySubject } : {}) });
+  audit(tx, db, actor, 'save-student-info', sourceStudentId, { studentId: id, ...(rename ? { name: { before: student.name, after: name } } : {}), ...(updatePhone ? { phone: { before: student.phone || '', after: phone } } : {}), ...(changeCourse ? { course: { mode: input.mode, subject, before: groups[subject] || subject, group } } : {}) });
+ });
+}
+
 export async function updateStudentPhone(input: Record<string, unknown>, actor: string) {
  const sourceStudentId = key(input.sourceStudentId), id = key(input.studentId), phone = guardianPhone(input.phone), db = database();
  return db.runTransaction(async tx => {

@@ -373,6 +373,51 @@ test('pending attendance notices use the new guardian phone while sent notices s
   assert.equal([...s.records.entries()].find(([k])=>k.startsWith('opsNotices/attendance_'))[1].phone,'01011110012');
  }finally{global.fetch=original;for(const k of keys){if(env[k]===undefined)delete process.env[k];else process.env[k]=env[k];}}
 });
+test('single student save atomically changes name, guardian and one course while keeping lesson and financial records',async()=>{
+ const s=setup();s.records.set('students/person',{name:'기존 학생',phone:'01000001234',instruments:['피아노','드럼']});
+ const ids=['피아노','드럼'].map(subject=>s.service.enrollmentId('person',subject));
+ for(const [i,subject] of ['피아노','드럼'].entries())await s.service.configure({studentId:ids[i],sourceStudentId:'person',subject,planUnits:8,planAmount:160000,remaining:6-i,phone:'01000001234',phones:['1234','5678'],active:true},'owner');
+ await s.seed('other',4);const other=structuredClone(s.records.get('opsAccounts/other'));
+ const before=ids.map(id=>structuredClone(s.records.get(`opsAccounts/${id}`)));
+ s.records.set('opsAttendance/history',{studentId:ids[0],name:'기존 학생 · 피아노',units:1});
+ s.records.set('opsInvoices/history',{studentId:ids[0],amount:160000,status:'open'});
+ const history=['opsAttendance/history','opsInvoices/history'].map(k=>structuredClone(s.records.get(k)));
+ await s.service.saveStudentInfo({sourceStudentId:'person',studentId:ids[0],name:'수정 학생',phone:'010-1111-0012',subject:'피아노',mode:'change',group:'어린이 피아노(2관)',expectedName:'기존 학생',expectedPhone:'01000001234'},'owner');
+ const student=s.records.get('students/person');assert.equal(student.name,'수정 학생');assert.equal(student.phone,'01011110012');assert.equal(student.phoneLast4,'0012');assert.equal(student.operationsCourseGroups['피아노'],'어린이 피아노(2관)');
+ for(const [i,id] of ids.entries()){
+  const a=s.records.get(`opsAccounts/${id}`);assert.equal(a.name,`수정 학생 · ${a.subject}`);assert.equal(a.phone,'01011110012');assert.deepEqual(a.checkinSuffixes,['0012','5678']);
+  for(const field of ['id','subject','sourceStudentId','remaining','planUnits','planAmount','openInvoiceId','active'])assert.deepEqual(a[field],before[i][field]);
+ }
+ assert.equal(s.records.get(`opsAccounts/${ids[0]}`).attendanceGroup,'어린이 피아노(2관)');assert.equal(s.records.get(`opsAccounts/${ids[1]}`).attendanceGroup,undefined);
+ assert.deepEqual(s.records.get('opsAccounts/other'),other);assert.deepEqual(['opsAttendance/history','opsInvoices/history'].map(k=>s.records.get(k)),history);
+ assert.equal([...s.records.values()].filter(v=>v.action==='save-student-info').length,1);
+ assert.equal([...s.records.keys()].filter(k=>k.startsWith('opsNotices/')).length,0);
+ // Adding another course in the same save leaves existing course balances alone.
+ await s.service.saveStudentInfo({sourceStudentId:'person',studentId:ids[0],name:'최종 학생',subject:'피아노',mode:'add',group:'보컬',expectedName:'수정 학생',expectedCourseUpdatedAt:student.courseUpdatedAt},'owner');
+ assert.deepEqual(s.records.get('students/person').instruments,['피아노','드럼','보컬']);assert.equal(s.records.get('students/person').name,'최종 학생');
+ assert.equal(s.records.has(`opsAccounts/${s.service.enrollmentId('person','보컬')}`),false);
+ assert.equal(s.records.get(`opsAccounts/${ids[0]}`).remaining,6);
+});
+test('invalid combined course or stale phone edits cannot partially save names or contacts',async()=>{
+ const s=setup();s.records.set('students/person',{name:'기존 학생',phone:'01000001234',instruments:['피아노','드럼']});
+ const id=s.service.enrollmentId('person','피아노');
+ await s.service.configure({studentId:id,sourceStudentId:'person',subject:'피아노',planUnits:8,planAmount:160000,remaining:6,phone:'01000001234',phones:['1234'],active:true},'owner');
+ const initial=structuredClone([...s.records]);
+ const input={sourceStudentId:'person',studentId:id,name:'변경 학생',phone:'01011110012',subject:'피아노',mode:'change',group:'어린이 피아노(2관)',expectedName:'기존 학생',expectedPhone:'01000001234'};
+ for(const patch of [{group:'드럼'},{expectedPhone:'01099999999'},{expectedCourseUpdatedAt:'stale'},{phone:'1234'},{name:''},{studentId:'unrelated'}]){
+  await assert.rejects(s.service.saveStudentInfo({...input,...patch},'owner'));assert.deepEqual([...s.records],initial);
+ }
+});
+test('partial student save preserves fields not edited and does not require missing legacy phone or course setup',async()=>{
+ const s=setup();await s.seed('legacy',5);
+ Object.assign(s.records.get('students/legacy'),{phone:'',name:'번호 없는 학생'});
+ await s.service.saveStudentInfo({studentId:'legacy',sourceStudentId:'legacy',name:'이름만 수정',expectedName:'번호 없는 학생'},'owner');
+ assert.equal(s.records.get('students/legacy').phone,'');assert.equal(s.records.get('opsAccounts/legacy').phone,'01000001234');
+ const before=structuredClone([...s.records]);await s.service.saveStudentInfo({studentId:'legacy',sourceStudentId:'legacy'},'owner');assert.deepEqual([...s.records],before);
+ // A phone-only edit must keep an unrelated name change made after opening the form.
+ await s.service.saveStudentInfo({studentId:'legacy',sourceStudentId:'legacy',phone:'01011110012',expectedPhone:'',expectedName:'번호 없는 학생'},'owner');
+ assert.equal(s.records.get('students/legacy').name,'이름만 수정');assert.equal(s.records.get('opsAccounts/legacy').remaining,5);
+});
 function setup() {
   const records = new Map(); let sequence = 0; let tail = Promise.resolve();
   const ref = p => ({ path: p, id: p.split('/').at(-1), get: async () => snap(p), update: async d => { if (!records.has(p)) throw Error('missing'); records.set(p, { ...records.get(p), ...structuredClone(d) }); }, set: async d => records.set(p, structuredClone(d)) });

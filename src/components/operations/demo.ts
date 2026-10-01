@@ -24,6 +24,17 @@ export function sample(): Snapshot {
   return { legacyAttendance, sequenceContext: {positions:Object.fromEntries(accounts.map(a=>[a.id, a.planUnits-a.remaining])),cycleStarts:[]}, accounts, students: accounts.map(({ id, name, phone, sourceStudentId, subject, attendanceGroup }) => ({ id, name, phone, sourceStudentId, subject, attendanceGroup, instruments: subject ? [subject] : [] })), attendance: [], invoices: [], payments: [], notices: [], devices: [], day: seoulDay(), configured: false };
 }
 export function demoAction(current: Snapshot, input: Record<string, unknown>): { data: Snapshot; result: Record<string, unknown> } {
+  if(input.action==='saveStudentInfo'){
+    const target=current.students.find(s=>s.id===input.studentId&&(s.sourceStudentId||s.id)===input.sourceStudentId);
+    if(!target)throw Error('학생을 찾을 수 없습니다.');
+    if((Object.hasOwn(input,'name')||Object.hasOwn(input,'group'))&&(target.name.split(' · ')[0]!==input.expectedName||(target.courseUpdatedAt||'')!==(input.expectedCourseUpdatedAt||'')))throw Error('학생 정보가 다른 화면에서 변경됐습니다. 창을 닫고 다시 확인해주세요.');
+    // Intermediate clones are only returned after every edit succeeds.
+    let next=current;
+    if(Object.hasOwn(input,'group'))next=demoAction(next,{...input,action:'manageCourse',expectedUpdatedAt:input.expectedCourseUpdatedAt}).data;
+    if(Object.hasOwn(input,'name'))next=demoAction(next,{...input,action:'renameStudent',expectedUpdatedAt:input.expectedCourseUpdatedAt}).data;
+    if(Object.hasOwn(input,'phone'))next=demoAction(next,{...input,action:'updateStudentPhone',expectedUpdatedAt:input.expectedPhoneUpdatedAt}).data;
+    return {data:next,result:{ok:true}};
+  }
   const data = structuredClone(current); const at = new Date().toISOString();
   const account = data.accounts.find(a => a.id === input.studentId);
   const enqueue = (a: Account, id: string, kind: 'attendance' | 'billing') => data.notices.unshift({ id, studentId: a.id, name: a.name, kind, status: 'demo', createdAt: at });
