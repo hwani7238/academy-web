@@ -287,6 +287,9 @@ test('a missed initial invoice can await its first lesson date without inventing
  await s.service.createCurrentCycleInvoice({studentId:account.id,kind:'first',cycleStart:'',expectedUpdatedAt:account.updatedAt},'owner');
  const invoice=s.records.get('opsInvoices/first_undated-new');assert.equal(invoice.cycleStart,undefined);assert.equal(invoice.creditUnits,0);
  assert.equal(s.load('billing-display').invoiceCycleStart(invoice,{}),undefined);
+ const today=s.load('model').seoulDay();
+ assert.equal(s.load('billing-display').invoiceCycleStart(invoice,{[account.id]:[today]}),today);
+ assert.equal(s.load('billing-display').invoiceCycleStart({...invoice,id:'renewal'},{[account.id]:[today]}),undefined);
  await s.service.payment({invoiceId:invoice.id,requestId:'undated-paid',amount:160000,method:'현금'},'owner');
  assert.equal(s.records.get('opsAccounts/undated-new').remaining,12);
 });

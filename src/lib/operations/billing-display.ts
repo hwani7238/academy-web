@@ -9,8 +9,10 @@ export const paymentDay = (payment: Payment) => payment.paymentDate || seoulDay(
 export function invoiceCycleStart(invoice: Invoice, cycleFirstDays: Record<string, string[]>) {
   if (invoice.cycleStart) return invoice.cycleStart;
   const created = new Date(invoice.createdAt);
+  // A first registration can start on its creation day; renewal invoices are for the following pass.
+  const initial = invoice.id === `first_${invoice.studentId}`;
   return Number.isFinite(created.getTime())
-    ? [...(cycleFirstDays[invoice.studentId] || [])].sort().find(day => day > seoulDay(created)) : undefined;
+    ? [...(cycleFirstDays[invoice.studentId] || [])].sort().find(day => initial ? day >= seoulDay(created) : day > seoulDay(created)) : undefined;
 }
 export function courseInitial(subject: string) {
   if (subject.includes('피아노')) {
