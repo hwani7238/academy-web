@@ -1,7 +1,9 @@
 'use client';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { type Invoice, type Snapshot, seoulDay } from '@/lib/operations/model';
 import { compareGroups, compareNames, groupName } from '@/lib/operations/student-order';
+import { attendanceSequence } from '@/lib/operations/attendance-sequence';
+import { courseInitial, invoiceCycleStart, paymentDay, shortBillingDay } from '@/lib/operations/billing-display';
 import { CloseButton } from './CloseButton';
 
 const won = (value: number) => `${value.toLocaleString('ko-KR')}원`;
@@ -18,22 +20,31 @@ type Props = {
 };
 export function BillingList({ data, invoices, busy, demo, pay, edit, action }: Props) {
   const [subject, setSubject] = useState(''), [search, setSearch] = useState(''), [selected, setSelected] = useState<string | null>(null);
+  const layout = useRef<HTMLDivElement>(null);
+  const [columns,setColumns]=useState(1);
+  useEffect(()=>{const node=layout.current;if(!node)return;const observer=new ResizeObserver(([entry])=>setColumns(Math.max(1,Math.min(3,Math.floor(entry.contentRect.width/350)))));observer.observe(node);return()=>observer.disconnect();},[]);
+  const cycleDays=useMemo(()=>attendanceSequence(data.accounts,data.attendance,data.legacyAttendance||[],data.sequenceContext).cycleFirstDays,[data.accounts,data.attendance,data.legacyAttendance,data.sequenceContext]);
+  const firstDay=(invoice:Invoice)=>invoiceCycleStart(invoice,cycleDays);
   const subjects = [...new Set(invoices.map(i => identity(data, i.studentId, i.name).subject))].sort(compareGroups);
   const visible = invoices.filter(i => { const who = identity(data, i.studentId, i.name); return (!subject || who.subject === subject) && who.name.includes(search.trim()); })
-    .sort((a,b) => invoiceDay(a).localeCompare(invoiceDay(b)) || compareGroups(identity(data,a.studentId,a.name).subject,identity(data,b.studentId,b.name).subject) || compareNames(a.name,b.name));
+    .sort((a,b) => (firstDay(a)||'9999').localeCompare(firstDay(b)||'9999') || compareGroups(identity(data,a.studentId,a.name).subject,identity(data,b.studentId,b.name).subject) || compareNames(a.name,b.name));
+  const columnCount=Math.min(columns,Math.max(1,Math.ceil(visible.length/9)));
+  const perColumn=Math.ceil(visible.length/columnCount);
+  const chunks=Array.from({length:columnCount},(_,index)=>visible.slice(index*perColumn,(index+1)*perColumn));
   const selectedInvoice = invoices.find(i => i.id === selected);
-  return <div className="billing-compact">
-    <div className="section-head billing-heading"><div><h2>청구·수납</h2><p>날짜순 · 같은 날짜는 과목, 이름순입니다. 재등록일이 없으면 청구일을 표시합니다.</p></div>
+  return <div className="billing-compact" ref={layout}>
+    <div className="section-head billing-heading"><div><h2>청구·수납</h2><p>1회차 날짜순 · 위에서 아래로, 다음 열로 이어집니다. 날짜 미확인은 맨 뒤에 표시합니다.</p></div>
       <label>과목<select value={subject} onChange={e=>setSubject(e.target.value)}><option value="">전체 과목</option>{subject && !subjects.includes(subject) && <option value={subject}>{subject}</option>}{subjects.map(s=><option key={s}>{s}</option>)}</select></label>
       <label>학생 찾기<input placeholder="이름" value={search} onChange={e=>setSearch(e.target.value)}/></label>
     </div>
     <div className="billing-count" role="status">결제 대상 <strong>{visible.length}건</strong><span>미납 합계 <strong>{won(visible.reduce((sum,i)=>sum+i.amount-i.paid,0))}</strong></span></div>
-    {visible.length ? <div className="table-wrap"><table className="billing-table"><caption className="sr-only">날짜별 결제 대상</caption><colgroup><col className="billing-date-col"/><col className="billing-subject-col"/><col className="billing-name-col"/><col className="billing-plan-col"/><col className="billing-amount-col"/><col className="billing-status-col"/><col className="billing-actions-col"/></colgroup><thead><tr><th>날짜</th><th>과목</th><th>학생</th><th>수강권</th><th className="money">미납 금액</th><th>상태</th><th>관리</th></tr></thead><tbody>{visible.map((i,index)=>{const who=identity(data,i.studentId,i.name),date=invoiceDay(i);return <tr key={i.id} className={index>0 && invoiceDay(visible[index-1])!==date?'billing-date-start':''}>
-      <td><time dateTime={date}>{date}</time><small>{i.cycleStart?'재등록일':'청구일'}</small></td><td>{who.subject}</td><td><strong>{who.name}</strong></td><td>{i.units}회</td><td className="money"><strong>{won(i.amount-i.paid)}</strong>{i.paid>0 && <small>{won(i.paid)} 수납</small>}</td><td><span className={`billing-state ${i.needsReview?'review':''}`}>{i.needsReview?'청구 확인 필요':i.paid>0?'부분 수납':'미수납'}</span></td>
-      <td><div className="billing-actions">{i.needsReview?<button disabled={busy} onClick={()=>action('confirmInvoice',i)}>청구 확인</button>:<button className="primary" disabled={busy} onClick={()=>pay(i)}>수납 완료</button>}<button className="billing-more" disabled={busy} aria-label={`${who.name} ${who.subject} ${date} 청구 관리`} title="청구 상세·수정·안내·취소" onClick={()=>setSelected(i.id)}>⋮</button></div></td>
-    </tr>;})}</tbody></table></div>:<div className="empty billing-empty">{invoices.length?'선택한 과목과 이름에 해당하는 청구가 없습니다.':'진행 중인 청구가 없습니다.'}{(subject||search)&&<button onClick={()=>{setSubject('');setSearch('');}}>전체 보기</button>}</div>}
-    <div className="section-head billing-heading divided"><div><h2>최근 수납 기록</h2><p>최근 100건 · 수납일이 최근인 순서입니다.</p></div></div>
-    {data.payments.length?<div className="table-wrap"><table className="billing-table payment-table"><caption className="sr-only">최근 수납 기록</caption><thead><tr><th>수납일</th><th>과목</th><th>학생</th><th className="money">수납 금액</th><th>수단</th><th>비고</th></tr></thead><tbody>{[...data.payments].sort((a,b)=>b.at.localeCompare(a.at)).map(p=>{const who=identity(data,p.studentId);return <tr key={p.id}><td><time dateTime={p.at}>{seoulDay(new Date(p.at))}</time></td><td>{who.subject}</td><td><strong>{who.name}</strong></td><td className="money">{won(p.amount)}</td><td>{p.method}</td><td className="billing-note">{p.note||'—'}</td></tr>;})}</tbody></table></div>:<p className="empty billing-empty">아직 수납 기록이 없습니다.</p>}
+    {visible.length ? <div className="billing-ledgers" style={{gridTemplateColumns:`repeat(${columnCount},minmax(0,1fr))`}}>{chunks.map((chunk,column)=><div className="table-wrap" key={column}><table className="billing-table billing-ledger"><caption className="sr-only">결제 대상 {column+1}열</caption><colgroup><col style={{width:'22%'}}/><col style={{width:'23%'}}/><col style={{width:'14%'}}/><col style={{width:'15%'}}/><col style={{width:'26%'}}/></colgroup><thead><tr><th>이름</th><th className="money">금액(원)</th><th>1회차</th><th>과목</th><th><span className="sr-only">관리</span></th></tr></thead><tbody>{chunk.map((i,index)=>{const who=identity(data,i.studentId,i.name),date=firstDay(i);return <tr key={i.id} className={index>0&&firstDay(chunk[index-1])!==date?'billing-date-start':''}>
+      <td title={`${who.name} · ${who.subject}`}><strong>{who.name}</strong>{i.needsReview&&<span title="청구 확인 필요" aria-label="청구 확인 필요"> !</span>}</td><td className="money" title={`청구 ${won(i.amount)} · 수납 ${won(i.paid)} · 미납 ${won(i.amount-i.paid)}`}><strong>{(i.amount-i.paid).toLocaleString('ko-KR')}</strong>{i.paid>0&&<span className="billing-partial" title={`부분 수납: ${won(i.paid)}`} aria-label={`부분 수납 ${won(i.paid)}`}>◐</span>}</td><td>{date?<time dateTime={date} title={date}>{shortBillingDay(date)}</time>:<span className="billing-unknown" title="1회차 날짜 확인이 필요합니다. 청구 생성일과 구분합니다.">미확인</span>}</td><td><abbr title={who.subject}>{courseInitial(who.subject)}</abbr></td>
+      <td><div className="billing-actions">{i.needsReview?<button disabled={busy} onClick={()=>action('confirmInvoice',i)} aria-label={`${who.name} 청구 확인`}>확인</button>:<button className="primary" disabled={busy} onClick={()=>pay(i)} aria-label={`${who.name} ${who.subject} 수납 완료`}>수납</button>}<button className="billing-more" disabled={busy} aria-label={`${who.name} ${who.subject} ${date||'날짜 미확인'} 청구 관리`} title="청구 상세·수정·안내·취소" onClick={()=>setSelected(i.id)}>⋮</button></div></td>
+    </tr>;})}</tbody></table></div>)}</div>:<div className="empty billing-empty">{invoices.length?'선택한 과목과 이름에 해당하는 청구가 없습니다.':'진행 중인 청구가 없습니다.'}{(subject||search)&&<button onClick={()=>{setSubject('');setSearch('');}}>전체 보기</button>}</div>}
+    <p className="billing-initials">PF(1) 피아노 1관 · PF(2) 피아노 2관 · PF(A) 성인 피아노 · D 드럼 · UK 우쿨렐레 · V 보컬 · G 기타 · ENS 앙상블 · MIDI 미디 · ◐ 부분 수납</p>
+    <div className="section-head billing-heading divided"><div><h2>최근 수납 기록</h2><p>최근 등록 100건 · 실제 결제받은 날짜순입니다.</p></div></div>
+    {data.payments.length?<div className="table-wrap"><table className="billing-table payment-table"><caption className="sr-only">최근 수납 기록</caption><thead><tr><th>결제일</th><th>과목</th><th>학생</th><th className="money">수납 금액</th><th>수단</th><th>비고</th></tr></thead><tbody>{[...data.payments].sort((a,b)=>paymentDay(b).localeCompare(paymentDay(a))||b.at.localeCompare(a.at)).map(p=>{const who=identity(data,p.studentId);return <tr key={p.id}><td><time dateTime={paymentDay(p)} title={`기록 시각: ${new Date(p.at).toLocaleString('ko-KR',{timeZone:'Asia/Seoul'})}`}>{paymentDay(p)}</time></td><td><abbr title={who.subject}>{courseInitial(who.subject)}</abbr></td><td><strong>{who.name}</strong></td><td className="money">{won(p.amount)}</td><td>{p.method}</td><td className="billing-note">{p.note||'—'}</td></tr>;})}</tbody></table></div>:<p className="empty billing-empty">아직 수납 기록이 없습니다.</p>}
     {selectedInvoice && <BillingActions key={selectedInvoice.id} invoice={selectedInvoice} name={identity(data,selectedInvoice.studentId,selectedInvoice.name).name} busy={busy} demo={demo} sent={data.notices.some(n=>n.id===`billing_${selectedInvoice.id}`)} close={()=>setSelected(null)} edit={()=>{setSelected(null);edit(selectedInvoice);}} action={name=>{action(name,selectedInvoice);setSelected(null);}}/>}
   </div>;
 }

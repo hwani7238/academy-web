@@ -1,3 +1,4 @@
+import { paymentDateInput } from './billing-display';
 import { reviewBalance, type BalanceAudit, type BalanceSource } from './balance-review';
 import { correctedLegacy, legacyCorrectionInput, type LegacyCorrection } from './legacy-correction';
 import { changeSchedule, moveLesson } from './schedule';
@@ -238,22 +239,23 @@ export async function createInvoice(studentId: unknown, actor: string) {
 export async function payment(input: Record<string, unknown>, actor: string) {
   const db = database(); const id = key(input.invoiceId); const requestId = key(input.requestId); const method = text(input.method, 30);
   if (!(METHODS as readonly string[]).includes(method)) throw new Error('결제 수단을 선택해주세요.');
+  const paymentDate = paymentDateInput(input.paymentDate);
   const paymentRef = db.doc(`opsPayments/${requestId}`);
   await db.runTransaction(async tx => {
     const invoiceRef = db.doc(`opsInvoices/${id}`);
     const [existing, snap] = await Promise.all([tx.get(paymentRef), tx.get(invoiceRef)]);
     if (existing.exists) {
-      if (existing.data()?.invoiceId !== id || existing.data()?.amount !== input.amount || existing.data()?.method !== method) throw new Error('중복 요청 내용이 다릅니다.');
+      if (existing.data()?.invoiceId !== id || existing.data()?.amount !== input.amount || existing.data()?.method !== method || (input.paymentDate !== undefined && (existing.data()?.paymentDate || seoulDay(new Date(existing.data()?.at))) !== paymentDate)) throw new Error('중복 요청 내용이 다릅니다.');
       return;
     }
     const invoice = snap.data() as Invoice | undefined; if (!invoice) throw new Error('청구를 찾을 수 없습니다.');
     if ((invoice.updatedAt || '') !== (input.expectedInvoiceUpdatedAt || '')) throw new Error('청구 내용이 변경됐습니다. 창을 닫고 다시 수납해주세요.');
     const accountRef = db.doc(`opsAccounts/${invoice.studentId}`); const account = (await tx.get(accountRef)).data() as Account;
     const { paid, complete } = settle(invoice, input.amount as number);
-    tx.create(paymentRef, { id: requestId, invoiceId: id, studentId: invoice.studentId, amount: input.amount, method, at: now(), note: text(input.note), actor });
+    tx.create(paymentRef, { id: requestId, invoiceId: id, studentId: invoice.studentId, amount: input.amount, method, paymentDate, at: now(), note: text(input.note), actor });
     tx.update(invoiceRef, { paid, status: complete ? 'paid' : 'open' });
     if (complete) tx.update(accountRef, { remaining: account.remaining + (invoice.creditUnits ?? invoice.units), openInvoiceId: account.openInvoiceId === id ? null : account.openInvoiceId, updatedAt: now() });
-    audit(tx, db, actor, 'payment', invoice.studentId, { invoiceId: id, amount: input.amount, method, complete });
+    audit(tx, db, actor, 'payment', invoice.studentId, { invoiceId: id, amount: input.amount, method, paymentDate, complete });
   });
 }
 export async function editInvoice(input: Record<string, unknown>, actor: string) {

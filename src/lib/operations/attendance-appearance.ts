@@ -1,3 +1,4 @@
+import { invoiceCycleStart } from './billing-display';
 import { seoulDay, type Account, type Attendance, type Invoice, type Snapshot } from './model';
 
 type Legacy = NonNullable<Snapshot['legacyAttendance']>[number];
@@ -37,9 +38,7 @@ export function confirmedFirstLessons(invoices: Invoice[], cycleFirstDays: Recor
   const byLesson = new Map<string, Invoice[]>();
   for (const invoice of invoices) {
     if (invoice.status === 'cancelled') continue;
-    const created = new Date(invoice.createdAt);
-    const day = invoice.cycleStart || (Number.isFinite(created.getTime())
-      ? [...(cycleFirstDays[invoice.studentId] || [])].sort().find(day => day > seoulDay(created)) : undefined);
+    const day = invoiceCycleStart(invoice, cycleFirstDays);
     if (!day) continue;
     const key = `${invoice.studentId}_${day}`;
     byLesson.set(key, [...(byLesson.get(key) || []), invoice]);

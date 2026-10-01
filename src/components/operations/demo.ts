@@ -1,3 +1,4 @@
+import { paymentDateInput } from '@/lib/operations/billing-display';
 import { correctedLegacy, legacyCorrectionInput } from '@/lib/operations/legacy-correction';
 import { changeSchedule, moveLesson } from '@/lib/operations/schedule';
 import { rangeAttendance } from '@/lib/operations/attendance-range';
@@ -131,11 +132,13 @@ export function demoAction(current: Snapshot, input: Record<string, unknown>): {
     if (a.remaining <= 0) invoice(a);
     else { const open = data.invoices.find(i => i.id === a.openInvoiceId); if (open) open.needsReview = true; }
   } else if (input.action === 'payment') {
-    if (data.payments.some(p => p.id === input.requestId)) return { data, result };
+    const paymentDate = paymentDateInput(input.paymentDate);
+    const existing = data.payments.find(p => p.id === input.requestId);
+    if (existing) { if(existing.invoiceId!==input.invoiceId || existing.amount!==Number(input.amount) || existing.method!==input.method || (input.paymentDate!==undefined && existing.paymentDate!==paymentDate))throw Error('중복 요청 내용이 다릅니다.');return { data, result }; }
     const i = data.invoices.find(i => i.id === input.invoiceId)!; const s = settle(i, Number(input.amount));
     i.paid = s.paid;
     if (s.complete) { i.status = 'paid'; const a = data.accounts.find(a => a.id === i.studentId)!; a.remaining += i.creditUnits ?? i.units; a.openInvoiceId = null; }
-    data.payments.unshift({ id: String(input.requestId), invoiceId: i.id, studentId: i.studentId, amount: Number(input.amount), method: String(input.method), at, note: String(input.note || '') });
+    data.payments.unshift({ id: String(input.requestId), invoiceId: i.id, studentId: i.studentId, amount: Number(input.amount), method: String(input.method), paymentDate, at, note: String(input.note || '') });
   } else if (['sendInvoice', 'cancelInvoice', 'confirmInvoice'].includes(String(input.action))) {
     const i = data.invoices.find(i => i.id === input.invoiceId)!;
     if (input.action === 'confirmInvoice') i.needsReview = false;

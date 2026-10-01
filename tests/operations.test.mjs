@@ -1273,3 +1273,26 @@ test('unpaid flags last across months, partial payment and other courses; cancel
  assert.throws(()=>attendanceInput({...marked,units:0}),/수강권 시작일/);
  assert.throws(()=>attendanceInput({...marked,day:'2999-01-01'}),/미래/);
 });
+
+
+test('actual payment date is stored separately from entry time and retries cannot change it',async()=>{
+ const s=setup();await s.seed();await s.service.createInvoice('student-a','owner');
+ const invoiceId=s.records.get('opsAccounts/student-a').openInvoiceId;
+ const request={invoiceId,requestId:'backdated',amount:60000,method:'현금',paymentDate:'2026-09-16'};
+ await s.service.payment(request,'owner');await s.service.payment(request,'owner');
+ const payment=s.records.get('opsPayments/backdated');
+ assert.equal(payment.paymentDate,'2026-09-16');assert.ok(payment.at.startsWith(s.load('model').seoulDay().slice(0,7)));
+ assert.equal(s.records.get('opsAccounts/student-a').remaining,1);
+ await assert.rejects(s.service.payment({...request,paymentDate:'2026-09-17'},'owner'),/중복 요청/);
+ for(const paymentDate of ['2999-01-01','2026-02-30','','bad'])await assert.rejects(s.service.payment({...request,requestId:'invalid-date',paymentDate},'owner'));
+ assert.equal(s.records.has('opsPayments/invalid-date'),false);
+ await s.service.payment({...request,requestId:'final-date',amount:100000,paymentDate:'2026-09-18'},'owner');
+ assert.equal(s.records.get('opsAccounts/student-a').remaining,9);
+ assert.equal(s.records.get('opsPayments/final-date').paymentDate,'2026-09-18');
+ const {paymentDay,courseInitial,invoiceCycleStart}=s.load('billing-display');
+ assert.equal(paymentDay(payment),'2026-09-16');
+ assert.equal(paymentDay({at:'2026-09-16T23:30:00Z'}),'2026-09-17');
+ for(const [subject,initial] of [['어린이 피아노(1관)','PF(1)'],['어린이 피아노 (2관)','PF(2)'],['성인 피아노','PF(A)'],['드럼','D'],['우쿨렐레','UK'],['보컬','V'],['기타','G']])assert.equal(courseInitial(subject),initial);
+ assert.equal(invoiceCycleStart({studentId:'p',createdAt:'2026-09-15T01:00:00Z'},{}),undefined);
+ assert.equal(invoiceCycleStart({studentId:'p',createdAt:'2026-09-15T01:00:00Z'},{p:['2026-09-01','2026-09-16']}),'2026-09-16');
+});
