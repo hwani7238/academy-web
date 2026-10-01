@@ -80,3 +80,5 @@
 .whee-ops .month-color-legend .forecast{color:#9ca3af;border:1px dashed #d1d5db}
 
 .whee-ops .inactive-actions{display:flex;align-items:center;gap:8px}.whee-ops button.inactive-delete{width:38px;min-height:38px;padding:8px;color:#9f2635;background:transparent;border-color:transparent}.whee-ops button.inactive-delete:hover:not(:disabled){background:#fff0f1;border-color:#edc6cc;color:#9f2635}
+
+.whee-ops .quick-option.unpaid{background:#f1e4ff;color:#703aa0;border-color:#dcc2f5}

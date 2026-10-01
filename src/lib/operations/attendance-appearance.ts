@@ -58,3 +58,20 @@ export function importedAttendanceAppearance(row: Legacy, account?: Account, inv
     : { tone: 'payment-due', label: '결제 확인 필요' };
   return appearance;
 }
+
+
+export function unpaidAttendanceCycles(records: Attendance[], confirmed: Set<string>, prior: string[] = []) {
+  return new Set([...prior, ...records.filter(r => r.status === 'present' && r.unpaidCycleStart).map(r => `${r.studentId}_${r.unpaidCycleStart}`)].filter(key => !confirmed.has(key)));
+}
+
+export function lessonCycleStart(studentId: string, day: string, cycleFirstDays: Record<string, string[]>) {
+  return [...(cycleFirstDays[studentId] || [])].filter(start => start <= day).sort().at(-1) || day;
+}
+
+
+export function isUnpaidAttendance(row: Attendance, cycleFirstDays: Record<string, string[]>, pending: Set<string>) {
+  if ((row.status || 'present') !== 'present') return false;
+  const markedStarts = [...pending].filter(key => key.startsWith(`${row.studentId}_`)).map(key => key.slice(-10));
+  const start = row.unpaidCycleStart || lessonCycleStart(row.studentId, row.day, { [row.studentId]: [...(cycleFirstDays[row.studentId] || []), ...markedStarts] });
+  return pending.has(`${row.studentId}_${start}`);
+}

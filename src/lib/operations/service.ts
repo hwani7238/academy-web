@@ -382,14 +382,15 @@ export async function recordAttendance(input: Record<string, unknown>, actor: st
     const stamp=now();
     const remaining = adjustBalance(account.remaining, old?.units || 0, values.units);
     const openInvoiceId = remaining <= 0 && values.units > (old?.units || 0) && !account.openInvoiceId ? newInvoice(tx, db, account, invoiceId, '수동 출결 기록 후 소진', stamp) : account.openInvoiceId;
-    if (remaining > 0 && currentInvoice?.exists) tx.update(currentInvoice.ref, { needsReview: true });
+    const review = remaining > 0 && values.units < (old?.units || 0);
+    if (review && currentInvoice?.exists) tx.update(currentInvoice.ref, { needsReview: true });
     const attendance:Attendance={ ...old, ...values, id, studentId, name: account.name, source: old?.source || 'manual', at: old?.at || stamp, updatedAt: stamp };
     delete attendance.range;
     const updatedAccount={...account,remaining,openInvoiceId,updatedAt:stamp};
     tx.set(ref, attendance);
     tx.update(accountRef, { remaining, openInvoiceId, updatedAt: stamp });
     audit(tx, db, actor, 'record-attendance', studentId, { attendanceId: id, before: old?.units || 0, ...values, remaining });
-    const invoices:Invoice[]=openInvoiceId && openInvoiceId!==account.openInvoiceId ? [{id:openInvoiceId,studentId:account.id,name:account.name,units:account.planUnits,amount:account.planAmount,paid:0,status:'open',needsReview:false,createdAt:stamp}] : currentInvoice?.exists ? [{...currentInvoice.data(),id:currentInvoice.id,...(remaining>0?{needsReview:true}:{})} as Invoice] : [];
+    const invoices:Invoice[]=openInvoiceId && openInvoiceId!==account.openInvoiceId ? [{id:openInvoiceId,studentId:account.id,name:account.name,units:account.planUnits,amount:account.planAmount,paid:0,status:'open',needsReview:false,createdAt:stamp}] : currentInvoice?.exists ? [{...currentInvoice.data(),id:currentInvoice.id,...(review?{needsReview:true}:{})} as Invoice] : [];
     return { attendance:[attendance], accounts:[updatedAccount], invoices };
   });
 }

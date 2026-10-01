@@ -1220,3 +1220,56 @@ test('cycle dates survive month changes so old payments cannot confirm a later f
  assert.deepEqual([...confirmed([invoice],next.cycleFirstDays)],['drums_2026-09-01']);
  assert.deepEqual(prior.cycleFirstDays.drums,['2026-09-01']);
 });
+
+
+test('unpaid attendance loop: mark, edit, repeat, cancel and later collect without duplicate deductions',async()=>{
+ const s=setup();await s.seed('student-a',8);
+ const day='2026-09-01';
+ const base={studentId:'student-a',day,status:'present',units:1,note:'',relatedDay:'',unpaidCycleStart:day};
+ const first=await s.service.recordAttendance(base,'owner');
+ assert.equal(first.accounts[0].remaining,7);
+ assert.equal(first.attendance[0].status,'present');
+ assert.equal(first.attendance[0].unpaidCycleStart,day);
+ await s.service.recordAttendance({...base,expectedUpdatedAt:first.attendance[0].updatedAt},'owner');
+ assert.equal(s.records.get('opsAccounts/student-a').remaining,7);
+ // Marking an existing two-lesson attendance must keep both existing deductions.
+ const two=await s.service.recordAttendance({...base,units:2,unpaidCycleStart:'',expectedUpdatedAt:first.attendance[0].updatedAt},'owner');
+ const marked=await s.service.recordAttendance({...base,units:2,expectedUpdatedAt:two.attendance[0].updatedAt},'owner');
+ assert.equal(marked.accounts[0].remaining,6);
+ const cancelled=await s.service.recordAttendance({...base,status:'cancelled',units:0,expectedUpdatedAt:marked.attendance[0].updatedAt},'owner');
+ assert.equal(cancelled.accounts[0].remaining,8);assert.equal(cancelled.attendance[0].unpaidCycleStart,'');
+ const restored=await s.service.recordAttendance({...base,expectedUpdatedAt:cancelled.attendance[0].updatedAt},'owner');
+ await s.service.createCurrentCycleInvoice({studentId:'student-a',cycleStart:day,expectedUpdatedAt:restored.accounts[0].updatedAt},'owner');
+ const invoice=[...s.records.values()].find(r=>r.cycleStart===day && r.status==='open');
+ await s.service.payment({invoiceId:invoice.id,requestId:'partial-unpaid',amount:80000,method:'현금'},'owner');
+ assert.equal(s.records.get('opsAccounts/student-a').remaining,7);
+ await s.service.payment({invoiceId:invoice.id,requestId:'full-unpaid',amount:80000,method:'현금'},'owner');
+ assert.equal(s.records.get('opsAccounts/student-a').remaining,7);
+ const {confirmedFirstLessons,unpaidAttendanceCycles}=s.load('attendance-appearance');
+ const confirmed=confirmedFirstLessons([s.records.get(`opsInvoices/${invoice.id}`)],{'student-a':[day]});
+ assert.equal(unpaidAttendanceCycles([restored.attendance[0]],confirmed).size,0);
+ assert.equal([...s.records.keys()].filter(k=>k.startsWith('opsNotices/')).length,0);
+});
+
+test('unpaid flags last across months, partial payment and other courses; cancellation and matching full payment clear them',()=>{
+ const s=setup(),{unpaidAttendanceCycles:pending,isUnpaidAttendance:unpaid,confirmedFirstLessons:confirmed}=s.load('attendance-appearance');
+ const start='2026-09-01',key=`drums_${start}`;
+ const row=(day,extra={})=>({studentId:'drums',day,status:'present',units:1,...extra});
+ const marked=row(start,{unpaidCycleStart:start});
+ const cycles={drums:[start,'2026-10-15']};
+ const prior=pending([marked],new Set());
+ const next=pending([],new Set(),[...prior]);
+ assert.equal(unpaid(row('2026-10-01'),cycles,next),true);
+ assert.equal(unpaid(row('2026-10-01'),{},next),true); // No old first-lesson date available.
+ assert.equal(unpaid(row('2026-10-15'),cycles,next),false); // Separate next pass.
+ assert.equal(unpaid(row('2026-10-01',{studentId:'piano'}),cycles,next),false);
+ assert.equal(unpaid(row('2026-10-01',{status:'absent'}),cycles,next),false);
+ assert.equal(pending([{...marked,status:'cancelled'}],new Set()).size,0);
+ const invoice={studentId:'drums',cycleStart:start,createdAt:'2026-09-01T00:00:00Z',amount:160000,paid:80000,status:'open',needsReview:false};
+ assert.equal(pending([],confirmed([invoice],cycles),[key]).has(key),true);
+ assert.equal(pending([],confirmed([{...invoice,status:'paid',paid:160000}],cycles),[key]).size,0);
+ const {attendanceInput}=s.load('model');
+ assert.throws(()=>attendanceInput({...marked,unpaidCycleStart:'2026-09-02'}),/수강권 시작일/);
+ assert.throws(()=>attendanceInput({...marked,units:0}),/수강권 시작일/);
+ assert.throws(()=>attendanceInput({...marked,day:'2999-01-01'}),/미래/);
+});

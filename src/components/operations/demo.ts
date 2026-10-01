@@ -100,7 +100,7 @@ export function demoAction(current: Snapshot, input: Record<string, unknown>): {
     data.attendance.push({ ...old, ...values, id, studentId: account.id, name: account.name, at: old?.at || at, source: old?.source || 'manual', updatedAt: at });
     delete data.attendance[data.attendance.length-1].range;
     if (account.remaining <= 0 && values.units > (old?.units || 0)) invoice(account);
-    if (account.remaining > 0) { const open = data.invoices.find(i => i.id === account.openInvoiceId); if (open) open.needsReview = true; }
+    if (account.remaining > 0 && values.units < (old?.units || 0)) { const open = data.invoices.find(i => i.id === account.openInvoiceId); if (open) open.needsReview = true; }
   } else if (input.action === 'demoCheckIn') {
     if (!account?.active || enrollmentState(data.students.find(s=>s.id===account.id)?.lifecycle)!=='active') throw new Error('학생 설정을 확인해주세요.');
     const existing = data.attendance.find(a => a.studentId === account.id && a.day === seoulDay());
