@@ -50,7 +50,7 @@ export function attendanceSequence(accounts: Pick<Account, 'id' | 'planUnits' | 
     if (e.start) positions[id] = 0;
     if (e.record) {
       if (status === 'cancelled') continue;
-      if (status === 'makeup') {
+      if (status === 'makeup' || status === 'makeup_reserved') {
         // Makeup fills the original slot, even in a later month or pass.
         // Unlinked makeup has no guessed ordinal and never shifts regular lessons.
         const original = e.record.relatedDay && e.record.relatedDay < e.day

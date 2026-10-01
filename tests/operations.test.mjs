@@ -1383,3 +1383,83 @@ test('actual payment date is stored separately from entry time and retries canno
  assert.equal(invoiceCycleStart({studentId:'p',createdAt:'2026-09-15T01:00:00Z'},{}),undefined);
  assert.equal(invoiceCycleStart({studentId:'p',createdAt:'2026-09-15T01:00:00Z'},{p:['2026-09-01','2026-09-16']}),'2026-09-16');
 });
+
+test('future makeup reserves the missed ordinal without attendance, credit or duplicate bookings',async()=>{
+ const s=setup();await s.seed('piano',3);await s.seed('drums',3);
+ const source='2026-10-01',target='2999-01-10';
+ for(const studentId of ['piano','drums'])await s.service.recordAttendance({studentId,day:source,status:'travel',units:0},'owner');
+ const booking={studentId:'piano',day:target,status:'makeup_reserved',units:0,relatedDay:source,note:'5회차 보강',expectedUpdatedAt:''};
+ await Promise.all([s.service.recordAttendance(booking,'owner'),s.service.recordAttendance(booking,'owner')]);
+ const saved=s.records.get(`opsAttendance/piano_${target}`);
+ assert.equal(saved.status,'makeup_reserved');assert.equal(saved.units,0);assert.equal(s.records.get('opsAccounts/piano').remaining,3);
+ assert.equal([...s.records.keys()].some(k=>k.startsWith('opsNotices/')||k.startsWith('opsInvoices/')),false);
+ const recordRows=[...s.records].filter(([key])=>key.startsWith('opsAttendance/')).map(([,value])=>value);
+ const {attendanceSequence}=s.load('attendance-sequence');
+ const earlier=attendanceSequence([{id:'piano',planUnits:8}],recordRows.filter(r=>r.day===source),[],{positions:{piano:4},cycleStarts:[]});
+ const future=attendanceSequence([{id:'piano',planUnits:8}],[saved,{studentId:'piano',day:'2999-01-11',status:'present',units:1}],[],{...earlier,cycleStarts:[]});
+ assert.equal(earlier.labels.get(`piano_${source}`),'5');assert.equal(future.labels.get(`piano_${target}`),'5');assert.equal(future.labels.get('piano_2999-01-11'),'6');
+ await assert.rejects(s.service.recordAttendance({...booking,day:'2999-01-12'},'owner'),/이미/);
+ await s.service.recordAttendance({...booking,studentId:'drums'},'owner');
+ await assert.rejects(s.service.adjust({attendanceId:saved.id,units:1},'owner'),/보강 예약/);
+ await assert.rejects(s.service.recordAttendanceRange({studentId:'piano',start:target,end:target,status:'travel',rangeId:'trip',revisions:{[target]:saved.updatedAt}},'owner'),/출석/);
+ await s.service.recordAttendance({...booking,status:'cancelled',expectedUpdatedAt:saved.updatedAt},'owner');
+ assert.equal(s.records.get('opsAccounts/piano').remaining,3);
+ await s.service.recordAttendance({...booking,day:'2999-01-12'},'owner');
+ assert.equal(s.records.get(`opsAttendance/piano_${source}`).status,'travel');
+});
+
+test('reserved makeup becomes one kiosk arrival and one deduction, even for simultaneous taps',async()=>{
+ const s=setup();await s.seed('piano',3);const today=s.load('model').seoulDay(),yesterday=new Date(Date.parse(today)-86400000).toISOString().slice(0,10);
+ await s.service.recordAttendance({studentId:'piano',day:yesterday,status:'travel',units:0},'owner');
+ await s.service.recordAttendance({studentId:'piano',day:today,status:'makeup_reserved',units:0,relatedDay:yesterday,note:'예약 비고'},'owner');
+ const planned=s.records.get(`opsAttendance/piano_${today}`);
+ assert.equal(s.load('daily-checkins').dailyCheckins([planned],today).length,0);
+ const results=await Promise.all([s.service.checkIn('piano','1234','device'),s.service.checkIn('piano','1234','device')]);
+ assert.equal(results.filter(r=>!r.duplicate).length,1);assert.equal(s.records.get('opsAccounts/piano').remaining,2);
+ const completed=s.records.get(`opsAttendance/${planned.id}`);
+ assert.equal(completed.status,'makeup');assert.equal(completed.source,'kiosk');assert.equal(completed.relatedDay,yesterday);assert.equal(completed.note,'예약 비고');
+ assert.equal(s.load('daily-checkins').dailyCheckins([completed],today).length,1);
+ assert.equal([...s.records.keys()].filter(k=>k.startsWith('opsNotices/attendance_')).length,1);
+ await assert.rejects(s.service.recordAttendance({studentId:'piano',day:'2999-01-01',status:'makeup_reserved',units:0,relatedDay:yesterday},'owner'),/이미/);
+});
+
+test('charged absences are not charged twice, and cancelled originals cannot complete a reservation',async()=>{
+ for(const kiosk of [false,true]){
+  const s=setup();await s.seed('piano',3);const today=s.load('model').seoulDay(),yesterday=new Date(Date.parse(today)-86400000).toISOString().slice(0,10);
+  await s.service.recordAttendance({studentId:'piano',day:yesterday,status:'late_cancel',units:1},'owner');
+  await s.service.recordAttendance({studentId:'piano',day:today,status:'makeup_reserved',units:0,relatedDay:yesterday},'owner');
+  const booked=s.records.get(`opsAttendance/piano_${today}`);
+  if(kiosk)await s.service.checkIn('piano','1234','device');
+  else await s.service.recordAttendance({studentId:'piano',day:today,status:'makeup',units:1,relatedDay:yesterday,expectedUpdatedAt:booked.updatedAt},'owner');
+  assert.equal(s.records.get('opsAccounts/piano').remaining,2);assert.equal(s.records.get(`opsAttendance/piano_${today}`).units,0);
+ }
+ const s=setup();await s.seed('piano',3);const today=s.load('model').seoulDay(),yesterday=new Date(Date.parse(today)-86400000).toISOString().slice(0,10);
+ await s.service.recordAttendance({studentId:'piano',day:yesterday,status:'absent',units:0},'owner');
+ await s.service.recordAttendance({studentId:'piano',day:today,status:'makeup_reserved',units:0,relatedDay:yesterday},'owner');
+ await s.service.recordAttendance({studentId:'piano',day:yesterday,status:'cancelled',units:0,expectedUpdatedAt:s.records.get(`opsAttendance/piano_${yesterday}`).updatedAt},'owner');
+ await assert.rejects(s.service.checkIn('piano','1234','device'),/원래/);
+ assert.equal(s.records.get('opsAccounts/piano').remaining,3);assert.equal(s.records.get(`opsAttendance/piano_${today}`).status,'makeup_reserved');
+});
+
+test('future makeup validates date, source and charge before writing any booking',async()=>{
+ const s=setup();await s.seed('piano',3);const book={studentId:'piano',day:'2999-01-10',status:'makeup_reserved',units:0,relatedDay:'2026-09-01'};
+ for(const patch of [{units:1},{relatedDay:''},{relatedDay:'2999-01-10'},{relatedDay:'2999-01-11'},{status:'makeup'},{status:'present'}])await assert.rejects(s.service.recordAttendance({...book,...patch},'owner'));
+ await assert.rejects(s.service.recordAttendance(book,'owner'),/원래/);
+ await s.service.recordAttendance({studentId:'piano',day:book.relatedDay,status:'present',units:1},'owner');
+ await assert.rejects(s.service.recordAttendance(book,'owner'),/원래/);
+ assert.equal(s.records.has('opsAttendance/piano_2999-01-10'),false);
+ assert.equal(s.records.get('opsAccounts/piano').remaining,2);
+});
+
+test('a legacy missed class can be reserved and later corrected imports are respected',async()=>{
+ const s=setup();const owner='legacy-owner',studentId=s.service.enrollmentId(owner,'피아노');
+ s.records.set(`students/${owner}`,{name:'가상 학생',instruments:['피아노'],phone:'01000001234'});
+ await s.service.configure({studentId,sourceStudentId:owner,subject:'피아노',planUnits:8,planAmount:160000,remaining:3,phone:'01000001234',phones:['1234'],active:true},'owner');
+ s.records.set('opsImports/legacy-booking',{matchedStudentId:owner,subject:'어린이 피아노',asOf:'2026-09-30',history:[{cells:[{day:'2026-09-18',value:'5',color:'FFCCCCCC'}]}]});
+ const book={studentId,day:'2999-01-10',status:'makeup_reserved',units:0,relatedDay:'2026-09-18'};
+ await s.service.recordAttendance(book,'owner');assert.equal(s.records.get(`opsAccounts/${studentId}`).remaining,3);
+ s.records.set(`opsLegacyCorrections/${studentId}_2026-09-18`,{studentId,day:'2026-09-18',status:'cancelled',value:'',color:'',updatedAt:'changed'});
+ const old=s.records.get(`opsAttendance/${studentId}_2999-01-10`);
+ await s.service.recordAttendance({...book,status:'cancelled',expectedUpdatedAt:old.updatedAt},'owner');
+ await assert.rejects(s.service.recordAttendance({...book,day:'2999-01-11'},'owner'),/원래/);
+});

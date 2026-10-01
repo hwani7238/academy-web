@@ -7,7 +7,7 @@ export function correctedLegacy(original: LegacyAttendance, correction?: LegacyC
 }
 export function legacyCorrectionInput(input: Record<string, unknown>) {
   const status = input.status as AttendanceStatus;
-  if (!Object.hasOwn(ATTENDANCE_LABELS, status)) throw Error('출결 상태를 선택해주세요.');
+  if (!Object.hasOwn(ATTENDANCE_LABELS, status) || status === 'makeup_reserved') throw Error('출결 상태를 선택해주세요.');
   const ordinal = input.ordinal === '' || input.ordinal == null ? null : integer(input.ordinal, 1, 200, '수강권 회차');
   if (status === 'present' && ordinal === null) throw Error('수강권 회차를 입력해주세요.');
   const value = status === 'cancelled' ? '' : ordinal === null ? ATTENDANCE_LABELS[status] : String(ordinal);

@@ -22,7 +22,7 @@ export function rangeAttendance(input: Record<string, unknown>, student: {id:str
       if (old?.range?.id !== input.rangeId || old.units !== 0 || !RANGE_STATUSES.includes(old.status as typeof RANGE_STATUSES[number])) continue;
     } else {
       if (legacyDays.has(day) && !old) throw Error(`${day}에 이전 장부 기록이 있습니다. 해당 날짜를 제외해주세요.`);
-      if (old && (old.units > 0 || ['present','makeup'].includes(old.status || 'present'))) throw Error(`${day}에 출석 또는 차감 기록이 있습니다. 해당 기록을 개별 수정하거나 기간에서 제외해주세요.`);
+      if (old && (old.units > 0 || ['present','makeup','makeup_reserved'].includes(old.status || 'present'))) throw Error(`${day}에 출석·보강 예약 또는 차감 기록이 있습니다. 해당 기록을 개별 수정하거나 기간에서 제외해주세요.`);
       if (old?.range?.id === input.rangeId && old.status === input.status && old.note === note) continue;
     }
     if (old && ((!cancel && old.updatedAt !== (revisions[day] || '')) || (cancel && revisions[day] !== undefined && old.updatedAt !== revisions[day]))) throw Error(`${day} 기록이 변경됐습니다. 창을 닫고 다시 확인해주세요.`);

@@ -1,3 +1,4 @@
+import { legacyAttendanceAppearance } from '@/lib/operations/attendance-appearance';
 import { paymentDateInput } from '@/lib/operations/billing-display';
 import { correctedLegacy, legacyCorrectionInput } from '@/lib/operations/legacy-correction';
 import { changeSchedule, moveLesson } from '@/lib/operations/schedule';
@@ -98,6 +99,14 @@ export function demoAction(current: Snapshot, input: Record<string, unknown>): {
     const values = attendanceInput(input);
     if (!account) throw new Error('먼저 수강 설정을 저장해주세요.');
     const id = `${account.id}_${values.day}`; const old = data.attendance.find(a => a.id === id);
+    if(values.status==='makeup_reserved'||(old?.status==='makeup_reserved'&&values.status==='makeup')) {
+      if(values.status==='makeup_reserved'&&old&&(old.units>0||['present','makeup'].includes(old.status||'present')))throw Error('이미 출석한 날짜입니다. 출석 기록을 먼저 취소해주세요.');
+      const source=data.attendance.find(r=>r.studentId===account.id&&r.day===values.relatedDay), imported=data.legacyAttendance?.find(r=>r.studentId===account.id&&r.day===values.relatedDay);
+      const originalStatus=source?.status || (imported?legacyAttendanceAppearance(imported).tone:'');
+      if(!['absent','travel','sick','late_cancel'].includes(originalStatus))throw Error('원래 날짜의 결석·여행 기록을 확인해주세요.');
+      if(data.attendance.some(r=>r.id!==id&&r.studentId===account.id&&r.relatedDay===values.relatedDay&&['makeup','makeup_reserved'].includes(r.status||'')))throw Error('이 수업의 보강이 이미 예약되었거나 완료되었습니다.');
+      if(values.status==='makeup'&&(source?.units||0)>0)values.units=0;
+    }
     account.remaining = adjustBalance(account.remaining, old?.units || 0, values.units);
     data.attendance = data.attendance.filter(a => a.id !== id);
     data.attendance.push({ ...old, ...values, id, studentId: account.id, name: account.name, at: old?.at || at, source: old?.source || 'manual', updatedAt: at });
@@ -107,13 +116,18 @@ export function demoAction(current: Snapshot, input: Record<string, unknown>): {
   } else if (input.action === 'demoCheckIn') {
     if (!account?.active || enrollmentState(data.students.find(s=>s.id===account.id)?.lifecycle)!=='active') throw new Error('학생 설정을 확인해주세요.');
     const existing = data.attendance.find(a => a.studentId === account.id && a.day === seoulDay());
-    if (existing?.status && existing.status !== 'cancelled' && existing.status !== 'present' && existing.status !== 'makeup') throw new Error('오늘 결석·취소 기록이 있습니다. 선생님께 출석 변경을 요청해주세요.');
-    if (existing && existing.status !== 'cancelled') return { data, result: { duplicate: true, name: checkInName(account, {}) } };
+    if (existing?.status && existing.status !== 'cancelled' && existing.status !== 'present' && existing.status !== 'makeup' && existing.status !== 'makeup_reserved') throw new Error('오늘 결석·취소 기록이 있습니다. 선생님께 출석 변경을 요청해주세요.');
+    if (existing && existing.status !== 'cancelled' && existing.status !== 'makeup_reserved') return { data, result: { duplicate: true, name: checkInName(account, {}) } };
     const id = `${account.id}_${seoulDay()}`;
-    account.remaining = adjustBalance(account.remaining, 0, 1);
+    const reservation=existing?.status==='makeup_reserved'?existing:undefined;
+    const original=reservation?data.attendance.find(r=>r.studentId===account.id&&r.day===reservation.relatedDay):undefined;
+    const imported=reservation?data.legacyAttendance?.find(r=>r.studentId===account.id&&r.day===reservation.relatedDay):undefined;
+    if(reservation&&!['absent','travel','sick','late_cancel'].includes(original?.status||(imported?legacyAttendanceAppearance(imported).tone:'')))throw Error('원래 날짜의 결석·여행 기록을 확인해주세요.');
+    const units=(original?.units||0)>0?0:1;
+    account.remaining = adjustBalance(account.remaining, 0, units);
     data.attendance=data.attendance.filter(r=>r.id!==id);
-    data.attendance.unshift({ id, studentId: account.id, name: account.name, day: seoulDay(), at, units: 1, status: 'present', source: 'kiosk', note: '', updatedAt: at });
-    if(!data.notices.some(n=>n.id===`attendance_${id}`))enqueue(account, `attendance_${id}`, 'attendance'); if (account.remaining <= 0) invoice(account);
+    data.attendance.unshift({ id, studentId: account.id, name: account.name, day: seoulDay(), at, units, status: reservation?'makeup':'present', source: 'kiosk', note: reservation?.note||'', ...(reservation?{relatedDay:reservation.relatedDay}:{}), updatedAt: at });
+    if(!data.notices.some(n=>n.id===`attendance_${id}`))enqueue(account, `attendance_${id}`, 'attendance'); if (account.remaining <= 0 && units>0) invoice(account);
     result = { name: checkInName(account, {}), duplicate: false };
   } else if (input.action === 'configure') {
     const student = data.students.find(s => s.id === input.studentId)!;

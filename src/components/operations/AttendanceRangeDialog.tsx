@@ -16,7 +16,7 @@ export function AttendanceRangeDialog({ selection, data, busy, save, close }: {
   const student=data.students.find(s=>s.id===selection.studentId)!;
   let days:string[]=[];try{days=attendanceDays(start,end);}catch{}
   const rows=data.attendance.filter(r=>r.studentId===selection.studentId && days.includes(r.day));
-  const conflicts=rows.filter(r=>r.units>0 || ['present','makeup'].includes(r.status||'present'));
+  const conflicts=rows.filter(r=>r.units>0 || ['present','makeup','makeup_reserved'].includes(r.status||'present'));
   useEffect(()=>{dialog.current?.showModal();},[]);
   async function commit(cancel:boolean,note='') {
     if(busy||lock.current)return;

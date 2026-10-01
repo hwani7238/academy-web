@@ -1,3 +1,5 @@
+import { legacyAttendanceAppearance } from './attendance-appearance';
+import { plannedLesson } from './schedule';
 import { paymentDateInput } from './billing-display';
 import { reviewBalance, type BalanceAudit, type BalanceSource } from './balance-review';
 import { correctedLegacy, legacyCorrectionInput, type LegacyCorrection } from './legacy-correction';
@@ -169,6 +171,32 @@ export async function configure(input: Record<string, unknown>, actor: string) {
     return old && old.planUnits === planUnits ? { accounts: [saved as Account] } : undefined;
   });
 }
+// Read the missed lesson and all bookings inside the transaction so two screens
+// cannot reserve the same course/absence twice. Modern corrections override imports.
+async function makeupSource(tx: Transaction, db: Firestore, account: Account, day: string, relatedDay: string, attendanceId: string) {
+  if (!relatedDay || relatedDay >= day) throw Error('보강할 원래 수업일을 확인해주세요.');
+  const records = await tx.get(db.collection('opsAttendance').where('studentId', '==', account.id));
+  if (records.docs.some(d => d.id !== attendanceId && d.data().relatedDay === relatedDay && ['makeup','makeup_reserved'].includes(d.data().status))) throw Error('이 수업의 보강이 이미 예약되었거나 완료되었습니다. 기존 보강을 먼저 취소해주세요.');
+  const original = records.docs.find(d => d.data().day === relatedDay)?.data() as Attendance | undefined;
+  if (original) {
+    if (!['absent','travel','sick','late_cancel'].includes(original.status || '') || (original.range && !plannedLesson(account.schedule, relatedDay))) throw Error('원래 날짜의 결석·여행 기록을 확인해주세요.');
+    return { charged: original.units > 0 };
+  }
+  const sourceId = account.sourceStudentId || account.id;
+  const [person, sources, correction] = await Promise.all([
+    tx.get(db.doc(`students/${sourceId}`)), tx.get(db.collection('opsImports').where('matchedStudentId', '==', sourceId)),
+    tx.get(db.doc(`opsLegacyCorrections/${account.id}_${relatedDay}`)),
+  ]);
+  const subjects = studentSubjects(person.data() || {}), cells: {studentId:string;day:string;value:string;color:string}[] = [];
+  for (const doc of sources.docs) {
+    const source = doc.data(), matching = resolveImportedSubjects(subjects, source.subject);
+    if (matching.length !== 1 || enrollmentId(sourceId, matching[0]) !== account.id || relatedDay > (source.attendanceCutoffs?.[relatedDay.slice(0,7)] || source.asOf || '')) continue;
+    for (const history of source.history || []) for (const cell of history.cells || []) if (cell.day === relatedDay) cells.push({studentId:account.id,day:relatedDay,value:String(cell.value),color:String(cell.color || '')});
+  }
+  if (cells.length !== 1 || !['absent','travel','sick','late_cancel'].includes(legacyAttendanceAppearance(correctedLegacy(cells[0], correction.data() as LegacyCorrection | undefined)).tone)) throw Error('원래 날짜의 결석·여행 기록을 확인해주세요.');
+  return { charged: false };
+}
+
 export async function checkIn(studentId: string, digits: string, actor: string) {
   const db = database(); const id = key(studentId); const day = seoulDay(); const attendanceId = `${id}_${day}`;
   const ref = db.doc(`opsAccounts/${id}`); const attendanceRef = db.doc(`opsAttendance/${attendanceId}`);
@@ -187,18 +215,21 @@ export async function checkIn(studentId: string, digits: string, actor: string) 
         return { duplicate: true, name };
       }
     }
-    if (attended.exists && attended.data()?.status !== 'cancelled') {
+    const reservation = attended.data()?.status === 'makeup_reserved' ? attended.data() as Attendance : undefined;
+    if (attended.exists && attended.data()?.status !== 'cancelled' && !reservation) {
       const status = attended.data()?.status || 'present';
       if (status !== 'present' && status !== 'makeup') throw new HttpError(409, '오늘 결석·취소 기록이 있습니다. 선생님께 출석 변경을 요청해주세요.');
       return { duplicate: true, name };
     }
     const previousNotice = attended.exists ? await tx.get(db.doc(`opsNotices/attendance_${attendanceId}`)) : null;
-    const remaining = adjustBalance(account.remaining, 0, 1);
-    const openInvoiceId = remaining <= 0 && !account.openInvoiceId ? newInvoice(tx, db, account, invoiceId, '수업 횟수 소진') : account.openInvoiceId;
-    tx.set(attendanceRef, { id: attendanceId, studentId: id, name: account.name, day, at: now(), units: 1, status: 'present', source: 'kiosk', note: '', updatedAt: now() });
+    const source = reservation ? await makeupSource(tx, db, account, day, reservation.relatedDay || '', attendanceId) : undefined;
+    const units = source?.charged ? 0 : 1;
+    const remaining = adjustBalance(account.remaining, 0, units);
+    const openInvoiceId = remaining <= 0 && units > 0 && !account.openInvoiceId ? newInvoice(tx, db, account, invoiceId, '수업 횟수 소진') : account.openInvoiceId;
+    tx.set(attendanceRef, { id: attendanceId, studentId: id, name: account.name, day, at: now(), units, status: reservation ? 'makeup' : 'present', source: 'kiosk', note: reservation?.note || '', ...(reservation ? {relatedDay:reservation.relatedDay} : {}), updatedAt: now() });
     tx.update(ref, { remaining, openInvoiceId, updatedAt: now() });
     if (!previousNotice?.exists) enqueue(tx, db, `attendance_${attendanceId}`, account, 'attendance', { student_name: account.name, attendance_time: new Date().toLocaleTimeString('ko-KR', { timeZone: 'Asia/Seoul', hour: '2-digit', minute: '2-digit', hour12: false }) });
-    audit(tx, db, actor, 'check-in', id, { attendanceId, units: 1, remaining });
+    audit(tx, db, actor, 'check-in', id, { attendanceId, units, remaining, ...(reservation ? {relatedDay:reservation.relatedDay, completedReservation:true} : {}) });
     return { duplicate: false, name };
   });
 }
@@ -208,6 +239,7 @@ export async function adjust(input: Record<string, unknown>, actor: string) {
   await db.runTransaction(async tx => {
     const attendanceRef = db.doc(`opsAttendance/${id}`); const attendance = (await tx.get(attendanceRef)).data() as Attendance | undefined;
     if (!attendance) throw new Error('출석 기록을 찾을 수 없습니다.');
+    if (attendance.status === 'makeup_reserved' && units !== 0) throw new Error('보강 예약은 월별 출석표에서 보강 완료로 변경해주세요.');
     if (attendance.status === 'cancelled' && units !== 0) throw new Error('취소 기록은 월별 출석표에서 상태를 먼저 변경해주세요.');
     const ref = db.doc(`opsAccounts/${attendance.studentId}`); const account = (await tx.get(ref)).data() as Account;
     const currentInvoice = account.openInvoiceId ? await tx.get(db.doc(`opsInvoices/${account.openInvoiceId}`)) : null;
@@ -405,6 +437,11 @@ export async function recordAttendance(input: Record<string, unknown>, actor: st
     if (old && Object.entries(values).every(([k,v]) => (old as unknown as Record<string, unknown>)[k] === v)) return { attendance:[old], accounts:[account], invoices: currentInvoice?.exists ? [{...currentInvoice.data(),id:currentInvoice.id} as Invoice] : [] };
     if ((old?.updatedAt || '') !== (input.expectedUpdatedAt || '')) throw new Error('다른 화면에서 기록이 변경됐습니다. 새로고침 후 다시 확인해주세요.');
 
+    if (values.status === 'makeup_reserved' || (old?.status === 'makeup_reserved' && values.status === 'makeup')) {
+      if (values.status === 'makeup_reserved' && old && (old.units > 0 || ['present','makeup'].includes(old.status || 'present'))) throw Error('이미 출석한 날짜입니다. 출석 기록을 먼저 취소해주세요.');
+      const original = await makeupSource(tx, db, account, values.day, values.relatedDay, id);
+      if (values.status === 'makeup' && original.charged) values.units = 0;
+    }
     const stamp=now();
     const remaining = adjustBalance(account.remaining, old?.units || 0, values.units);
     const openInvoiceId = remaining <= 0 && values.units > (old?.units || 0) && !account.openInvoiceId ? newInvoice(tx, db, account, invoiceId, '수동 출결 기록 후 소진', stamp) : account.openInvoiceId;

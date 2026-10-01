@@ -7,7 +7,7 @@ export type Account = {
   planUnits: number; planAmount: number; remaining: number; openInvoiceId: string | null;
   autoBilling: boolean; active: boolean; updatedAt: string;
 };
-export const ATTENDANCE_LABELS = { present: "출석", absent: "결석", makeup: "보강", late_cancel: "당일 취소", travel: "여행", sick: "병가", cancelled: "취소" } as const;
+export const ATTENDANCE_LABELS = { present: "출석", absent: "결석", makeup: "보강", makeup_reserved: "보강 예약", late_cancel: "당일 취소", travel: "여행", sick: "병가", cancelled: "취소" } as const;
 export type AttendanceStatus = keyof typeof ATTENDANCE_LABELS;
 export type LegacyAttendance = { studentId: string; day: string; value: string; color: string; status?: AttendanceStatus; note?: string; revision?: string };
 export type Attendance = { unpaidCycleStart?: string; range?: {id:string;start:string;end:string}; arrivalAt?: string; status?: AttendanceStatus; source?: "kiosk" | "manual"; relatedDay?: string; id: string; studentId: string; name: string; day: string; at: string; units: number; note: string; updatedAt: string };
@@ -47,10 +47,12 @@ export function attendanceInput(input: Record<string, unknown>) {
   const status = input.status as AttendanceStatus;
   if (!Object.hasOwn(ATTENDANCE_LABELS, status)) throw new Error('출결 상태를 선택해주세요.');
   const units = integer(input.units, 0, 10, '차감 횟수');
-  if (day > seoulDay() && !(units === 0 && ['travel','absent','sick','cancelled'].includes(status))) throw new Error('미래 날짜에는 차감 없는 여행·결석·병가만 미리 표시할 수 있습니다.');
+  if (day > seoulDay() && !(units === 0 && ['travel','absent','sick','cancelled','makeup_reserved'].includes(status))) throw new Error('미래 날짜에는 차감 없는 여행·결석·병가·보강 예약만 미리 표시할 수 있습니다.');
+  if (status === 'makeup_reserved' && units !== 0) throw new Error('보강 예약은 차감 없이 저장해주세요.');
   if (status === 'cancelled' && units !== 0) throw new Error('취소 기록은 0회 차감으로 저장해주세요.');
   const note = typeof input.note === 'string' ? input.note.trim().slice(0, 500) : '';
-  const relatedDay = status === 'makeup' && input.relatedDay ? validDay(input.relatedDay) : '';
+  const relatedDay = ['makeup','makeup_reserved'].includes(status) && input.relatedDay ? validDay(input.relatedDay) : '';
+  if (status === 'makeup_reserved' && (!relatedDay || relatedDay >= day)) throw new Error('보강할 원래 수업일을 보강일 이전 날짜로 선택해주세요.');
   if (relatedDay && relatedDay > day) throw new Error('원래 수업일은 보강일보다 늦을 수 없습니다.');
   const unpaidCycleStart = status === 'present' && input.unpaidCycleStart ? validDay(input.unpaidCycleStart) : '';
   if (unpaidCycleStart && (unpaidCycleStart > day || units < 1)) throw new Error('미결제 출석은 수강권 시작일 이후에 1회 이상 차감으로 기록해주세요.');

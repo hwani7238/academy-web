@@ -45,7 +45,7 @@ export function moveLesson(old: LessonSchedule | undefined, input: Record<string
   const lesson=plannedLesson(old,from);
   if (!lesson) throw Error('옮길 수업이 없습니다.');
   if (plannedLesson(old,to)) throw Error('그 날짜에는 이미 수업이 예정되어 있습니다. 다른 날짜를 선택해주세요.');
-  if (records.some(r=>r.day===from && (r.units>0 || ['present','makeup'].includes(r.status||'present')))) throw Error('출석·차감 기록이 있는 수업은 옮길 수 없습니다.');
+  if (records.some(r=>r.day===from && (r.units>0 || ['present','makeup','makeup_reserved'].includes(r.status||'present')))) throw Error('출석·보강 예약·차감 기록이 있는 수업은 옮길 수 없습니다.');
   if (records.some(r=>r.day===to && r.status!=='cancelled')) throw Error('옮길 날짜에 출결·여행 기록이 있습니다. 다른 날짜를 선택하거나 해당 기록을 먼저 취소해주세요.');
   const moves=old.moves.filter(m=>m.from!==lesson.origin);
   const originIsRegular=ruleOn(old,lesson.origin)?.weekdays.includes(new Date(`${lesson.origin}T00:00:00Z`).getUTCDay());
