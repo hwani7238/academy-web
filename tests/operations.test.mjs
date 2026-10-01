@@ -1041,3 +1041,45 @@ test('snapshot revision detects schedule-only edits and removal without attendan
  assert.notEqual(await operationsRevision(db),removed);
  assert.ok(queries.some(q=>q[0]==='opsAccounts'&&q[1]==='schedule.updatedAt'));
 });
+
+test('inactive course deletion and restoration preserve other courses, balances and financial history', async () => {
+ const s=setup();s.records.set('students/person',{name:'가상',instruments:['피아노','드럼']});
+ const piano=s.service.enrollmentId('person','피아노'),drums=s.service.enrollmentId('person','드럼');
+ for(const [id,subject] of [[piano,'피아노'],[drums,'드럼']])await s.service.configure({studentId:id,sourceStudentId:'person',subject,planUnits:8,planAmount:160000,remaining:6,phone:'01000001234',phones:['1234']},'owner');
+ const withdrawn=await s.service.changeLifecycle({sourceStudentId:'person',studentId:drums,status:'withdrawn',withdrawnOn:'2026-01-01',note:'시간 변경'},'owner');
+ s.records.set('opsAttendance/old',{studentId:drums,day:'2026-01-01',units:1});
+ s.records.set('opsInvoices/open',{studentId:drums,status:'open',amount:160000,paid:0});
+ s.records.set('opsPayments/old',{studentId:drums,amount:160000});
+ const ledger=()=>[...s.records].filter(([p])=>/^ops(Accounts|Attendance|Invoices|Payments|Notices)\//.test(p));
+ const before=structuredClone(ledger());
+ const input={action:'deleteEnrollment',sourceStudentId:'person',studentId:drums,expectedUpdatedAt:withdrawn.lifecycle.value.updatedAt};
+ const deleted=await s.service.deleteEnrollment(input,'owner');
+ assert.ok(deleted.lifecycle.value.deletedAt);assert.deepEqual(ledger(),before);
+ assert.equal(s.load('lifecycle').enrollmentState(s.load('lifecycle').courseLifecycle(s.records.get('students/person'),piano)),'active');
+ await assert.rejects(s.service.checkIn(drums,'1234','device'));
+ await assert.rejects(s.service.changeLifecycle({...input,status:'active',expectedUpdatedAt:deleted.lifecycle.value.updatedAt},'owner'),/복원/);
+ await assert.rejects(s.service.deleteEnrollment(input,'owner'),/변경/);
+ const restored=await s.service.deleteEnrollment({...input,action:'restoreEnrollment',expectedUpdatedAt:deleted.lifecycle.value.updatedAt},'owner');
+ assert.equal(restored.lifecycle.value.deletedAt,undefined);assert.equal(restored.lifecycle.value.status,'withdrawn');
+ assert.equal(restored.lifecycle.value.withdrawnOn,'2026-01-01');assert.equal(restored.lifecycle.value.note,'시간 변경');assert.deepEqual(ledger(),before);
+ assert.deepEqual([...s.records.values()].filter(v=>['delete-enrollment','restore-enrollment'].includes(v.action)).map(v=>v.action),['delete-enrollment','restore-enrollment']);
+});
+
+test('deletion rejects active, expired, foreign, stale and ambiguous courses', async () => {
+ const s=setup();await s.seed('student-a',8);
+ const base={action:'deleteEnrollment',sourceStudentId:'student-a',studentId:'student-a'};
+ await assert.rejects(s.service.deleteEnrollment(base,'owner'),/휴원·퇴원/);
+ await assert.rejects(s.service.deleteEnrollment({...base,studentId:'foreign'},'owner'),/과목/);
+ s.records.get('students/student-a').instruments=['피아노','드럼'];
+ await assert.rejects(s.service.deleteEnrollment(base,'owner'),/분리/);
+ const {deleteOrRestoreEnrollment,enrollmentState}=s.load('lifecycle');
+ const paused={status:'paused',until:'2026-10-02',note:'보관',updatedAt:'a'};
+ await assert.rejects(s.service.deleteEnrollment({...base,sourceStudentId:'missing'},'owner'),/학생/);
+ assert.throws(()=>deleteOrRestoreEnrollment(paused,{action:'deleteEnrollment',expectedUpdatedAt:'wrong'},'b','2026-10-01'),/변경/);
+ assert.throws(()=>deleteOrRestoreEnrollment(paused,{action:'deleteEnrollment',expectedUpdatedAt:'a'},'b','2026-10-03'),/휴원·퇴원/);
+ const deleted=deleteOrRestoreEnrollment(paused,{action:'deleteEnrollment',expectedUpdatedAt:'a'},'b','2026-10-01');
+ assert.notEqual(enrollmentState(deleted,'2026-10-03'),'active');
+ const restored=deleteOrRestoreEnrollment(deleted,{action:'restoreEnrollment',expectedUpdatedAt:'b'},'c','2026-10-03');
+ assert.equal(enrollmentState(restored,'2026-10-03'),'active');assert.equal(restored.until,paused.until);
+ assert.throws(()=>deleteOrRestoreEnrollment(restored,{action:'restoreEnrollment',expectedUpdatedAt:'c'},'d'),/삭제된/);
+});

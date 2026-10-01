@@ -86,6 +86,7 @@ export async function POST(request: Request) {
   try {
     sameOrigin(request); const actor = await manager(request); const input = await request.json();
     switch (input.action) {
+      case 'deleteEnrollment': case 'restoreEnrollment': return Response.json({ok:true,changes:await service.deleteEnrollment(input,actor)});
       case 'saveSchedule': case 'moveLesson': return Response.json({ok:true,changes:await service.saveSchedule(input,actor)});
       case 'renameStudent': await service.renameStudent(input,actor); return Response.json({ok:true});
       case 'correctAttendanceTime': return Response.json({ok:true,changes:await service.correctAttendanceTime(input,actor)});

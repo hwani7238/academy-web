@@ -1,7 +1,7 @@
 import { reviewBalance, type BalanceAudit, type BalanceSource } from './balance-review';
 import { changeSchedule, moveLesson } from './schedule';
 import { attendanceDays, rangeAttendance } from './attendance-range';
-import { enrollmentState, lifecycleInput, courseLifecycle } from './lifecycle';
+import { enrollmentState, lifecycleInput, courseLifecycle, deleteOrRestoreEnrollment } from './lifecycle';
 import { checkInName, courseGroup, resolveImportedSubjects } from './course-label';
 export { resolveImportedSubjects } from './course-label';
 import { correctedArrival } from './attendance-time';
@@ -39,11 +39,33 @@ export async function changeLifecycle(input: Record<string, unknown>, actor: str
     if(studentId===id){if(subjects.length>1)throw Error('과목별 수강권을 먼저 분리해주세요.');}
     else if(!subjects.some(subject=>enrollmentId(id,subject)===studentId) && !(account?.sourceStudentId===id))throw Error('해당 학생의 과목을 찾을 수 없습니다.');
     const old = courseLifecycle(student,studentId);
+    if (old?.deletedAt) throw Error('삭제된 항목에서 먼저 복원해주세요.');
     if (old && old.status === values.status && old.until === values.until && (old.withdrawnOn || '') === values.withdrawnOn && old.note === values.note) return { lifecycle: { studentId, value:old } };
     if ((old?.updatedAt || '') !== (input.expectedUpdatedAt || '')) throw Error('학생 상태가 변경됐습니다. 새로고침 후 다시 확인해주세요.');
     const value = { ...values, updatedAt: new Date(Math.max(Date.now(),Date.parse(old?.updatedAt||'')+1||0)).toISOString() };
     tx.update(ref, { courseLifecycles: {...student.courseLifecycles,[studentId]:value} });
     audit(tx, db, actor, 'course-lifecycle', studentId, { sourceStudentId:id, before: old || null, ...values });
+    return { lifecycle: { studentId, value } };
+  });
+}
+export async function deleteEnrollment(input: Record<string, unknown>, actor: string) {
+  const id = key(input.sourceStudentId), studentId = key(input.studentId), db = database();
+  return db.runTransaction(async tx => {
+    const ref = db.doc(`students/${id}`), student = (await tx.get(ref)).data();
+    if (!student) throw Error('학생을 찾을 수 없습니다.');
+    const account = (await tx.get(db.doc(`opsAccounts/${studentId}`))).data();
+    const subjects = studentSubjects(student);
+    if (studentId === id) {
+      if (subjects.length > 1) throw Error('과목별 수강권을 먼저 분리해주세요.');
+    } else if (!subjects.some(subject => enrollmentId(id, subject) === studentId) && account?.sourceStudentId !== id) {
+      throw Error('해당 학생의 과목을 찾을 수 없습니다.');
+    }
+    const old = courseLifecycle(student, studentId);
+    const stamp = new Date(Math.max(Date.now(), Date.parse(old?.updatedAt || '') + 1 || 0)).toISOString();
+    const value = deleteOrRestoreEnrollment(old, input, stamp);
+    // Keep attendance, payments, outstanding invoices and other courses intact.
+    tx.update(ref, { courseLifecycles: { ...student.courseLifecycles, [studentId]: value } });
+    audit(tx, db, actor, input.action === 'restoreEnrollment' ? 'restore-enrollment' : 'delete-enrollment', studentId, { sourceStudentId: id, before: old, after: value });
     return { lifecycle: { studentId, value } };
   });
 }

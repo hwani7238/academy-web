@@ -1,6 +1,6 @@
 import { changeSchedule, moveLesson } from '@/lib/operations/schedule';
 import { rangeAttendance } from '@/lib/operations/attendance-range';
-import { enrollmentState, lifecycleInput } from '@/lib/operations/lifecycle';
+import { enrollmentState, lifecycleInput, deleteOrRestoreEnrollment } from '@/lib/operations/lifecycle';
 import { correctedArrival } from '@/lib/operations/attendance-time';
 import { checkInName } from '@/lib/operations/course-label';
 import { REGISTRATION_SUBJECTS, registrationInput } from '@/lib/operations/registration';
@@ -62,9 +62,14 @@ export function demoAction(current: Snapshot, input: Record<string, unknown>): {
     const existing=data.invoices.find(i=>i.id===account.openInvoiceId);
     if(existing)existing.needsReview=true;
     else if(account.remaining<=0){const auto=account.autoBilling;account.autoBilling=false;invoice(account);account.autoBilling=auto;}
+  } else if(input.action === 'deleteEnrollment' || input.action === 'restoreEnrollment'){
+    const row=data.students.find(s=>s.id===input.studentId && (s.sourceStudentId||s.id)===input.sourceStudentId);
+    if(!row)throw Error('학생을 찾을 수 없습니다.');
+    row.lifecycle=deleteOrRestoreEnrollment(row.lifecycle,input,at);
   } else if(input.action === 'changeLifecycle'){
     const values=lifecycleInput(input);const rows=data.students.filter(s=>s.id===input.studentId && (s.sourceStudentId||s.id)===input.sourceStudentId);
     if(!rows.length)throw Error('학생을 찾을 수 없습니다.');
+    if(rows[0].lifecycle?.deletedAt)throw Error('삭제된 항목에서 먼저 복원해주세요.');
     if((rows[0].lifecycle?.updatedAt||'')!==(input.expectedUpdatedAt||''))throw Error('학생 상태가 변경됐습니다.');
     for(const row of rows)row.lifecycle={...values,updatedAt:at};
   } else if (input.action === 'registerStudent') {
