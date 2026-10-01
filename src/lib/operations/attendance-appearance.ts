@@ -22,16 +22,39 @@ export function attendancePaymentDue(row: Pick<Attendance, 'day' | 'status' | 'u
   return Boolean(account && account.remaining < 0 && Number.isFinite(created.getTime()) && row.day > seoulDay(created));
 }
 
-export function paidFirstLesson(sequence: string | undefined, status: Attendance['status'], paymentDue: boolean) {
-  return !paymentDue && ['present', 'makeup'].includes(status || 'present') && Boolean(sequence?.split('·').some(value => Number(value) === 1));
+export function isFirstLesson(sequence: string | undefined, status: Attendance['status']) {
+  return (status || 'present') === 'present' && Boolean(sequence?.split('·').some(value => Number(value) === 1));
 }
 
-export function importedAttendanceAppearance(row: Legacy, account?: Account, invoice?: Invoice) {
+export function paidFirstLesson(sequence: string | undefined, status: Attendance['status'], paymentDue: boolean, confirmed = false) {
+  return confirmed && !paymentDue && isFirstLesson(sequence, status);
+}
+
+// A previous payment must never paint every later pass as paid. Explicit cycle
+// dates win; an ordinary advance renewal belongs only to the first cycle after
+// its creation day. Same-day/ambiguous renewals need an explicit cycle date.
+export function confirmedFirstLessons(invoices: Invoice[], cycleFirstDays: Record<string, string[]>) {
+  const byLesson = new Map<string, Invoice[]>();
+  for (const invoice of invoices) {
+    if (invoice.status === 'cancelled') continue;
+    const created = new Date(invoice.createdAt);
+    const day = invoice.cycleStart || (Number.isFinite(created.getTime())
+      ? [...(cycleFirstDays[invoice.studentId] || [])].sort().find(day => day > seoulDay(created)) : undefined);
+    if (!day) continue;
+    const key = `${invoice.studentId}_${day}`;
+    byLesson.set(key, [...(byLesson.get(key) || []), invoice]);
+  }
+  return new Set([...byLesson].filter(([, rows]) => rows.every(i => i.status === 'paid' && i.amount > 0 && i.paid >= i.amount && !i.needsReview)).map(([key]) => key));
+}
+
+export function importedAttendanceAppearance(row: Legacy, account?: Account, invoice?: Invoice, confirmed = false) {
   const appearance = legacyAttendanceAppearance(row);
   if (row.status === 'cancelled') return appearance;
   const status = appearance.tone === 'payment-due' ? 'present' : appearance.tone as Attendance['status'];
   const due = attendancePaymentDue({ day: row.day, status, units: 1 }, account, invoice);
   if (due) return { tone: 'payment-due', label: '결제 필요' };
-  if (paidFirstLesson(row.value, status, false)) return { tone: 'paid-first', label: appearance.tone === 'makeup' ? '보강' : '결제 완료' };
+  if (isFirstLesson(row.value, status)) return confirmed
+    ? { tone: 'paid-first', label: '결제 완료' }
+    : { tone: 'payment-due', label: '결제 확인 필요' };
   return appearance;
 }

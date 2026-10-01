@@ -143,6 +143,7 @@ export function demoAction(current: Snapshot, input: Record<string, unknown>): {
     else { if (i.needsReview) throw new Error('청구 내용을 확인해주세요.'); if (data.notices.some(n => n.id === `billing_${i.id}`)) throw new Error('이미 요청 기록이 있습니다.'); enqueue(data.accounts.find(a => a.id === i.studentId)!, `billing_${i.id}`, 'billing'); }
   } else if (input.action === 'pair') result = { code: '체험에서는 실제 기기를 등록하지 않습니다.' };
   else if (input.action === 'process') result = { submitted: 0 };
+  data.settledInvoices = [...(data.settledInvoices || []), ...data.invoices.filter(i => i.status === 'paid')];
   data.invoices = data.invoices.filter(i => i.status === 'open');
   return { data, result };
 }

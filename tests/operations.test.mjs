@@ -934,9 +934,10 @@ test('monthly payment color excludes completed passes and clears when settled',(
 
 test('paid first lessons are pink while unpaid first lessons stay purple',()=>{
  const {paidFirstLesson:first,importedAttendanceAppearance:appearance}=setup().load('attendance-appearance');
- assert.equal(first('1','present',false),true);
- assert.equal(first('8·1','present',false),true);
- assert.equal(first('1','makeup',false),true);
+ assert.equal(first('1','present',false),false);
+ assert.equal(first('1','present',false,true),true);
+ assert.equal(first('8·1','present',false,true),true);
+ assert.equal(first('1','makeup',false,true),false);
  assert.equal(first('1','present',true),false);
  assert.equal(first('11','present',false),false);
  assert.equal(first(undefined,'present',false),false);
@@ -944,9 +945,9 @@ test('paid first lessons are pink while unpaid first lessons stay purple',()=>{
  const row={studentId:'p',day:'2026-09-15',value:'1.0',color:'FFFF00FF'};
  const inv={status:'open',amount:230000,paid:100000,cycleStart:'2026-09-15',createdAt:'2026-09-15T00:00:00Z'};
  assert.equal(appearance(row,{remaining:11},inv).tone,'payment-due');
- assert.equal(appearance(row,{remaining:11},{...inv,status:'paid',paid:230000}).tone,'paid-first');
- assert.equal(appearance(row,{remaining:11},undefined).tone,'paid-first');
- assert.equal(appearance(row,{remaining:11},{...inv,cycleStart:'2026-09-30'}).tone,'paid-first');
+ assert.equal(appearance(row,{remaining:11},{...inv,status:'paid',paid:230000},true).tone,'paid-first');
+ assert.equal(appearance(row,{remaining:11},undefined).tone,'payment-due');
+ assert.equal(appearance(row,{remaining:11},{...inv,cycleStart:'2026-09-30'}).tone,'payment-due');
  assert.equal(appearance({...row,color:'FFD9D9D9'},{remaining:11},inv).tone,'absent');
  assert.equal(appearance({...row,value:'2',color:'FFFF9900'},{remaining:11},undefined).tone,'makeup');
 });
@@ -1184,4 +1185,38 @@ test('vacation ranges reserve only actual class days, including moves and exclud
  // Removing a reservation removes its ordinal and recalculates the next class.
  const cancelled=records.map(r=>({...r,status:'cancelled'}));
  assert.equal(forecast([account],cancelled,[],{positions:{p:2},cycleStarts:[]},dates,'2026-10-01').get('p_2026-10-08'),'3');
+});
+
+
+test('first-lesson colors require full payment for that course and that cycle, never absence of an invoice',()=>{
+ const s=setup(),{confirmedFirstLessons:confirmed,importedAttendanceAppearance:appearance}=s.load('attendance-appearance');
+ const cycles={drums:['2026-08-31','2026-09-28','2026-10-26'],piano:['2026-09-28']};
+ const invoice={id:'i',studentId:'drums',amount:160000,paid:0,status:'open',createdAt:'2026-09-21T02:00:00Z',needsReview:false};
+ assert.equal(confirmed([invoice],cycles).size,0);
+ assert.equal(confirmed([{...invoice,paid:80000}],cycles).size,0);
+ const paid={...invoice,status:'paid',paid:160000};
+ assert.deepEqual([...confirmed([paid],cycles)],['drums_2026-09-28']);
+ assert.equal(confirmed([paid],cycles).has('drums_2026-10-26'),false);
+ assert.equal(confirmed([paid],cycles).has('piano_2026-09-28'),false);
+ for(const patch of [{status:'cancelled'},{paid:80000},{needsReview:true}])assert.equal(confirmed([{...paid,...patch}],cycles).size,0);
+ assert.equal(confirmed([paid,{...invoice,id:'other',cycleStart:'2026-09-28'}],cycles).size,0);
+ // Explicit late collection marks the intended earlier cycle, not the next one.
+ assert.deepEqual([...confirmed([{...paid,createdAt:'2026-10-02T00:00:00Z',cycleStart:'2026-09-28'}],cycles)],['drums_2026-09-28']);
+ for(const color of ['', 'FFFF00FF']){
+  const row={studentId:'drums',day:'2026-09-28',value:'1.0',color};
+  assert.equal(appearance(row).tone,'payment-due');
+  assert.equal(appearance(row,undefined,undefined,true).tone,'paid-first');
+  assert.equal(appearance({...row,status:'absent'},undefined,undefined,true).tone,'absent');
+ }
+});
+
+test('cycle dates survive month changes so old payments cannot confirm a later first lesson',()=>{
+ const s=setup(),{attendanceSequence:sequence}=s.load('attendance-sequence'),{confirmedFirstLessons:confirmed}=s.load('attendance-appearance');
+ const a=[{id:'drums',planUnits:4}];
+ const prior=sequence(a,[],[{studentId:'drums',day:'2026-09-01',value:'1',color:''},{studentId:'drums',day:'2026-09-28',value:'4',color:''}]);
+ const next=sequence(a,[{studentId:'drums',day:'2026-10-01',units:1,status:'present'}],[],{...prior,cycleStarts:[]});
+ assert.deepEqual(next.cycleFirstDays.drums,['2026-09-01','2026-10-01']);
+ const invoice={id:'i',studentId:'drums',createdAt:'2026-08-28T00:00:00Z',status:'paid',amount:160000,paid:160000,needsReview:false};
+ assert.deepEqual([...confirmed([invoice],next.cycleFirstDays)],['drums_2026-09-01']);
+ assert.deepEqual(prior.cycleFirstDays.drums,['2026-09-01']);
 });

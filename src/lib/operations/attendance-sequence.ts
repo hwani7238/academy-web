@@ -5,6 +5,7 @@ import { plannedLesson } from './schedule';
 export type SequenceContext = {
   positions: Record<string, number>;
   missedLessons?: Record<string, string>;
+  cycleFirstDays?: Record<string, string[]>;
   cycleStarts: { studentId: string; day: string }[];
 };
 type RecordRow = Pick<Attendance, 'studentId' | 'day' | 'units' | 'status' | 'relatedDay' | 'range'>;
@@ -17,6 +18,7 @@ export function attendanceSequence(accounts: Pick<Account, 'id' | 'planUnits' | 
   const schedules = new Map(accounts.map(a => [a.id, a.schedule]));
   const positions = { ...context?.positions };
   const missedLessons = { ...context?.missedLessons };
+  const cycleFirstDays = Object.fromEntries(Object.entries(context?.cycleFirstDays || {}).map(([id, days]) => [id, [...days]]));
   const labels = new Map<string, string>();
   const days = new Map<string, { studentId: string; day: string; record?: RecordRow; legacy?: Legacy; start?: boolean }>();
   function event(studentId: string, day: string) {
@@ -31,12 +33,17 @@ export function attendanceSequence(accounts: Pick<Account, 'id' | 'planUnits' | 
     const id = e.studentId, plan = plans.get(id), key = `${id}_${e.day}`;
     const status = e.record ? (e.record.status || 'present') : (e.legacy ? legacyAttendanceAppearance(e.legacy).tone : 'present');
     const missed = ['absent', 'travel', 'sick', 'late_cancel'].includes(status);
+    function firstDay() {
+      const dates = cycleFirstDays[id] ||= [];
+      if (!dates.includes(e.day)) dates.push(e.day);
+    }
     function advance(units: number) {
       const numbers: number[] = [];
       for (let n = 0; n < units; n++) {
         const last = positions[id] || 0;
         positions[id] = plan && plan > 0 ? (last % plan) + 1 : last + 1;
         numbers.push(positions[id]);
+        if (positions[id] === 1) firstDay();
       }
       return numbers.join('·');
     }
@@ -65,13 +72,14 @@ export function attendanceSequence(accounts: Pick<Account, 'id' | 'planUnits' | 
       // The billing form explicitly records the first lesson date, even when
       // that day's attendance has not been copied into the new system.
       positions[id] = 1;
+      firstDay();
       if (missed) missedLessons[key] = '1';
     } else if (e.legacy) {
       const value = Number(e.legacy.value);
-      if (Number.isSafeInteger(value) && value > 0) positions[id] = value;
+      if (Number.isSafeInteger(value) && value > 0) { positions[id] = value; if (value === 1) firstDay(); }
       else if (missed) advance(1);
       if (missed) missedLessons[key] = String(positions[id]);
     }
   }
-  return { positions, labels, missedLessons };
+  return { positions, labels, missedLessons, cycleFirstDays };
 }
