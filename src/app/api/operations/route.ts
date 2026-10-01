@@ -28,7 +28,7 @@ export async function GET(request: Request) {
     }
     const month = day.slice(0, 7); const end = new Date(`${month}-01T00:00:00Z`); end.setUTCMonth(end.getUTCMonth() + 1);
     const [students, accounts, attendance, invoices, payments, notices, devices, imports, priorAttendance, cycleInvoices, legacyCorrections] = await Promise.all([
-      timing.measure('students', () => db.collection('students').select('name', 'phone', 'instruments', 'instrument', 'lifecycle', 'courseLifecycles', 'operationsCourseGroups', 'courseUpdatedAt').get()),
+      timing.measure('students', () => db.collection('students').select('name', 'phone', 'instruments', 'instrument', 'lifecycle', 'courseLifecycles', 'operationsCourseGroups', 'courseUpdatedAt', 'phoneUpdatedAt').get()),
       timing.measure('accounts', () => db.collection('opsAccounts').get()),
       timing.measure('attendance', () => db.collection('opsAttendance').where('day', '>=', `${month}-01`).where('day', '<', end.toISOString().slice(0, 10)).get()),
       timing.measure('invoices', () => db.collection('opsInvoices').where('status', 'in', ['open', 'paid']).get()),
@@ -78,7 +78,7 @@ export async function GET(request: Request) {
     const sequenceContext = { positions: priorSequence.positions, missedLessons: priorSequence.missedLessons, cycleFirstDays: priorSequence.cycleFirstDays, cycleStarts:cycleStarts.filter(r=>r.day>=beforeMonth && r.day<end.toISOString().slice(0,10)) };
     const unpaidCycleKeys = [...new Set(priorAttendance.docs.map(d=>d.data()).filter(r=>r.status==='present' && r.unpaidCycleStart).map(r=>`${r.studentId}_${r.unpaidCycleStart}`))];
     return Response.json({ unpaidCycleKeys, ...(revision ? { revision } : {}), day, sequenceContext, legacyAttendance: allLegacy.filter(r=>r.day.startsWith(`${month}-`)), configured: noticeConfigured(), students: students.docs.flatMap<Snapshot['students'][number]>(d => {
-      const raw = d.data(); const base = { courseUpdatedAt:raw.courseUpdatedAt || '', name: raw.name || '학생', phone: raw.phone || '', ...(raw.lifecycle ? { lifecycle: raw.lifecycle } : {}) };
+      const raw = d.data(); const base = { phoneUpdatedAt:raw.phoneUpdatedAt || '', courseUpdatedAt:raw.courseUpdatedAt || '', name: raw.name || '학생', phone: raw.phone || '', ...(raw.lifecycle ? { lifecycle: raw.lifecycle } : {}) };
       // Preserve existing single-account balances; do not silently duplicate them.
       if (accountById.has(d.id)) { const account = accountById.get(d.id)!; const attendanceGroup = courseGroup({ ...account, name: account.name || base.name }, raw, sourcesByStudent.get(d.id)); return [{ ...base, id: d.id, lifecycle:courseLifecycle(raw,d.id), instruments: service.studentSubjects(raw), ...(attendanceGroup ? { attendanceGroup } : {}) }]; }
       const subjects = service.studentSubjects(raw);
@@ -95,6 +95,7 @@ export async function POST(request: Request) {
       case 'correctLegacyAttendance': return Response.json(await service.correctLegacyAttendance(input,actor));
       case 'deleteEnrollment': case 'restoreEnrollment': return Response.json({ok:true,changes:await service.deleteEnrollment(input,actor)});
       case 'saveSchedule': case 'moveLesson': return Response.json({ok:true,changes:await service.saveSchedule(input,actor)});
+      case 'updateStudentPhone': return Response.json({ok:true,changes:await service.updateStudentPhone(input,actor)});
       case 'renameStudent': await service.renameStudent(input,actor); return Response.json({ok:true});
       case 'correctAttendanceTime': return Response.json({ok:true,changes:await service.correctAttendanceTime(input,actor)});
       case 'changeLifecycle': return Response.json({ok:true,changes:await service.changeLifecycle(input, actor)});

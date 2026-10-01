@@ -1,3 +1,4 @@
+import { guardianPhone, contactAccount } from '@/lib/operations/student-contact';
 import { legacyAttendanceAppearance } from '@/lib/operations/attendance-appearance';
 import { paymentDateInput } from '@/lib/operations/billing-display';
 import { correctedLegacy, legacyCorrectionInput } from '@/lib/operations/legacy-correction';
@@ -42,6 +43,14 @@ export function demoAction(current: Snapshot, input: Record<string, unknown>): {
     if(!account)throw Error('먼저 수강 등록을 완료해주세요.');
     const stamp=new Date(Math.max(Date.now(),Date.parse(account.schedule?.updatedAt||'')+1||0)).toISOString();
     account.schedule=input.action==='moveLesson'?moveLesson(account.schedule,input,data.attendance.filter(r=>r.studentId===account.id),stamp):changeSchedule(account.schedule,input,stamp);
+  } else if(input.action==='updateStudentPhone'){
+    const source=String(input.sourceStudentId),siblings=data.students.filter(s=>(s.sourceStudentId||s.id)===source),target=siblings.find(s=>s.id===input.studentId);
+    if(!target)throw Error('학생을 찾을 수 없습니다.');
+    const phone=guardianPhone(input.phone);
+    if(target.phone.replace(/\D/g,'')!==String(input.expectedPhone??'').replace(/\D/g,'')||(target.phoneUpdatedAt||'')!==(input.expectedUpdatedAt||''))throw Error('보호자 번호가 다른 화면에서 변경됐습니다. 창을 닫고 다시 확인해주세요.');
+    const ids=new Set(siblings.map(s=>s.id)),previousPhone=target.phone;
+    data.accounts=data.accounts.map(a=>ids.has(a.id)?contactAccount(a,previousPhone,phone,at):a);
+    for(const row of siblings){row.phone=phone;row.phoneUpdatedAt=at;}
   } else if(input.action==='renameStudent'){
     const source=String(input.sourceStudentId),siblings=data.students.filter(s=>(s.sourceStudentId||s.id)===source),target=siblings.find(s=>s.id===input.studentId);
     const name=typeof input.name==='string'?input.name.trim():'';

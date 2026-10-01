@@ -315,6 +315,64 @@ test('quick attendance reasons save without notes, preserve balance on retries a
  }
  const s=setup();assert.equal(s.load('model').defaultAttendanceUnits('late_cancel','어린이 피아노(1관)'),0);
 });
+test('guardian phone updates all owned courses and lookups without changing siblings, balances or history',async()=>{
+ const s=setup(),source='person';
+ s.records.set(`students/${source}`,{name:'다과목 학생',phone:'010-0000-1234',instruments:['피아노','드럼']});
+ const ids=['피아노','드럼'].map(subject=>s.service.enrollmentId(source,subject));
+ for(const [i,subject] of ['피아노','드럼'].entries())await s.service.configure({studentId:ids[i],sourceStudentId:source,subject,planUnits:8,planAmount:160000,remaining:6-i,phone:'01000001234',phones:['1234','5678'],active:true},'owner');
+ await s.seed('sibling',4);const other=structuredClone(s.records.get('opsAccounts/sibling'));
+ // An account may still have an old, different guardian contact from per-course setup.
+ Object.assign(s.records.get(`opsAccounts/${ids[1]}`),{phone:'01000008888',checkinSuffixes:['8888','5678']});
+ const before=ids.map(id=>structuredClone(s.records.get(`opsAccounts/${id}`)));
+ s.records.set('opsAttendance/history',{studentId:ids[0],status:'travel',units:0});
+ s.records.set('opsInvoices/history',{studentId:ids[0],status:'open',paid:0,amount:160000});
+ s.records.set('opsNotices/history',{studentId:ids[0],phone:'01000001234',status:'submitted'});
+ const history=['opsAttendance/history','opsInvoices/history','opsNotices/history'].map(k=>structuredClone(s.records.get(k)));
+ const input={studentId:ids[0],sourceStudentId:source,phone:'010-1111-0012',expectedPhone:'010-0000-1234',expectedUpdatedAt:''};
+ const changes=await s.service.updateStudentPhone(input,'owner');
+ assert.equal(s.records.get('students/person').phone,'01011110012');assert.equal(s.records.get('students/person').phoneLast4,'0012');
+ for(const [i,id] of ids.entries()){
+  const a=s.records.get(`opsAccounts/${id}`);assert.equal(a.phone,'01011110012');assert.deepEqual(a.checkinSuffixes,['0012','5678']);
+  for(const field of ['id','sourceStudentId','subject','name','remaining','planUnits','planAmount','openInvoiceId','active'])assert.deepEqual(a[field],before[i][field]);
+  await assert.rejects(s.service.checkIn(id,i===0?'1234':'8888','device'));
+ }
+ assert.deepEqual(s.records.get('opsAccounts/sibling'),other);
+ assert.deepEqual(['opsAttendance/history','opsInvoices/history','opsNotices/history'].map(k=>s.records.get(k)),history);
+ const lookup=async digits=>(await (await s.checkInPost({action:'lookup',digits})).json()).matches.map(m=>m.id);
+ assert.deepEqual((await lookup('0012')).sort(),[...ids].sort());assert.deepEqual(await lookup('1234'),['sibling']);
+ assert.deepEqual(await s.service.updateStudentPhone(input,'owner'),changes);
+ assert.equal([...s.records.values()].filter(v=>v.action==='update-student-phone').length,1);
+ const students=ids.map(id=>({id,sourceStudentId:source,phone:'01000001234'})).concat([{id:'sibling',phone:'01000001234'}]);
+ const snapshot=s.load('snapshot-changes').applySnapshotChanges({students,accounts:before,attendance:[],invoices:[],day:'2026-10-01'},changes);
+ assert.deepEqual(snapshot.students.map(v=>v.phone),['01011110012','01011110012','01000001234']);
+ await s.service.checkIn(ids[0],'0012','device');assert.equal(s.records.get(`opsAccounts/${ids[0]}`).remaining,5);
+ assert.equal([...s.records.entries()].find(([k,v])=>k.startsWith('opsNotices/attendance_')&&v.studentId===ids[0])[1].phone,'01011110012');
+});
+test('guardian edits reject stale or unrelated targets and work before enrollment or on legacy accounts',async()=>{
+ const s=setup();await s.seed();await s.seed('other');
+ const input={studentId:'student-a',sourceStudentId:'student-a',phone:'01022220012',expectedPhone:'01000001234'};
+ for(const patch of [{phone:''},{phone:'1234'},{phone:'abc01022220012'},{studentId:'other'},{expectedPhone:'01099999999'}])await assert.rejects(s.service.updateStudentPhone({...input,...patch},'owner'));
+ const simultaneous=await Promise.allSettled([s.service.updateStudentPhone(input,'owner'),s.service.updateStudentPhone({...input,phone:'01033339999'},'owner')]);
+ assert.equal(simultaneous.filter(r=>r.status==='fulfilled').length,1);
+ assert.equal(s.records.get('opsAccounts/student-a').remaining,1);assert.equal(s.records.get('opsAccounts/other').phone,'01000001234');
+ s.records.set('students/unconfigured',{name:'미등록',phone:'',instruments:['피아노']});
+ const id=s.service.enrollmentId('unconfigured','피아노');
+ await s.service.updateStudentPhone({studentId:id,sourceStudentId:'unconfigured',phone:'010-1234-0000',expectedPhone:''},'owner');
+ assert.equal(s.records.get('students/unconfigured').phoneLast4,'0000');assert.equal(s.records.has(`opsAccounts/${id}`),false);
+});
+test('pending attendance notices use the new guardian phone while sent notices stay unchanged',async()=>{
+ const s=setup();await s.seed('student-a',8);await s.service.checkIn('student-a','1234','device');
+ const sent={studentId:'student-a',phone:'01000001234',status:'submitted',kind:'attendance'};s.records.set('opsNotices/sent',sent);
+ await s.service.updateStudentPhone({studentId:'student-a',sourceStudentId:'student-a',phone:'01011110012',expectedPhone:'01000001234'},'owner');
+ const keys=['NHN_APP_KEY','NHN_SECRET_KEY','NHN_SENDER_KEY','NHN_ATTENDANCE_TEMPLATE'],env={...process.env},original=global.fetch,bodies=[];
+ for(const k of keys)process.env[k]='test';
+ global.fetch=async(_,options)=>{bodies.push(JSON.parse(options.body));return {ok:true,json:async()=>({header:{isSuccessful:true},recipientList:[{resultCode:0}]})};};
+ try{
+  await s.load('notices').processNotices();assert.equal(bodies.length,1);assert.equal(bodies[0].recipientList[0].recipientNo,'01011110012');
+  assert.deepEqual(s.records.get('opsNotices/sent'),sent);
+  assert.equal([...s.records.entries()].find(([k])=>k.startsWith('opsNotices/attendance_'))[1].phone,'01011110012');
+ }finally{global.fetch=original;for(const k of keys){if(env[k]===undefined)delete process.env[k];else process.env[k]=env[k];}}
+});
 function setup() {
   const records = new Map(); let sequence = 0; let tail = Promise.resolve();
   const ref = p => ({ path: p, id: p.split('/').at(-1), get: async () => snap(p), update: async d => { if (!records.has(p)) throw Error('missing'); records.set(p, { ...records.get(p), ...structuredClone(d) }); }, set: async d => records.set(p, structuredClone(d)) });

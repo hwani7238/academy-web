@@ -1,6 +1,6 @@
 import type { Snapshot, Attendance, Account, Invoice } from './model';
 import type { Lifecycle } from './lifecycle';
-export type SnapshotChanges = { lifecycle?: { studentId: string; value: Lifecycle }; attendance?: Attendance[]; accounts?: Account[]; invoices?: Invoice[] };
+export type SnapshotChanges = { contact?: { sourceStudentId: string; phone: string; phoneUpdatedAt: string }; lifecycle?: { studentId: string; value: Lifecycle }; attendance?: Attendance[]; accounts?: Account[]; invoices?: Invoice[] };
 function merge<T extends {id:string}>(old:T[], changed:T[] = []) {
   if (!changed.length) return old;
   const updates = new Map(changed.map(row=>[row.id,row]));
@@ -9,8 +9,12 @@ function merge<T extends {id:string}>(old:T[], changed:T[] = []) {
 // Apply only server-confirmed records, keeping the currently selected month intact.
 export function applySnapshotChanges(current: Snapshot, changes: SnapshotChanges): Snapshot {
   const life = changes.lifecycle;
+  const contact = changes.contact;
   return { ...current,
-    students: life ? current.students.map(s=>s.id===life.studentId ? {...s,lifecycle:life.value} : s) : current.students,
+    students: life || contact ? current.students.map(s => ({ ...s,
+      ...(life && s.id === life.studentId ? { lifecycle: life.value } : {}),
+      ...(contact && (s.sourceStudentId || s.id) === contact.sourceStudentId ? { phone: contact.phone, phoneUpdatedAt: contact.phoneUpdatedAt } : {}),
+    })) : current.students,
     attendance: merge(current.attendance, changes.attendance?.filter(a=>a.day.slice(0,7)===current.day.slice(0,7))),
     accounts: merge(current.accounts, changes.accounts),
     invoices: merge(current.invoices, changes.invoices).filter(i=>i.status==='open'),

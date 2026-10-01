@@ -1,4 +1,5 @@
 import { legacyAttendanceAppearance } from './attendance-appearance';
+import { guardianPhone, contactAccount } from './student-contact';
 import { plannedLesson } from './schedule';
 import { paymentDateInput } from './billing-display';
 import { reviewBalance, type BalanceAudit, type BalanceSource } from './balance-review';
@@ -521,6 +522,33 @@ export async function createCurrentCycleInvoice(input:Record<string,unknown>,act
   tx.create(invoiceRef,invoice);tx.update(ref,{openInvoiceId:invoiceId,updatedAt:at});
   audit(tx,db,actor,'current-cycle-invoice',id,{invoiceId,cycleStart,amount:invoice.amount,remaining:account.remaining,creditUnits:0});
   return {accounts:[{...account,openInvoiceId:invoiceId,updatedAt:at}],invoices:[invoice]};
+ });
+}
+
+export async function updateStudentPhone(input: Record<string, unknown>, actor: string) {
+ const sourceStudentId = key(input.sourceStudentId), id = key(input.studentId), phone = guardianPhone(input.phone), db = database();
+ return db.runTransaction(async tx => {
+  const studentRef = db.doc(`students/${sourceStudentId}`);
+  const [studentSnap, courses, legacy] = await Promise.all([
+   tx.get(studentRef), tx.get(db.collection('opsAccounts').where('sourceStudentId', '==', sourceStudentId)), tx.get(db.doc(`opsAccounts/${sourceStudentId}`)),
+  ]);
+  const student = studentSnap.data();
+  if (!student) throw Error('학생을 찾을 수 없습니다.');
+  if (id !== sourceStudentId && !studentSubjects(student).some(s => enrollmentId(sourceStudentId, s) === id) && !courses.docs.some(d => d.id === id)) throw Error('해당 학생의 수강 정보를 찾을 수 없습니다.');
+  const documents = new Map<string, FirebaseFirestore.DocumentSnapshot>(courses.docs.map(d => [d.id, d]));
+  if (legacy.exists) documents.set(legacy.id, legacy);
+  const accounts = [...documents.values()].map(d => ({ ...d.data(), id: d.id }) as Account);
+  const previousPhone = String(student.phone || ''), before = previousPhone.replace(/\D/g, '');
+  if (before === phone && student.phoneLast4 === phone.slice(-4) && accounts.every(a => a.phone === phone && a.checkinSuffixes.includes(phone.slice(-4)))) {
+   return { contact: { sourceStudentId, phone, phoneUpdatedAt: student.phoneUpdatedAt || '' }, accounts };
+  }
+  if (before !== String(input.expectedPhone ?? '').replace(/\D/g, '') || (student.phoneUpdatedAt || '') !== (input.expectedUpdatedAt || '')) throw Error('보호자 번호가 다른 화면에서 변경됐습니다. 창을 닫고 다시 확인해주세요.');
+  const at = new Date(Math.max(Date.now(), ...[student.phoneUpdatedAt, ...accounts.map(a => a.updatedAt)].map(v => (Date.parse(v || '') || 0) + 1))).toISOString();
+  const updated = accounts.map(a => contactAccount(a, previousPhone, phone, at));
+  tx.update(studentRef, { phone, phoneLast4: phone.slice(-4), phoneUpdatedAt: at });
+  for (const account of updated) tx.update(documents.get(account.id)!.ref, { phone, checkinSuffixes: account.checkinSuffixes, updatedAt: at });
+  audit(tx, db, actor, 'update-student-phone', sourceStudentId, { before: previousPhone, after: phone, accountIds: updated.map(a => a.id) });
+  return { contact: { sourceStudentId, phone, phoneUpdatedAt: at }, accounts: updated };
  });
 }
 

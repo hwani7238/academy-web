@@ -18,10 +18,14 @@ export async function processNotices() {
         return null;
       }
       const template = process.env.NHN_ATTENDANCE_TEMPLATE;
+      // Resolve pending notices against the current contact, preserving already sent history.
+      const account = (await tx.get(db.doc(`opsAccounts/${fresh.studentId}`))).data();
+      const phone = String(account?.phone || '').replace(/\D/g, '');
+      if (!/^0\d{8,10}$/.test(phone)) reason = '알림 받을 보호자 전화번호를 확인해주세요.';
       if (!process.env.NHN_APP_KEY || !process.env.NHN_SECRET_KEY || !process.env.NHN_SENDER_KEY || !template) reason = '알림톡 발신 및 템플릿 설정이 필요합니다.';
       if (reason) { tx.update(item.ref, { status: 'blocked', error: reason }); return null; }
-      tx.update(item.ref, { status: 'processing', startedAt: new Date().toISOString(), error: '' });
-      return { phone: fresh.phone as string, parameters: fresh.parameters as Record<string, string>, template };
+      tx.update(item.ref, { status: 'processing', phone, startedAt: new Date().toISOString(), error: '' });
+      return { phone, parameters: fresh.parameters as Record<string, string>, template };
     });
     if (!notice) continue;
     // Never blindly retry an uncertain external send. A crash after submission
