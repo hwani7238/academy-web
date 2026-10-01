@@ -95,7 +95,7 @@ export function demoAction(current: Snapshot, input: Record<string, unknown>): {
     const id = `${account.id}_${seoulDay()}`;
     account.remaining = adjustBalance(account.remaining, 0, 1);
     data.attendance=data.attendance.filter(r=>r.id!==id);
-    data.attendance.unshift({ id, studentId: account.id, name: account.name, day: seoulDay(), at, units: 1, note: '', updatedAt: at });
+    data.attendance.unshift({ id, studentId: account.id, name: account.name, day: seoulDay(), at, units: 1, status: 'present', source: 'kiosk', note: '', updatedAt: at });
     if(!data.notices.some(n=>n.id===`attendance_${id}`))enqueue(account, `attendance_${id}`, 'attendance'); if (account.remaining <= 0) invoice(account);
     result = { name: checkInName(account, {}), duplicate: false };
   } else if (input.action === 'configure') {
