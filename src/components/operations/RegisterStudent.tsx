@@ -2,6 +2,7 @@
 import { CloseButton } from './CloseButton';
 import { useEffect, useRef, useState } from 'react';
 import { REGISTRATION_SUBJECTS } from '@/lib/operations/registration';
+import { seoulDay } from '@/lib/operations/model';
 export function RegisterStudent({ save, close }: { save: (input: Record<string, unknown>) => Promise<unknown>; close: () => void }) {
   const dialog = useRef<HTMLDialogElement>(null); const locked = useRef(false);
   const [requestId] = useState(() => crypto.randomUUID());
@@ -24,7 +25,8 @@ export function RegisterStudent({ save, close }: { save: (input: Record<string, 
       <label>학생 전화번호 (선택)<input name="personalPhone" type="tel" /><small>입력하면 학생 번호 뒷자리로도 출석할 수 있습니다.</small></label>
       <div className="registration-grid"><label>수강권 횟수<input type="number" min="1" max="200" required value={units} onChange={e=>{const n=Number(e.target.value);setUnits(n);setRemaining(n);}} /><small>주 2회는 8회입니다.</small></label><label>수강료 (원)<input name="planAmount" type="number" min="1" max="100000000" required placeholder="170000" /></label></div>
       <label>처음 사용할 횟수<input type="number" min="0" max={units} required value={remaining} onChange={e=>setRemaining(Number(e.target.value))} /><small>등록 후 이 횟수에서 출석할 때마다 차감됩니다.</small></label>
-      <p className="subtle">학생과 수강권을 함께 등록합니다. 수납 기록은 실제 결제 확인 후 청구·수납에서 관리하세요.</p>
+      <label>첫 수업일 (1회차)<input name="firstLessonDate" type="date" defaultValue={seoulDay()} required /><small>청구·수납 목록의 1회차 날짜로 표시됩니다.</small></label>
+      <p className="subtle">등록하면 첫 수강료 청구가 청구·수납 목록에 함께 만들어집니다. 실제 결제 후 수납 완료로 기록하세요. 수납해도 횟수는 중복 추가되지 않으며, 결제 안내는 자동 발송하지 않습니다.</p>
       {error&&<p className="error" role="alert">{error}</p>}<button className="primary" disabled={busy}>{busy?'등록 중…':'학생·수강권 등록'}</button>
     </form>
   </dialog>;

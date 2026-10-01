@@ -1,4 +1,4 @@
-import { integer } from './model';
+import { type Account, type Invoice, integer, seoulDay, validDay } from './model';
 export const REGISTRATION_SUBJECTS = ['성인 피아노', '어린이 피아노(1관)', '어린이 피아노(2관)', '앙상블', '보컬', '드럼', '우쿨렐레', '통기타', '일렉기타', '베이스', '미디', '성악', '시창청음', '리코더', '댄스'];
 export function registrationInput(input: Record<string, unknown>) {
   const name = typeof input.name === 'string' ? input.name.trim() : '';
@@ -13,5 +13,13 @@ export function registrationInput(input: Record<string, unknown>) {
   const remaining = integer(input.remaining, 0, planUnits, '처음 사용할 횟수');
   const personalPhone = typeof input.personalPhone === 'string' ? input.personalPhone.replace(/\D/g, '') : '';
   if (personalPhone && !/^0\d{8,10}$/.test(personalPhone)) throw Error('학생 전화번호를 확인해주세요.');
-  return { name, phone, group, subject, planUnits, planAmount, remaining, personalPhone };
+  const firstLessonDate = validDay(input.firstLessonDate ?? seoulDay());
+  return { name, phone, group, subject, planUnits, planAmount, remaining, personalPhone, firstLessonDate };
+}
+
+// Initial lessons are allocated at registration, so receiving payment must not add them again.
+export function firstEnrollmentInvoice(account: Account, firstLessonDate: string, createdAt: string): Invoice {
+  return { id: `first_${account.id}`, studentId: account.id, name: account.name,
+    units: account.planUnits, amount: account.planAmount, paid: 0, status: 'open', needsReview: false,
+    createdAt, cycleStart: validDay(firstLessonDate), creditUnits: 0 };
 }

@@ -5,7 +5,7 @@ import { rangeAttendance } from '@/lib/operations/attendance-range';
 import { enrollmentState, lifecycleInput, deleteOrRestoreEnrollment } from '@/lib/operations/lifecycle';
 import { correctedArrival } from '@/lib/operations/attendance-time';
 import { checkInName } from '@/lib/operations/course-label';
-import { REGISTRATION_SUBJECTS, registrationInput } from '@/lib/operations/registration';
+import { REGISTRATION_SUBJECTS, registrationInput, firstEnrollmentInvoice } from '@/lib/operations/registration';
 import { Snapshot, Account, integer, adjustBalance, settle, seoulDay, suffixes, validDay, attendanceInput } from '@/lib/operations/model';
 export function sample(): Snapshot {
   const stamp = new Date().toISOString();
@@ -87,6 +87,8 @@ export function demoAction(current: Snapshot, input: Record<string, unknown>): {
     if(data.accounts.some(a=>a.id===id))return {data,result:{ok:true,duplicate:true}};
     if(data.students.some(s=>s.name.split(' · ')[0].replace(/\s/g,'')===v.name.replace(/\s/g,'')&&s.phone.replace(/\D/g,'')===v.phone))throw Error('이미 등록된 학생입니다.');
     const a:Account={id,sourceStudentId:id,subject:v.subject,name:`${v.name} · ${v.subject}`,phone:v.phone,checkinSuffixes:[...new Set([v.phone.slice(-4),...(v.personalPhone?[v.personalPhone.slice(-4)]:[])])],planUnits:v.planUnits,planAmount:v.planAmount,remaining:v.remaining,openInvoiceId:null,autoBilling:false,active:true,updatedAt:at};
+    const firstInvoice=firstEnrollmentInvoice(a,v.firstLessonDate,at);a.openInvoiceId=firstInvoice.id;data.invoices.push(firstInvoice);
+    data.sequenceContext ||= {positions:{},cycleStarts:[]};data.sequenceContext.cycleStarts.push({studentId:id,day:v.firstLessonDate});
     data.accounts.push(a);data.students.push({id,name:a.name,phone:v.phone,sourceStudentId:id,subject:v.subject,instruments:[v.subject],attendanceGroup:v.group});
   } else if (input.action === 'recordAttendanceRange') {
     if(!account)throw Error('먼저 수강 설정을 저장해주세요.');
@@ -116,14 +118,17 @@ export function demoAction(current: Snapshot, input: Record<string, unknown>): {
   } else if (input.action === 'configure') {
     const student = data.students.find(s => s.id === input.studentId)!;
     const next: Account = { ...(account?.schedule?{schedule:account.schedule}:{}), id: student.id, sourceStudentId: student.sourceStudentId, subject: student.subject, name: student.name, phone: String(input.phone), checkinSuffixes: suffixes(input.phones), planUnits: Number(input.planUnits), planAmount: Number(input.planAmount), remaining: account?.remaining ?? Number(input.remaining), openInvoiceId: account?.openInvoiceId || null, active: input.active !== false, autoBilling: input.autoBilling === true, updatedAt: at };
+    if(!account&&input.firstBilling===true){const firstInvoice=firstEnrollmentInvoice(next,validDay(input.firstLessonDate),at);next.openInvoiceId=firstInvoice.id;data.invoices.push(firstInvoice);data.sequenceContext||={positions:{},cycleStarts:[]};data.sequenceContext.cycleStarts.push({studentId:next.id,day:firstInvoice.cycleStart!});}
     data.accounts = [...data.accounts.filter(a => a.id !== student.id), next];
   } else if(input.action==='currentCycleInvoice'){
     if(!account || account.openInvoiceId)throw Error('수강권과 기존 청구를 확인해주세요.');
-    const cycleStart=validDay(input.cycleStart);if(cycleStart>seoulDay())throw Error('재등록일을 확인해주세요.');
-    const id=crypto.randomUUID();account.openInvoiceId=id;
+    const cycleStart=input.kind==='first'&&!input.cycleStart?'':validDay(input.cycleStart);if(cycleStart>seoulDay()&&input.kind!=='first')throw Error('재등록일을 확인해주세요.');
+    const id=input.kind==='first'?`first_${account.id}`:crypto.randomUUID();
+    if([...data.invoices,...(data.settledInvoices||[])].some(i=>i.id===id))throw Error('첫 수강권의 청구가 이미 있습니다.');
+    account.openInvoiceId=id;
     data.sequenceContext ||= {positions:{},cycleStarts:[]};
-    data.sequenceContext.cycleStarts.push({studentId:account.id,day:cycleStart});
-    data.invoices.push({id,studentId:account.id,name:account.name,units:account.planUnits,amount:account.planAmount,paid:0,status:'open',needsReview:false,createdAt:at,creditUnits:0,cycleStart});
+    if(cycleStart)data.sequenceContext.cycleStarts.push({studentId:account.id,day:cycleStart});
+    data.invoices.push({id,studentId:account.id,name:account.name,units:account.planUnits,amount:account.planAmount,paid:0,status:'open',needsReview:false,createdAt:at,creditUnits:0,...(cycleStart?{cycleStart}:{})});
   } else if (input.action === 'invoice') { if (!account) throw new Error('수강 설정을 저장해주세요.'); if (account.openInvoiceId) throw new Error('진행 중인 청구가 있습니다.'); invoice(account); }
   else if (input.action === 'adjust') {
     const attendance = data.attendance.find(a => a.id === input.attendanceId)!;
