@@ -288,12 +288,28 @@ export async function editInvoice(input: Record<string, unknown>, actor: string)
     }
     if (old.units === units && old.amount === amount && (old.creditUnits ?? old.units) === creditUnits && (old.cycleStart || '') === cycleStart && !old.needsReview) return;
     const updatedAt = new Date(Math.max(Date.now(), Date.parse(old.updatedAt || '') + 1 || 0)).toISOString();
-    tx.update(ref, { units, amount, creditUnits, cycleStart, needsReview: false, updatedAt });
+    tx.update(ref, { units, amount, creditUnits, cycleStart, ...(old.lessonDate && cycleStart ? {lessonDate:cycleStart} : {}), needsReview: false, updatedAt });
     if (notice && notice.status !== 'cancelled') tx.update(noticeRef, { parameters: { ...notice.parameters, amount: String(amount), lesson_count: String(units) } });
     audit(tx, db, actor, 'edit-invoice', old.studentId, {
       invoiceId: id, before: { units: old.units, amount: old.amount, creditUnits: old.creditUnits ?? old.units, cycleStart: old.cycleStart || '' },
       after: { units, amount, creditUnits, cycleStart }, remaining: account.remaining, note: text(input.note),
     });
+  });
+}
+export async function linkInvoiceLesson(input: Record<string, unknown>, actor: string) {
+  const id = key(input.invoiceId), lessonDate = validDay(input.lessonDate), db = database();
+  return db.runTransaction(async tx => {
+    const ref = db.doc(`opsInvoices/${id}`), invoice = (await tx.get(ref)).data() as Invoice | undefined;
+    if (!invoice || invoice.status !== 'open') throw Error('진행 중인 청구를 확인해주세요.');
+    if ((invoice.updatedAt || '') !== (input.expectedUpdatedAt || '')) throw Error('청구 내용이 변경됐습니다. 창을 닫고 다시 확인해주세요.');
+    if (invoice.lessonDate === lessonDate) return { invoices: [invoice] };
+    const others = await tx.get(db.collection('opsInvoices').where('studentId', '==', invoice.studentId));
+    if (others.docs.some(d => d.id !== id && d.data().status !== 'cancelled' && (d.data().lessonDate || d.data().cycleStart) === lessonDate)) throw Error('이 1회차 날짜에 연결된 다른 청구가 있습니다. 수납 기록을 확인해주세요.');
+    const updatedAt = new Date(Math.max(Date.now(), Date.parse(invoice.updatedAt || '') + 1 || 0)).toISOString();
+    // Link billing metadata only: never reset lesson chronology or alter financial credit/review state.
+    tx.update(ref, { lessonDate, updatedAt });
+    audit(tx, db, actor, 'invoice-lesson-date', invoice.studentId, { invoiceId: id, before: invoice.lessonDate || invoice.cycleStart || '', after: lessonDate });
+    return { invoices: [{ ...invoice, lessonDate, updatedAt }] };
   });
 }
 export async function invoiceAction(input: Record<string, unknown>, actor: string) {

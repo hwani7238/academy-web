@@ -118,3 +118,5 @@
 .whee-ops .billing-partial{color:#9359ad;font-size:10px;margin-left:2px}
 .whee-ops .billing-initials{padding:8px 12px;color:#63718a;font-size:11px;line-height:1.5}
 .whee-ops .billing-ledger .billing-date-start td{border-top:1px solid #c6cede}
+
+.whee-ops .billing-ledger .billing-date-button{display:block;width:100%;min-height:24px;height:24px;padding:0;border:0;border-radius:3px;background:transparent;font-size:12px;font-weight:400;line-height:20px;font-variant-numeric:tabular-nums}.whee-ops .billing-ledger .billing-date-button:hover:not(:disabled){background:#edf3ff;text-decoration:underline}

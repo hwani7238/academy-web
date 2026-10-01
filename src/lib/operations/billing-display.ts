@@ -7,6 +7,7 @@ export function paymentDateInput(value: unknown) {
 }
 export const paymentDay = (payment: Payment) => payment.paymentDate || seoulDay(new Date(payment.at));
 export function invoiceCycleStart(invoice: Invoice, cycleFirstDays: Record<string, string[]>) {
+  if (invoice.lessonDate) return invoice.lessonDate;
   if (invoice.cycleStart) return invoice.cycleStart;
   const created = new Date(invoice.createdAt);
   // A first registration can start on its creation day; renewal invoices are for the following pass.

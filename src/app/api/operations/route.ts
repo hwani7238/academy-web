@@ -99,6 +99,7 @@ export async function POST(request: Request) {
       case 'correctAttendanceTime': return Response.json({ok:true,changes:await service.correctAttendanceTime(input,actor)});
       case 'changeLifecycle': return Response.json({ok:true,changes:await service.changeLifecycle(input, actor)});
       case 'registerStudent': return Response.json(await service.registerStudent(input, actor));
+      case 'linkInvoiceLesson': return Response.json({ok:true,changes:await service.linkInvoiceLesson(input,actor)});
       case 'correctRemaining': return Response.json({ok:true,changes:await service.correctRemaining(input,actor)});
       case 'manageCourse': await service.manageCourse(input,actor); return Response.json({ok:true});
       case 'configure': return Response.json({ok:true,changes:await service.configure(input, actor)});

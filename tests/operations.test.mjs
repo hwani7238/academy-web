@@ -1331,6 +1331,37 @@ test('unpaid flags last across months, partial payment and other courses; cancel
 });
 
 
+test('linking a first lesson date preserves financial state, review flags and lesson chronology',async()=>{
+ const s=setup();await s.seed('date-link',0);await s.service.createInvoice('date-link','owner');
+ const id=s.records.get('opsAccounts/date-link').openInvoiceId;
+ s.records.get(`opsInvoices/${id}`).needsReview=true;
+ const beforeAccount=structuredClone(s.records.get('opsAccounts/date-link')),before=structuredClone(s.records.get(`opsInvoices/${id}`));
+ const result=await s.service.linkInvoiceLesson({invoiceId:id,lessonDate:'2026-09-16'},'owner');
+ const invoice=result.invoices[0];assert.equal(invoice.lessonDate,'2026-09-16');assert.equal(invoice.cycleStart,undefined);
+ for(const field of ['units','creditUnits','amount','paid','status','needsReview'])assert.equal(invoice[field],before[field]);
+ assert.deepEqual(s.records.get('opsAccounts/date-link'),beforeAccount);
+ assert.equal([...s.records.keys()].some(k=>k.startsWith('opsPayments/')||k.startsWith('opsNotices/')||k.startsWith('opsAttendance/')),false);
+ assert.equal(s.load('billing-display').invoiceCycleStart(invoice,{}),'2026-09-16');
+ assert.equal(s.load('attendance-appearance').confirmedFirstLessons([invoice],{}).size,0);
+ assert.equal(s.load('attendance-appearance').confirmedFirstLessons([{...invoice,status:'paid',paid:invoice.amount,needsReview:false}],{}).has('date-link_2026-09-16'),true);
+ const current=invoice.updatedAt;
+ await s.service.linkInvoiceLesson({invoiceId:id,lessonDate:'2026-09-16',expectedUpdatedAt:current},'owner');
+ assert.equal([...s.records.values()].filter(r=>r.action==='invoice-lesson-date').length,1);
+ await assert.rejects(s.service.linkInvoiceLesson({invoiceId:id,lessonDate:'2026-09-17',expectedUpdatedAt:''},'owner'),/변경/);
+ for(const lessonDate of ['','bad','2026-02-30'])await assert.rejects(s.service.linkInvoiceLesson({invoiceId:id,lessonDate,expectedUpdatedAt:current},'owner'));
+});
+test('date linking rejects another paid invoice for the same course and cycle but leaves other courses independent',async()=>{
+ const s=setup();await s.seed('piano',8);await s.service.createInvoice('piano','owner');const id=s.records.get('opsAccounts/piano').openInvoiceId;
+ const paid={id:'paid',studentId:'piano',status:'paid',lessonDate:'2026-09-16'};s.records.set('opsInvoices/paid',paid);
+ await assert.rejects(s.service.linkInvoiceLesson({invoiceId:id,lessonDate:'2026-09-16'},'owner'),/다른 청구/);
+ assert.equal(s.records.get(`opsInvoices/${id}`).lessonDate,undefined);
+ s.records.get('opsInvoices/paid').studentId='drums';
+ await s.service.linkInvoiceLesson({invoiceId:id,lessonDate:'2026-09-16'},'owner');
+ const changed=s.records.get(`opsInvoices/${id}`);
+ await s.service.payment({invoiceId:id,requestId:'linked-payment',amount:160000,method:'현금',expectedInvoiceUpdatedAt:changed.updatedAt},'owner');
+ assert.equal(s.records.get('opsAccounts/piano').remaining,16);
+ await assert.rejects(s.service.linkInvoiceLesson({invoiceId:id,lessonDate:'2026-09-17',expectedUpdatedAt:changed.updatedAt},'owner'),/진행 중/);
+});
 test('actual payment date is stored separately from entry time and retries cannot change it',async()=>{
  const s=setup();await s.seed();await s.service.createInvoice('student-a','owner');
  const invoiceId=s.records.get('opsAccounts/student-a').openInvoiceId;

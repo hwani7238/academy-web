@@ -129,6 +129,12 @@ export function demoAction(current: Snapshot, input: Record<string, unknown>): {
     data.sequenceContext ||= {positions:{},cycleStarts:[]};
     if(cycleStart)data.sequenceContext.cycleStarts.push({studentId:account.id,day:cycleStart});
     data.invoices.push({id,studentId:account.id,name:account.name,units:account.planUnits,amount:account.planAmount,paid:0,status:'open',needsReview:false,createdAt:at,creditUnits:0,...(cycleStart?{cycleStart}:{})});
+  } else if (input.action === 'linkInvoiceLesson') {
+    const invoice=data.invoices.find(i=>i.id===input.invoiceId),lessonDate=validDay(input.lessonDate);
+    if(!invoice||invoice.status!=='open')throw Error('진행 중인 청구를 확인해주세요.');
+    if((invoice.updatedAt||'')!==(input.expectedUpdatedAt||''))throw Error('청구 내용이 변경됐습니다.');
+    if([...data.invoices,...(data.settledInvoices||[])].some(i=>i.id!==invoice.id&&i.studentId===invoice.studentId&&i.status!=='cancelled'&&(i.lessonDate||i.cycleStart)===lessonDate))throw Error('이 1회차 날짜에 연결된 다른 청구가 있습니다.');
+    invoice.lessonDate=lessonDate;invoice.updatedAt=at;
   } else if (input.action === 'invoice') { if (!account) throw new Error('수강 설정을 저장해주세요.'); if (account.openInvoiceId) throw new Error('진행 중인 청구가 있습니다.'); invoice(account); }
   else if (input.action === 'adjust') {
     const attendance = data.attendance.find(a => a.id === input.attendanceId)!;

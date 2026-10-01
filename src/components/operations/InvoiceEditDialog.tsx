@@ -27,7 +27,7 @@ export function InvoiceEditDialog({ invoice, account, save, close }: {
         <label>청구 횟수<input type="number" required min="1" max="200" value={units} onChange={e => setUnits(e.target.value)} /></label>
         <label>청구 금액 (원)<input type="number" inputMode="numeric" required min="1" max="100000000" value={amount} onChange={e => setAmount(e.target.value)} /></label>
         <label>수납 완료 시 횟수 처리<select value={kind} onChange={e => setKind(e.target.value)}><option value="next">새 수강권 횟수 추가</option><option value="current">이미 횟수 반영됨 · 현재 잔여 유지</option></select></label>
-        {kind === 'current' && <label>1회차 시작일<input name="cycleStart" type="date" required max={invoice.id === `first_${invoice.studentId}` ? undefined : seoulDay()} defaultValue={invoice.cycleStart || (invoice.id === `first_${invoice.studentId}` ? '' : seoulDay())} /></label>}
+        {kind === 'current' && <label>1회차 시작일<input name="cycleStart" type="date" required max={invoice.id === `first_${invoice.studentId}` ? undefined : seoulDay()} defaultValue={invoice.lessonDate || invoice.cycleStart || (invoice.id === `first_${invoice.studentId}` ? '' : seoulDay())} /></label>}
         <p>{kind === 'current' ? '수납해도 횟수를 다시 추가하지 않습니다. 이미 새 수강권의 잔여를 입력했다면 선택하세요.' : `전액 수납 시 ${units || '0'}회가 추가됩니다.`}</p>
         <label>변경 사유·비고<input name="note" maxLength={500} placeholder="예: 9/30 콩쿨반 전환, 12회·23만 원" /></label>
         <p>청구서만 수정합니다. 수강 설정·잔여 횟수는 유지되며, 수납이나 결제 안내 발송은 하지 않습니다.</p>
