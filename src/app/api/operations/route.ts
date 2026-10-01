@@ -3,11 +3,12 @@ import { attendanceSequence } from '@/lib/operations/attendance-sequence';
 import type { Account, Attendance } from '@/lib/operations/model';
 import { courseLifecycle } from '@/lib/operations/lifecycle';
 import { importSources } from '@/lib/operations/import-cache';
-import { database, manager, sameOrigin, failure, hash } from '@/lib/operations/auth';
+import { database, manager, sameOrigin, failure } from '@/lib/operations/auth';
 import * as service from '@/lib/operations/service';
 import { noticeConfigured, processNotices } from '@/lib/operations/notices';
 import { seoulDay, validDay, type Snapshot } from '@/lib/operations/model';
 import { after } from 'next/server';
+import { operationsRevision } from '@/lib/operations/revision';
 import { serverTiming } from '@/lib/operations/server-timing';
 export const runtime = 'nodejs';
 export const maxDuration = 60;
@@ -21,8 +22,7 @@ export async function GET(request: Request) {
     // Older clients can still request an unconditional snapshot.
     let revision: string | undefined;
     if (params.get('sync') === '1') {
-      const latest = await timing.measure('revision', () => db.collection('opsAttendance').orderBy('updatedAt', 'desc').limit(1).select('updatedAt').get());
-      revision = hash(JSON.stringify(latest.docs.map(d => [d.id, d.data().updatedAt, d.updateTime])));
+      revision = await timing.measure('revision', () => operationsRevision(db));
       if (params.get('since') === revision) return Response.json({ unchanged: true, revision }, { headers: { 'Cache-Control': 'no-store', 'Server-Timing': timing.header() } });
     }
     const month = day.slice(0, 7); const end = new Date(`${month}-01T00:00:00Z`); end.setUTCMonth(end.getUTCMonth() + 1);

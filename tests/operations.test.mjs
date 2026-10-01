@@ -998,3 +998,46 @@ test('academy closure suppresses even moved lessons and rejects new moves to clo
  assert.equal(plannedLesson({...schedule,moves:[{from:'2026-10-01',to:'2026-10-05'}]},'2026-10-05'),null);
  assert.throws(()=>moveLesson(schedule,{from:'2026-10-01',to:'2026-10-05',expectedUpdatedAt:'a'},[],'b','2026-09-30'),/휴원/);
 });
+
+test('roster and monthly summaries retain current weekdays when viewing a month before setup', () => {
+ const {scheduleSummary,plannedLesson}=setup().load('schedule');
+ const schedule={rules:[{start:'2026-09-30',weekdays:[2,4]}],moves:[],updatedAt:'a'};
+ assert.deepEqual(scheduleSummary(schedule,'2026-10-01'),{label:'주 2회 · 화·목',upcoming:[]});
+ // Showing current weekdays must not backfill earlier calendar cells.
+ assert.equal(plannedLesson(schedule,'2026-09-29'),null);
+ assert.ok(plannedLesson(schedule,'2026-10-01'));
+ const future={...schedule,rules:[{start:'2026-10-12',weekdays:[1,3,5]},...schedule.rules]};
+ assert.deepEqual(scheduleSummary(future,'2026-10-01'),{label:'주 2회 · 화·목',upcoming:[{start:'2026-10-12',label:'주 3회 · 월·수·금'}]});
+ assert.equal(scheduleSummary(future,'2026-10-12').label,'주 3회 · 월·수·금');
+ assert.deepEqual(scheduleSummary({rules:[{start:'2026-10-12',weekdays:[2,4]}],moves:[]},'2026-10-01'),{label:'적용 예정',upcoming:[{start:'2026-10-12',label:'주 2회 · 화·목'}]});
+ assert.equal(scheduleSummary(undefined,'2026-10-01').label,'요일 설정');
+ assert.equal(scheduleSummary({...schedule,rules:[{start:'2026-09-30',weekdays:[]}]},'2026-10-01').label,'정규 수업 없음');
+});
+
+test('weekday edits from either list update only that course in the shared snapshot', () => {
+ const s=setup(),{applySnapshotChanges,reconcileSnapshot}=s.load('snapshot-changes');
+ const piano={id:'piano',schedule:{rules:[{start:'2026-09-30',weekdays:[2,4]}],moves:[],updatedAt:'a'}};
+ const drums={id:'drums',schedule:{rules:[{start:'2026-09-30',weekdays:[3]}],moves:[],updatedAt:'b'}};
+ const snapshot={day:'2026-09-01',accounts:[piano,drums],students:[],attendance:[],invoices:[]};
+ const changed={...piano,schedule:{...piano.schedule,rules:[...piano.schedule.rules,{start:'2026-10-01',weekdays:[1,3,5]}],updatedAt:'c'}};
+ const next=applySnapshotChanges(snapshot,{accounts:[changed]});
+ assert.equal(next.accounts.find(a=>a.id==='piano').schedule,changed.schedule);
+ assert.equal(next.accounts.find(a=>a.id==='drums'),drums);
+ assert.equal(next.day,'2026-09-01');assert.equal(next.attendance,snapshot.attendance);
+ assert.equal(reconcileSnapshot(next,structuredClone(next)),next);
+});
+
+test('snapshot revision detects schedule-only edits and removal without attendance changes', async () => {
+ const {operationsRevision}=setup().load('revision');
+ const state={opsAttendance:[],opsAccounts:[]},queries=[];
+ const db={collection(name){const query={orderBy(field,dir){queries.push([name,field,dir]);return query},limit(n){assert.equal(n,1);return query},select(){return query},async get(){return {docs:state[name]}}};return query}};
+ const doc=(id,value,updateTime)=>({id,data:()=>value,updateTime});
+ const empty=await operationsRevision(db);
+ state.opsAccounts=[doc('piano',{schedule:{updatedAt:'2026-10-01T01:00:00Z'}},'1')];
+ const saved=await operationsRevision(db);assert.notEqual(saved,empty);assert.equal(await operationsRevision(db),saved);
+ state.opsAccounts=[doc('piano',{schedule:{updatedAt:'2026-10-01T01:01:00Z'}},'2')];
+ const removed=await operationsRevision(db);assert.notEqual(removed,saved);
+ state.opsAttendance=[doc('arrival',{updatedAt:'2026-10-01T01:02:00Z'},'3')];
+ assert.notEqual(await operationsRevision(db),removed);
+ assert.ok(queries.some(q=>q[0]==='opsAccounts'&&q[1]==='schedule.updatedAt'));
+});

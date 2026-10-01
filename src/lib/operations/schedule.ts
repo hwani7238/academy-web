@@ -11,6 +11,12 @@ export function scheduleLabel(schedule: LessonSchedule | undefined, day: string)
   const rule = ruleOn(schedule, day);
   return rule ? rule.weekdays.length ? `주 ${rule.weekdays.length}회 · ${WEEK_ORDER.filter(n=>rule.weekdays.includes(n)).map(n=>WEEKDAYS[n]).join('·')}` : '정규 수업 없음' : '요일 설정';
 }
+export function scheduleSummary(schedule: LessonSchedule | undefined, today: string) {
+  const upcoming = (schedule?.rules || []).filter(r => r.start > today)
+    .sort((a, b) => a.start.localeCompare(b.start))
+    .map(r => ({ start: r.start, label: scheduleLabel(schedule, r.start) }));
+  return { label: ruleOn(schedule, today) ? scheduleLabel(schedule, today) : upcoming.length ? '적용 예정' : '요일 설정', upcoming };
+}
 export function plannedLesson(schedule: LessonSchedule | undefined, day: string): { origin: string; moved: boolean } | null {
   if (!schedule || academyClosed(day)) return null;
   const moved = schedule.moves.find(m=>m.to===day);
