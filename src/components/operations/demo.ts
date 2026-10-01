@@ -1,4 +1,5 @@
 import { guardianPhone, contactAccount } from '@/lib/operations/student-contact';
+import { invoiceForPlan } from '@/lib/operations/plan-invoice';
 import { legacyAttendanceAppearance } from '@/lib/operations/attendance-appearance';
 import { paymentDateInput } from '@/lib/operations/billing-display';
 import { correctedLegacy, legacyCorrectionInput } from '@/lib/operations/legacy-correction';
@@ -150,6 +151,14 @@ export function demoAction(current: Snapshot, input: Record<string, unknown>): {
     if(!data.notices.some(n=>n.id===`attendance_${id}`))enqueue(account, `attendance_${id}`, 'attendance'); if (account.remaining <= 0 && units>0) invoice(account);
     result = { name: checkInName(account, {}), duplicate: false };
   } else if (input.action === 'configure') {
+    if(Object.hasOwn(input,'expectedUpdatedAt')&&(account?.updatedAt||'')!==input.expectedUpdatedAt)throw Error('수강 정보가 변경됐습니다. 창을 닫고 다시 확인해주세요.');
+    if(Object.hasOwn(input,'expectedOpenInvoiceId')&&(account?.openInvoiceId||'')!==input.expectedOpenInvoiceId)throw Error('연결된 청구가 변경됐습니다. 창을 닫고 다시 확인해주세요.');
+    const linked=data.invoices.find(i=>i.id===account?.openInvoiceId);
+    if(linked&&(input.syncOpenInvoice===true||account?.planUnits!==input.planUnits||account?.planAmount!==input.planAmount)){
+      if(Object.hasOwn(input,'expectedInvoiceUpdatedAt')&&(linked.updatedAt||'')!==input.expectedInvoiceUpdatedAt)throw Error('청구 내용이 변경됐습니다. 창을 닫고 다시 확인해주세요.');
+      const revised=invoiceForPlan(linked,String(input.studentId),Number(input.planUnits),Number(input.planAmount),at);
+      if(revised)Object.assign(linked,revised);
+    }
     const student = data.students.find(s => s.id === input.studentId)!;
     const next: Account = { ...(account?.schedule?{schedule:account.schedule}:{}), id: student.id, sourceStudentId: student.sourceStudentId, subject: student.subject, name: student.name, phone: String(input.phone), checkinSuffixes: suffixes(input.phones), planUnits: Number(input.planUnits), planAmount: Number(input.planAmount), remaining: account?.remaining ?? Number(input.remaining), openInvoiceId: account?.openInvoiceId || null, active: input.active !== false, autoBilling: input.autoBilling === true, updatedAt: at };
     if(!account&&input.firstBilling===true){const firstInvoice=firstEnrollmentInvoice(next,validDay(input.firstLessonDate),at);next.openInvoiceId=firstInvoice.id;data.invoices.push(firstInvoice);data.sequenceContext||={positions:{},cycleStarts:[]};data.sequenceContext.cycleStarts.push({studentId:next.id,day:firstInvoice.cycleStart!});}

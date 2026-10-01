@@ -1,5 +1,6 @@
 import { legacyAttendanceAppearance } from './attendance-appearance';
 import { guardianPhone, contactAccount } from './student-contact';
+import { invoiceForPlan } from './plan-invoice';
 import { plannedLesson } from './schedule';
 import { paymentDateInput } from './billing-display';
 import { reviewBalance, type BalanceAudit, type BalanceSource } from './balance-review';
@@ -156,20 +157,40 @@ export async function configure(input: Record<string, unknown>, actor: string) {
     if (subject && !studentSubjects(student.data() || {}).includes(subject)) throw new Error('등록된 과목을 확인해주세요.');
     if (subject && (await tx.get(db.doc(`opsAccounts/${sourceStudentId}`))).exists) throw new Error('기존 통합 수강권을 과목별로 분리한 후 등록해주세요.');
     const old = existing.data();
+    if (Object.hasOwn(input, 'expectedUpdatedAt') && (old?.updatedAt || '') !== input.expectedUpdatedAt) throw Error('수강 정보가 다른 화면에서 변경됐습니다. 창을 닫고 다시 확인해주세요.');
+    if (Object.hasOwn(input, 'expectedOpenInvoiceId') && (old?.openInvoiceId || '') !== input.expectedOpenInvoiceId) throw Error('연결된 청구가 변경됐습니다. 창을 닫고 다시 확인해주세요.');
     const overrideGroup=student.data()?.operationsCourseGroups?.[subject] as string|undefined;
     const overrideSubject=overrideGroup?(overrideGroup.includes('피아노')?'피아노':overrideGroup):undefined;
     const remaining = old ? old.remaining : integer(input.remaining, -1000, 1000, '현재 남은 횟수');
     const saved = { id, ...(old?.schedule ? {schedule:old.schedule} : {}), ...(old?.importId ? { importId: old.importId, openingAsOf: old.openingAsOf } : {}), ...(old?.attendanceGroup ? { attendanceGroup: old.attendanceGroup } : {}), ...(old?.displaySubject ? { displaySubject: old.displaySubject } : {}), ...(subject ? { sourceStudentId, subject } : {}), name: subject ? `${student.data()?.name || '학생'} · ${subject}` : student.data()?.name || '학생', phone, checkinSuffixes: codes, planUnits, planAmount, remaining, openInvoiceId: old?.openInvoiceId || null, active: input.active !== false, autoBilling: input.autoBilling === true, updatedAt: now(), ...(overrideGroup?{attendanceGroup:overrideGroup,displaySubject:overrideSubject,name:`${student.data()?.name} · ${overrideSubject}`}:{}) };
     const firstInvoice = !old && input.firstBilling === true ? firstEnrollmentInvoice(saved as Account, validDay(input.firstLessonDate), saved.updatedAt) : null;
+    let revisedInvoice: Invoice | undefined, invoiceBefore: Invoice | undefined;
+    let billingNotice: FirebaseFirestore.DocumentSnapshot | undefined;
+    if (old?.openInvoiceId && (input.syncOpenInvoice === true || old.planUnits !== planUnits || old.planAmount !== planAmount)) {
+      const invoiceSnap = await tx.get(db.doc(`opsInvoices/${old.openInvoiceId}`));
+      if (!invoiceSnap.exists) throw Error('연결된 미납 청구를 찾을 수 없습니다. 청구·수납에서 확인해주세요.');
+      invoiceBefore = { ...invoiceSnap.data(), id: invoiceSnap.id } as Invoice;
+      if (Object.hasOwn(input, 'expectedInvoiceUpdatedAt') && (invoiceBefore.updatedAt || '') !== input.expectedInvoiceUpdatedAt) throw Error('청구 내용이 다른 화면에서 변경됐습니다. 창을 닫고 다시 확인해주세요.');
+      revisedInvoice = invoiceForPlan(invoiceBefore, id, planUnits, planAmount, saved.updatedAt);
+      if (revisedInvoice) {
+        billingNotice = await tx.get(db.doc(`opsNotices/billing_${old.openInvoiceId}`));
+        if (billingNotice.exists && !['queued','blocked','review','cancelled'].includes(billingNotice.data()?.status)) throw Error('이미 결제 안내를 처리한 청구입니다. 발송 결과를 확인한 뒤 청구를 수정해주세요.');
+      }
+    }
     if (firstInvoice) {
       saved.openInvoiceId = firstInvoice.id;
       tx.create(db.doc(`opsInvoices/${firstInvoice.id}`), { ...firstInvoice, reason: '신규 수강 등록' });
     }
     tx.set(ref, saved);
+    if (revisedInvoice) {
+      tx.update(db.doc(`opsInvoices/${revisedInvoice.id}`), { units: revisedInvoice.units, amount: revisedInvoice.amount, creditUnits: revisedInvoice.creditUnits, updatedAt: revisedInvoice.updatedAt });
+      if (billingNotice?.exists && billingNotice.data()?.status !== 'cancelled') tx.update(billingNotice.ref, { parameters: { ...billingNotice.data()?.parameters, amount: String(revisedInvoice.amount - revisedInvoice.paid), lesson_count: String(revisedInvoice.units) } });
+      audit(tx, db, actor, 'configure-invoice', id, { invoiceId: revisedInvoice.id, before: { units: invoiceBefore!.units, amount: invoiceBefore!.amount, creditUnits: invoiceBefore!.creditUnits ?? invoiceBefore!.units }, after: { units: revisedInvoice.units, amount: revisedInvoice.amount, creditUnits: revisedInvoice.creditUnits }, paid: revisedInvoice.paid });
+    }
     audit(tx, db, actor, 'configure', id, { planUnits, planAmount, remaining, active: input.active !== false, autoBilling: input.autoBilling === true, ...(firstInvoice ? { invoiceId: firstInvoice.id, firstLessonDate: firstInvoice.cycleStart } : {}) });
     // A changed plan length also changes historical sequence positions.
     // Let that case rebuild the chronology; fee/contact edits need only this row.
-    return old && old.planUnits === planUnits ? { accounts: [saved as Account] } : undefined;
+    return old && old.planUnits === planUnits ? { accounts: [saved as Account], ...(revisedInvoice ? { invoices: [revisedInvoice] } : {}) } : undefined;
   });
 }
 // Read the missed lesson and all bookings inside the transaction so two screens
