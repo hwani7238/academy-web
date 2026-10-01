@@ -34,6 +34,8 @@ export function attendanceSequence(accounts: Pick<Account, 'id' | 'planUnits'>[]
         numbers.push(positions[id]);
       }
       labels.set(`${id}_${e.day}`, numbers.join('·'));
+    } else if (e.legacy?.status === 'cancelled') {
+      continue;
     } else if (e.start) {
       // The billing form explicitly records the first lesson date, even when
       // that day's attendance has not been copied into the new system.

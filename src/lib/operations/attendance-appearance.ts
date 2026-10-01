@@ -3,6 +3,7 @@ import { seoulDay, type Account, type Attendance, type Invoice, type Snapshot } 
 type Legacy = NonNullable<Snapshot['legacyAttendance']>[number];
 
 export function legacyAttendanceAppearance(row: Legacy) {
+  if (row.status) return { tone: row.status, label: row.status === 'present' ? '' : ({ absent: '결석', makeup: '보강', late_cancel: '당일 취소', travel: '여행', sick: '병가', cancelled: '취소' }[row.status] || '') };
   const color = row.color.toUpperCase().replace(/^#/, '').replace(/^FF(?=.{6}$)/, '');
   if (['CCCCCC', 'D9D9D9', 'B7B7B7'].includes(color) || /결석/.test(row.value)) return { tone: 'absent', label: '결석' };
   if (color === 'FF9900' || /보강/.test(row.value)) return { tone: 'makeup', label: '보강' };
@@ -27,6 +28,7 @@ export function paidFirstLesson(sequence: string | undefined, status: Attendance
 
 export function importedAttendanceAppearance(row: Legacy, account?: Account, invoice?: Invoice) {
   const appearance = legacyAttendanceAppearance(row);
+  if (row.status === 'cancelled') return appearance;
   const status = appearance.tone === 'payment-due' ? 'present' : appearance.tone as Attendance['status'];
   const due = attendancePaymentDue({ day: row.day, status, units: 1 }, account, invoice);
   if (due) return { tone: 'payment-due', label: '결제 필요' };

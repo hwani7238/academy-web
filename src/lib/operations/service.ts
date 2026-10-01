@@ -1,4 +1,5 @@
 import { reviewBalance, type BalanceAudit, type BalanceSource } from './balance-review';
+import { correctedLegacy, legacyCorrectionInput, type LegacyCorrection } from './legacy-correction';
 import { changeSchedule, moveLesson } from './schedule';
 import { attendanceDays, rangeAttendance } from './attendance-range';
 import { enrollmentState, lifecycleInput, courseLifecycle, deleteOrRestoreEnrollment } from './lifecycle';
@@ -28,6 +29,40 @@ function newInvoice(tx: Transaction, db: Firestore, account: Account, id: string
 }
 export function enrollmentId(studentId: string, subject: string) {
   return `course_${hash(JSON.stringify([studentId, subject]))}`;
+}
+export async function correctLegacyAttendance(input: Record<string, unknown>, actor: string) {
+  const studentId = key(input.studentId), day = validDay(input.day), values = legacyCorrectionInput(input), db = database();
+  if (day > seoulDay()) throw Error('이전 출결 날짜를 확인해주세요.');
+  return db.runTransaction(async tx => {
+    const account = (await tx.get(db.doc(`opsAccounts/${studentId}`))).data() as Account | undefined;
+    if (!account) throw Error('먼저 수강 등록을 완료해주세요.');
+    const sourceId = account.sourceStudentId || studentId;
+    const ref = db.doc(`opsLegacyCorrections/${studentId}_${day}`);
+    const [person, sources, previous, modern] = await Promise.all([
+      tx.get(db.doc(`students/${sourceId}`)), tx.get(db.collection('opsImports').where('matchedStudentId', '==', sourceId)),
+      tx.get(ref), tx.get(db.doc(`opsAttendance/${studentId}_${day}`)),
+    ]);
+    if (modern.exists) throw Error('직접 입력한 출결 기록이 있습니다. 새로고침 후 해당 기록을 수정해주세요.');
+    if (!person.exists) throw Error('학생을 찾을 수 없습니다.');
+    const subjects = studentSubjects(person.data()!);
+    const cells: { studentId: string; day: string; value: string; color: string }[] = [];
+    for (const doc of sources.docs) {
+      const source = doc.data(), matching = resolveImportedSubjects(subjects, source.subject);
+      if (matching.length !== 1 || enrollmentId(sourceId, matching[0]) !== studentId || day > (source.attendanceCutoffs?.[day.slice(0, 7)] || source.asOf || '')) continue;
+      for (const history of source.history || []) for (const cell of history.cells || []) {
+        if (cell.day === day) cells.push({ studentId, day, value: String(cell.value), color: String(cell.color || '') });
+      }
+    }
+    if (cells.length !== 1) throw Error('이전 장부 기록이 없거나 중복되어 있습니다. 새로고침 후 확인해주세요.');
+    const old = previous.data() as LegacyCorrection | undefined, current = correctedLegacy(cells[0], old);
+    if (current.revision !== input.expectedRevision) throw Error('다른 화면에서 이전 출결이 변경됐습니다. 창을 닫고 다시 열어주세요.');
+    const updatedAt = new Date(Math.max(Date.now(), Date.parse(old?.updatedAt || '') + 1 || 0)).toISOString();
+    const correction: LegacyCorrection = { studentId, day, ...values, updatedAt };
+    tx.set(ref, correction);
+    audit(tx, db, actor, 'correct-legacy-attendance', studentId, { day, original: cells[0], before: old || null, after: correction });
+    // The opening balance already includes imported lessons. Never charge again.
+    return { ok: true };
+  });
 }
 export async function changeLifecycle(input: Record<string, unknown>, actor: string) {
   const id = key(input.sourceStudentId); const studentId=key(input.studentId); const values = lifecycleInput(input); const db = database();

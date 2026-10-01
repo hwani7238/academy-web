@@ -4,7 +4,7 @@ export type BalanceAudit = {id:string;studentId?:string;action:string;at:string;
 type Cell={day:string;value:string;color:string};
 export type BalanceSource={id:string;asOf:string;attendanceAsOf?:string;attendanceRevision?:number;attendanceCutoffs?:Record<string,string>;remainingCandidate:number;planUnits:number;openingHistory?:{cells?:Cell[]}[];history?:{cells?:Cell[]}[]};
 export type BalanceReview={id:string;name:string;group:string;current:number;expected:number|null;ledger:number|null;status:'correct'|'verified'|'confirmed'|'review';reason:string;missingDays:string[];fingerprint:string;updatedAt:string;evidence:{planUnits:number;openingSnapshot:Cell[];invoices:Pick<Invoice,'id'|'units'|'creditUnits'|'cycleStart'|'status'>[];openingDay:string;openingRemaining:number|null;lastCorrection:string;lastOrdinal:string;events:{at:string;action:string;detail:Record<string,unknown>}[];legacy:Cell[];attendance:Pick<Attendance,'day'|'status'|'units'>[]}};
-const ignored=new Set(['invoice','cancelInvoice','confirmInvoice','sendInvoice','correct-attendance-time','attendance-range','course-lifecycle','lifecycle','lesson-schedule','move-lesson','manage-course','notice-config-retry','current-cycle-invoice']);
+const ignored=new Set(['delete-enrollment','restore-enrollment','invoice','cancelInvoice','confirmInvoice','sendInvoice','correct-attendance-time','attendance-range','course-lifecycle','lifecycle','lesson-schedule','move-lesson','manage-course','notice-config-retry','current-cycle-invoice']);
 const gray=new Set(['FFCCCCCC','FFD9D9D9','FFB7B7B7']);
 export function reviewBalance(account:Account,source:BalanceSource|undefined,audits:BalanceAudit[],attendance:Attendance[],invoices:Invoice[]):BalanceReview{
  const events=audits.filter(a=>a.studentId===account.id).sort((a,b)=>a.at.localeCompare(b.at)||a.id.localeCompare(b.id));
@@ -31,7 +31,8 @@ export function reviewBalance(account:Account,source:BalanceSource|undefined,aud
    const invoice=invoices.find(i=>i.id===d.invoiceId&&i.studentId===account.id);
    if(!invoice||credited.has(invoice.id))return stop('수납의 수강 횟수 반영 근거를 확인해주세요.');
    credited.add(invoice.id);ledger+=invoice.creditUnits??invoice.units;
-  }else if(event.action==='configure' || event.action==='payment' || ignored.has(event.action)){
+  }else if(event.action==='correct-legacy-attendance')return stop('이전 출결을 정정했습니다. 현재 잔여 횟수도 맞는지 확인해주세요.');
+  else if(event.action==='configure' || event.action==='payment' || ignored.has(event.action)){
    // Configuration and billing requests do not reset a balance.
   }else return stop(`별도 변경 이력 확인 필요: ${event.action}`);
   if(!Number.isSafeInteger(ledger))return stop('잔여 변경 이력의 횟수가 불명확합니다.');

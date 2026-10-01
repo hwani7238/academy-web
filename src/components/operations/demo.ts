@@ -1,3 +1,4 @@
+import { correctedLegacy, legacyCorrectionInput } from '@/lib/operations/legacy-correction';
 import { changeSchedule, moveLesson } from '@/lib/operations/schedule';
 import { rangeAttendance } from '@/lib/operations/attendance-range';
 import { enrollmentState, lifecycleInput, deleteOrRestoreEnrollment } from '@/lib/operations/lifecycle';
@@ -14,7 +15,10 @@ export function sample(): Snapshot {
   ];
   accounts.push({ ...accounts[2], id: 'demo-c-vocal', subject: '보컬', name: '김하린 · 보컬', planUnits: 4, planAmount: 180000, remaining: 2 });
   accounts[0].attendanceGroup = '어린이 피아노(1관)';
-  return { sequenceContext: {positions:Object.fromEntries(accounts.map(a=>[a.id, a.planUnits-a.remaining])),cycleStarts:[]}, accounts, students: accounts.map(({ id, name, phone, sourceStudentId, subject, attendanceGroup }) => ({ id, name, phone, sourceStudentId, subject, attendanceGroup, instruments: subject ? [subject] : [] })), attendance: [], invoices: [], payments: [], notices: [], devices: [], day: seoulDay(), configured: false };
+  const previousMonth=new Date(`${seoulDay().slice(0,7)}-01T00:00:00Z`);previousMonth.setUTCMonth(previousMonth.getUTCMonth()-1);
+  const month=previousMonth.toISOString().slice(0,7);
+  const legacyAttendance=[{studentId:'demo-b',day:month+'-19',value:'7',color:''},{studentId:'demo-b',day:month+'-21',value:'8',color:''}].map(row=>correctedLegacy(row));
+  return { legacyAttendance, sequenceContext: {positions:Object.fromEntries(accounts.map(a=>[a.id, a.planUnits-a.remaining])),cycleStarts:[]}, accounts, students: accounts.map(({ id, name, phone, sourceStudentId, subject, attendanceGroup }) => ({ id, name, phone, sourceStudentId, subject, attendanceGroup, instruments: subject ? [subject] : [] })), attendance: [], invoices: [], payments: [], notices: [], devices: [], day: seoulDay(), configured: false };
 }
 export function demoAction(current: Snapshot, input: Record<string, unknown>): { data: Snapshot; result: Record<string, unknown> } {
   const data = structuredClone(current); const at = new Date().toISOString();
@@ -27,7 +31,12 @@ export function demoAction(current: Snapshot, input: Record<string, unknown>): {
     if (a.autoBilling) enqueue(a, `billing_${id}`, 'billing');
   };
   let result: Record<string, unknown> = { ok: true };
-  if(input.action==='saveSchedule'||input.action==='moveLesson'){
+  if(input.action==='correctLegacyAttendance'){
+    const row=data.legacyAttendance?.find(r=>r.studentId===input.studentId&&r.day===input.day);
+    if(!row||!account)throw Error('이전 출결을 찾을 수 없습니다.');
+    if(row.revision!==input.expectedRevision)throw Error('이전 출결이 변경됐습니다.');
+    Object.assign(row,legacyCorrectionInput(input),{revision:crypto.randomUUID()});
+  } else if(input.action==='saveSchedule'||input.action==='moveLesson'){
     if(!account)throw Error('먼저 수강 등록을 완료해주세요.');
     const stamp=new Date(Math.max(Date.now(),Date.parse(account.schedule?.updatedAt||'')+1||0)).toISOString();
     account.schedule=input.action==='moveLesson'?moveLesson(account.schedule,input,data.attendance.filter(r=>r.studentId===account.id),stamp):changeSchedule(account.schedule,input,stamp);

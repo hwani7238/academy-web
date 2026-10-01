@@ -9,12 +9,13 @@ export type Account = {
 };
 export const ATTENDANCE_LABELS = { present: "출석", absent: "결석", makeup: "보강", late_cancel: "당일 취소", travel: "여행", sick: "병가", cancelled: "취소" } as const;
 export type AttendanceStatus = keyof typeof ATTENDANCE_LABELS;
+export type LegacyAttendance = { studentId: string; day: string; value: string; color: string; status?: AttendanceStatus; note?: string; revision?: string };
 export type Attendance = { range?: {id:string;start:string;end:string}; arrivalAt?: string; status?: AttendanceStatus; source?: "kiosk" | "manual"; relatedDay?: string; id: string; studentId: string; name: string; day: string; at: string; units: number; note: string; updatedAt: string };
 export type Invoice = { updatedAt?: string; creditUnits?: number; cycleStart?: string; id: string; studentId: string; name: string; units: number; amount: number; paid: number; status: 'open' | 'paid' | 'cancelled'; needsReview: boolean; createdAt: string };
 export type Payment = { id: string; invoiceId: string; studentId: string; amount: number; method: string; at: string; note: string };
 export type Notice = { id: string; studentId: string; name: string; kind: 'attendance' | 'billing'; status: string; createdAt: string; requestId?: string; error?: string };
 export type Device = { id: string; name: string; active: boolean; createdAt: string };
-export type Snapshot = { sequenceContext?: import('./attendance-sequence').SequenceContext; legacyAttendance?: { studentId: string; day: string; value: string; color: string }[]; students: { courseUpdatedAt?: string; lifecycle?: Lifecycle; id: string; name: string; phone: string; sourceStudentId?: string; subject?: string; importId?: string; openingAsOf?: string; instruments?: string[]; attendanceGroup?: string }[]; accounts: Account[]; attendance: Attendance[]; invoices: Invoice[]; payments: Payment[]; notices: Notice[]; devices: Device[]; day: string; configured: boolean };
+export type Snapshot = { sequenceContext?: import('./attendance-sequence').SequenceContext; legacyAttendance?: LegacyAttendance[]; students: { courseUpdatedAt?: string; lifecycle?: Lifecycle; id: string; name: string; phone: string; sourceStudentId?: string; subject?: string; importId?: string; openingAsOf?: string; instruments?: string[]; attendanceGroup?: string }[]; accounts: Account[]; attendance: Attendance[]; invoices: Invoice[]; payments: Payment[]; notices: Notice[]; devices: Device[]; day: string; configured: boolean };
 export const METHODS = ['현금', '카드', '지역화폐', '계좌이체'] as const;
 export function seoulDay(date = new Date()) { return new Intl.DateTimeFormat('sv-SE', { timeZone: 'Asia/Seoul' }).format(date); }
 export function suffixes(values: unknown) {

@@ -1,4 +1,5 @@
 import { courseGroup, type Imported } from '@/lib/operations/course-label';
+import { correctedLegacy, type LegacyCorrection } from '@/lib/operations/legacy-correction';
 import { attendanceSequence } from '@/lib/operations/attendance-sequence';
 import type { Account, Attendance } from '@/lib/operations/model';
 import { courseLifecycle } from '@/lib/operations/lifecycle';
@@ -26,7 +27,7 @@ export async function GET(request: Request) {
       if (params.get('since') === revision) return Response.json({ unchanged: true, revision }, { headers: { 'Cache-Control': 'no-store', 'Server-Timing': timing.header() } });
     }
     const month = day.slice(0, 7); const end = new Date(`${month}-01T00:00:00Z`); end.setUTCMonth(end.getUTCMonth() + 1);
-    const [students, accounts, attendance, invoices, payments, notices, devices, imports, priorAttendance, cycleInvoices] = await Promise.all([
+    const [students, accounts, attendance, invoices, payments, notices, devices, imports, priorAttendance, cycleInvoices, legacyCorrections] = await Promise.all([
       timing.measure('students', () => db.collection('students').select('name', 'phone', 'instruments', 'instrument', 'lifecycle', 'courseLifecycles', 'operationsCourseGroups', 'courseUpdatedAt').get()),
       timing.measure('accounts', () => db.collection('opsAccounts').get()),
       timing.measure('attendance', () => db.collection('opsAttendance').where('day', '>=', `${month}-01`).where('day', '<', end.toISOString().slice(0, 10)).get()),
@@ -37,6 +38,7 @@ export async function GET(request: Request) {
       timing.measure('imports', importSources),
       timing.measure('history', () => db.collection('opsAttendance').where('day', '<', `${month}-01`).select('studentId', 'day', 'units', 'status').get()),
       timing.measure('cycles', () => db.collection('opsInvoices').where('creditUnits', '==', 0).select('studentId', 'cycleStart', 'status').get()),
+      timing.measure('legacyCorrections', () => db.collection('opsLegacyCorrections').get()),
     ]);
     const studentById = new Map(students.docs.map(d => [d.id, d]));
     const accountById = new Map(accounts.docs.map(d => [d.id, d.data()]));
@@ -67,7 +69,8 @@ export async function GET(request: Request) {
     }
     const rows = (snap: FirebaseFirestore.QuerySnapshot) => snap.docs.map(d => ({ ...d.data(), id: d.id }));
     const namedRows = (snap: FirebaseFirestore.QuerySnapshot) => snap.docs.map(d => { const value=d.data(); return {...value,id:d.id,name:accountById.get(value.studentId)?.name||value.name}; });
-    const allLegacy = [...legacyCells.values()].filter((v): v is NonNullable<typeof v> => Boolean(v));
+    const correctionsById = new Map(legacyCorrections.docs.map(d => [d.id, d.data() as LegacyCorrection]));
+    const allLegacy = [...legacyCells.values()].filter((v): v is NonNullable<typeof v> => Boolean(v)).map(row => correctedLegacy(row, correctionsById.get(`${row.studentId}_${row.day}`)));
     const cycleStarts = cycleInvoices.docs.map(d=>d.data()).filter(v=>v.status!=='cancelled' && typeof v.cycleStart==='string').map(v=>({studentId:String(v.studentId),day:String(v.cycleStart)}));
     const beforeMonth = `${month}-01`;
     const sequenceContext = { positions: attendanceSequence(accounts.docs.map(d=>({...d.data(),id:d.id}) as Account), priorAttendance.docs.map(d=>d.data() as Attendance), allLegacy.filter(r=>r.day<beforeMonth), {positions:{},cycleStarts:cycleStarts.filter(r=>r.day<beforeMonth)}).positions, cycleStarts:cycleStarts.filter(r=>r.day>=beforeMonth && r.day<end.toISOString().slice(0,10)) };
@@ -86,6 +89,7 @@ export async function POST(request: Request) {
   try {
     sameOrigin(request); const actor = await manager(request); const input = await request.json();
     switch (input.action) {
+      case 'correctLegacyAttendance': return Response.json(await service.correctLegacyAttendance(input,actor));
       case 'deleteEnrollment': case 'restoreEnrollment': return Response.json({ok:true,changes:await service.deleteEnrollment(input,actor)});
       case 'saveSchedule': case 'moveLesson': return Response.json({ok:true,changes:await service.saveSchedule(input,actor)});
       case 'renameStudent': await service.renameStudent(input,actor); return Response.json({ok:true});

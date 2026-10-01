@@ -1029,7 +1029,7 @@ test('weekday edits from either list update only that course in the shared snaps
 
 test('snapshot revision detects schedule-only edits and removal without attendance changes', async () => {
  const {operationsRevision}=setup().load('revision');
- const state={opsAttendance:[],opsAccounts:[]},queries=[];
+ const state={opsAttendance:[],opsAccounts:[],opsLegacyCorrections:[]},queries=[];
  const db={collection(name){const query={orderBy(field,dir){queries.push([name,field,dir]);return query},limit(n){assert.equal(n,1);return query},select(){return query},async get(){return {docs:state[name]}}};return query}};
  const doc=(id,value,updateTime)=>({id,data:()=>value,updateTime});
  const empty=await operationsRevision(db);
@@ -1082,4 +1082,54 @@ test('deletion rejects active, expired, foreign, stale and ambiguous courses', a
  const restored=deleteOrRestoreEnrollment(deleted,{action:'restoreEnrollment',expectedUpdatedAt:'b'},'c','2026-10-03');
  assert.equal(enrollmentState(restored,'2026-10-03'),'active');assert.equal(restored.until,paused.until);
  assert.throws(()=>deleteOrRestoreEnrollment(restored,{action:'restoreEnrollment',expectedUpdatedAt:'c'},'d'),/삭제된/);
+});
+
+test('legacy corrections edit ordinal, status and note without charging imported lessons again', async () => {
+ const s=setup(),sourceId='person',subject='피아노',id=s.service.enrollmentId(sourceId,subject),day='2026-09-19';
+ s.records.set('students/person',{name:'가상',instruments:[subject,'드럼']});
+ await s.service.configure({studentId:id,sourceStudentId:sourceId,subject,planUnits:8,planAmount:160000,remaining:2,phone:'01000001234',phones:['1234']},'owner');
+ const raw={studentId:id,day,value:'5.0',color:''};
+ const source={matchedStudentId:sourceId,subject,asOf:'2026-09-22',history:[{cells:[raw]}]};
+ s.records.set('opsImports/piano',source);
+ const before=structuredClone([...s.records]);
+ const {correctedLegacy}=s.load('legacy-correction');
+ const input={studentId:id,day,status:'present',ordinal:4,note:'회차 정정',expectedRevision:correctedLegacy(raw).revision};
+ await s.service.correctLegacyAttendance(input,'owner');
+ const saved=s.records.get(`opsLegacyCorrections/${id}_${day}`);
+ assert.equal(saved.value,'4');assert.equal(saved.note,'회차 정정');
+ for(const [path,value] of before)assert.deepEqual(s.records.get(path),value);
+ assert.equal([...s.records.keys()].some(p=>/^ops(Attendance|Notices|Invoices)\//.test(p)),false);
+ await assert.rejects(s.service.correctLegacyAttendance(input,'owner'),/변경/);
+ const cancelled={...input,status:'cancelled',ordinal:'',expectedRevision:correctedLegacy(raw,saved).revision};
+ await s.service.correctLegacyAttendance(cancelled,'owner');
+ const removed=s.records.get(`opsLegacyCorrections/${id}_${day}`);
+ assert.equal(removed.value,'');assert.equal(removed.status,'cancelled');
+ await s.service.correctLegacyAttendance({...input,expectedRevision:correctedLegacy(raw,removed).revision},'owner');
+ assert.equal(s.records.get(`opsLegacyCorrections/${id}_${day}`).status,'present');
+ // Refreshing the spreadsheet source does not erase the correction; its new revision rejects stale editors.
+ const changedOriginal={...raw,value:'6.0'};
+ assert.equal(correctedLegacy(changedOriginal,saved).value,'4');
+ assert.notEqual(correctedLegacy(changedOriginal,saved).revision,correctedLegacy(raw,saved).revision);
+ const drums=s.service.enrollmentId(sourceId,'드럼');
+ await s.service.configure({studentId:drums,sourceStudentId:sourceId,subject:'드럼',planUnits:4,planAmount:160000,remaining:2,phone:'01000001234',phones:['1234']},'owner');
+ await assert.rejects(s.service.correctLegacyAttendance({...input,studentId:drums},'owner'),/이전 장부/);
+ s.records.set(`opsAttendance/${id}_${day}`,{studentId:id,day,units:1});
+ await assert.rejects(s.service.correctLegacyAttendance(input,'owner'),/직접 입력/);
+});
+
+test('corrected legacy cells anchor subsequent sequence and cancelled or absent cells do not advance it', () => {
+ const s=setup(),{correctedLegacy,legacyCorrectionInput}=s.load('legacy-correction');
+ const {attendanceSequence}=s.load('attendance-sequence');
+ const raw={studentId:'p',day:'2026-09-19',value:'5.0',color:''};
+ const next={studentId:'p',day:'2026-09-21',units:1,status:'present'};
+ const corrected=correctedLegacy(raw,{...raw,...legacyCorrectionInput({status:'present',ordinal:4}),updatedAt:'a'});
+ assert.equal(attendanceSequence([{id:'p',planUnits:8}],[next],[corrected]).labels.get('p_2026-09-21'),'5');
+ for(const status of ['cancelled','absent','travel','sick']){
+  const cell=correctedLegacy(raw,{...raw,...legacyCorrectionInput({status,ordinal:''}),updatedAt:'b'});
+  assert.equal(attendanceSequence([{id:'p',planUnits:8}],[next],[cell],{positions:{p:3},cycleStarts:[]}).labels.get('p_2026-09-21'),'4');
+ }
+ const {importedAttendanceAppearance}=s.load('attendance-appearance');
+ assert.equal(importedAttendanceAppearance({...corrected,status:'cancelled'}).tone,'cancelled');
+ for(const ordinal of [0,-1,1.5,201])assert.throws(()=>legacyCorrectionInput({status:'present',ordinal}));
+ assert.throws(()=>legacyCorrectionInput({status:'present',ordinal:''}));assert.throws(()=>legacyCorrectionInput({status:'unknown',ordinal:1}));
 });

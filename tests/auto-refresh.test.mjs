@@ -92,7 +92,7 @@ test('combined endpoint authorizes first; unchanged revision skips all ledger qu
   assert.equal(first.status,200); assert.ok(snapshot.students); assert.equal(reads[0],'opsAttendance');
   assert.ok(reads.includes('opsAccounts')); reads.length=0;
   const same=await (await GET(request(snapshot.revision))).json();
-  assert.deepEqual(same,{unchanged:true,revision:snapshot.revision}); assert.deepEqual(reads,['opsAttendance','opsAccounts']);
+  assert.deepEqual(same,{unchanged:true,revision:snapshot.revision}); assert.deepEqual(reads,['opsAttendance','opsAccounts','opsLegacyCorrections']);
   scheduleStamp='schedule-two'; reads.length=0;
   const scheduleChanged=await(await GET(request(snapshot.revision))).json();
   assert.ok(scheduleChanged.students);assert.notEqual(scheduleChanged.revision,snapshot.revision);
