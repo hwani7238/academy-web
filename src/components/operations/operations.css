@@ -82,3 +82,19 @@
 .whee-ops .inactive-actions{display:flex;align-items:center;gap:8px}.whee-ops button.inactive-delete{width:38px;min-height:38px;padding:8px;color:#9f2635;background:transparent;border-color:transparent}.whee-ops button.inactive-delete:hover:not(:disabled){background:#fff0f1;border-color:#edc6cc;color:#9f2635}
 
 .whee-ops .quick-option.unpaid{background:#f1e4ff;color:#703aa0;border-color:#dcc2f5}
+
+/* Dense billing ledger: keep dates, instruments and people in aligned columns. */
+.whee-ops .billing-heading{padding:14px 16px;gap:12px;justify-content:flex-start;flex-wrap:wrap}
+.whee-ops .billing-heading>div{margin-right:auto}.whee-ops .billing-heading p{font-size:12px;margin-top:3px}
+.whee-ops .billing-heading label{min-width:130px;font-size:12px;gap:3px}.whee-ops .billing-heading input,.whee-ops .billing-heading select{min-height:32px;padding:5px 8px;font-size:13px}
+.whee-ops .billing-count{display:flex;gap:24px;padding:8px 16px;background:#f6f4fb;border-top:1px solid var(--line);font-size:13px;color:#5f4c79}
+.whee-ops .billing-table{font-size:13px;max-width:1180px;min-width:810px;table-layout:fixed}
+.whee-ops .billing-table th,.whee-ops .billing-table td{padding:6px 10px;line-height:18px;vertical-align:middle}
+.whee-ops .billing-table th{font-size:12px}.whee-ops .billing-table td small{font-size:11px;line-height:14px;margin-top:0}
+.whee-ops .billing-date-col{width:108px}.whee-ops .billing-subject-col{width:150px}.whee-ops .billing-name-col{width:100px}.whee-ops .billing-plan-col{width:65px}.whee-ops .billing-amount-col{width:120px}.whee-ops .billing-status-col{width:110px}.whee-ops .billing-actions-col{width:132px}
+.whee-ops .billing-table .money{text-align:right;font-variant-numeric:tabular-nums}.whee-ops .billing-date-start td{border-top:2px solid #d9dfeb}.whee-ops .billing-table tbody tr:hover{background:#fafbff}
+.whee-ops .billing-state{color:#7e22ce;font-size:12px}.whee-ops .billing-state.review{color:#915600}
+.whee-ops .billing-actions{display:flex;align-items:center;gap:5px}.whee-ops .billing-actions button{min-height:30px;padding:4px 8px;font-size:12px;white-space:nowrap}.whee-ops .billing-actions .billing-more{font-size:22px;min-width:28px;padding:0 5px}
+.whee-ops .billing-empty{padding:28px 16px;font-size:13px}.whee-ops .billing-empty button{margin-left:12px}
+.whee-ops .payment-table{table-layout:auto;min-width:730px}.whee-ops .billing-note{white-space:normal;overflow-wrap:anywhere;max-width:280px}
+.whee-ops .billing-detail p{font-size:13px;line-height:1.6}.whee-ops .billing-detail dl{margin:12px 0}.whee-ops .billing-detail dl>div{display:flex;justify-content:space-between;padding:5px 0;font-size:14px}.whee-ops .billing-detail-actions{display:flex;gap:6px;flex-wrap:wrap;margin:14px 0}.whee-ops .billing-detail-actions button{font-size:13px;padding:6px 10px}.whee-ops .billing-api-note{color:#63718a;font-size:12px!important}
