@@ -61,18 +61,18 @@ test('lesson sequence follows imported counts, rolls per course and recalculates
  const row=(studentId,day,units=1,status='present')=>({studentId,day,units,status});
  const records=[row('piano','2026-09-30'),row('piano','2026-09-20'),row('piano','2026-09-22',0,'absent'),row('piano','2026-09-23',2,'makeup'),row('drums','2026-09-20')];
  const result=sequence(accounts,records,legacy);
- assert.equal(result.labels.get('piano_2026-09-20'),'6');
- assert.equal(result.labels.get('piano_2026-09-23'),'7·8');
+ assert.equal(result.labels.get('piano_2026-09-20'),'7');
+ assert.equal(result.labels.has('piano_2026-09-23'),false);
  assert.equal(result.labels.get('piano_2026-09-30'),'1');
- assert.equal(result.labels.has('piano_2026-09-22'),false);
+ assert.equal(result.labels.get('piano_2026-09-22'),'8');
  assert.equal(result.labels.get('drums_2026-09-20'),'1');
  const cancelled=records.map(r=>r.day==='2026-09-20'&&r.studentId==='piano'?{...r,units:0,status:'cancelled'}:r);
  assert.equal(sequence(accounts,cancelled,legacy).labels.get('piano_2026-09-30'),'8');
  // A backdated lesson updates later numbers; input array order does not matter.
- assert.equal(sequence(accounts,[...records,row('piano','2026-09-21')],legacy).labels.get('piano_2026-09-23'),'8·1');
- // Zero-charge makeup and illness do not advance a course; charged late cancellation does.
+ assert.equal(sequence(accounts,[...records,row('piano','2026-09-21')],legacy).labels.get('piano_2026-09-30'),'2');
+ // Makeup never advances the regular sequence; illness and late cancellation reserve a slot.
  const extra=[row('drums','2026-09-21',0,'makeup'),row('drums','2026-09-22',0,'sick'),row('drums','2026-09-23',1,'late_cancel')];
- assert.equal(sequence(accounts,[...records,...extra],legacy).labels.get('drums_2026-09-23'),'2');
+ assert.equal(sequence(accounts,[...records,...extra],legacy).labels.get('drums_2026-09-23'),'3');
 });
 test('lesson sequence carries across months and explicit renewal dates, independent of payments and balances',()=>{
  const {attendanceSequence: sequence}=setup().load('attendance-sequence');
@@ -982,7 +982,7 @@ test('actual attendance replaces forecasts and later forecasts use real deductio
  const result=forecast([a],records,[],context,dates,'2026-10-02');
  for(const r of records)assert.equal(result.has(`p_${r.day}`),false);
  assert.equal(sequence([a],records,[],context).labels.get('p_2026-10-02'),'7·8');
- assert.equal(result.get('p_2026-10-10'),'1');
+ assert.equal(result.get('p_2026-10-10'),'3');
  // Unrecorded past lessons are never counted as if the student attended.
  assert.equal(forecast([a],[],[],context,dates,'2026-10-10').get('p_2026-10-10'),'7');
  const renewed=forecast([a],records,[],{...context,cycleStarts:[{studentId:'p',day:'2026-10-12'}]},dates,'2026-10-02');
@@ -1117,7 +1117,7 @@ test('legacy corrections edit ordinal, status and note without charging imported
  await assert.rejects(s.service.correctLegacyAttendance(input,'owner'),/직접 입력/);
 });
 
-test('corrected legacy cells anchor subsequent sequence and cancelled or absent cells do not advance it', () => {
+test('corrected legacy cells reserve missed lessons while cancelled cells do not advance', () => {
  const s=setup(),{correctedLegacy,legacyCorrectionInput}=s.load('legacy-correction');
  const {attendanceSequence}=s.load('attendance-sequence');
  const raw={studentId:'p',day:'2026-09-19',value:'5.0',color:''};
@@ -1126,10 +1126,62 @@ test('corrected legacy cells anchor subsequent sequence and cancelled or absent 
  assert.equal(attendanceSequence([{id:'p',planUnits:8}],[next],[corrected]).labels.get('p_2026-09-21'),'5');
  for(const status of ['cancelled','absent','travel','sick']){
   const cell=correctedLegacy(raw,{...raw,...legacyCorrectionInput({status,ordinal:''}),updatedAt:'b'});
-  assert.equal(attendanceSequence([{id:'p',planUnits:8}],[next],[cell],{positions:{p:3},cycleStarts:[]}).labels.get('p_2026-09-21'),'4');
+  assert.equal(attendanceSequence([{id:'p',planUnits:8}],[next],[cell],{positions:{p:3},cycleStarts:[]}).labels.get('p_2026-09-21'),status==='cancelled'?'4':'5');
  }
  const {importedAttendanceAppearance}=s.load('attendance-appearance');
  assert.equal(importedAttendanceAppearance({...corrected,status:'cancelled'}).tone,'cancelled');
  for(const ordinal of [0,-1,1.5,201])assert.throws(()=>legacyCorrectionInput({status:'present',ordinal}));
  assert.throws(()=>legacyCorrectionInput({status:'present',ordinal:''}));assert.throws(()=>legacyCorrectionInput({status:'unknown',ordinal:1}));
+});
+
+
+test('gray imported absences anchor the next lesson for every course, independent of balance',()=>{
+ const {attendanceSequence:sequence}=setup().load('attendance-sequence');
+ for(const color of ['FFCCCCCC','FFD9D9D9','FFB7B7B7','#cccccc']){
+  const accounts=[{id:'osw',planUnits:4,remaining:3},{id:'other',planUnits:8}];
+  const legacy=[{studentId:'osw',day:'2026-09-11',value:'1.0',color:''},{studentId:'osw',day:'2026-09-18',value:'2.0',color},{studentId:'other',day:'2026-09-18',value:'8',color}];
+  const rows=accounts.map(a=>({studentId:a.id,day:'2026-10-02',units:1}));
+  const before=JSON.stringify({accounts,legacy,rows});
+  const prior=sequence(accounts,[],legacy);
+  const result=sequence(accounts,rows,[],{...prior,cycleStarts:[]});
+  assert.equal(result.labels.get('osw_2026-10-02'),'3');
+  assert.equal(result.labels.get('other_2026-10-02'),'1');
+  assert.equal(JSON.stringify({accounts,legacy,rows}),before);
+ }
+});
+
+test('makeup fills a missed ordinal across months and renewal without shifting regular lessons',()=>{
+ const {attendanceSequence:sequence}=setup().load('attendance-sequence');
+ const accounts=[{id:'p',planUnits:4}];
+ const prior=sequence(accounts,[{studentId:'p',day:'2026-09-30',units:0,status:'absent'}],[{studentId:'p',day:'2026-09-29',value:'3',color:''}]);
+ assert.equal(prior.labels.get('p_2026-09-30'),'4');
+ for(const units of [0,1]){
+  const rows=[{studentId:'p',day:'2026-10-01',units:1,status:'present'},{studentId:'p',day:'2026-10-02',units,status:'makeup',relatedDay:'2026-09-30'},{studentId:'p',day:'2026-10-03',units:1,status:'present'}];
+  const result=sequence(accounts,rows,[],{...prior,cycleStarts:[{studentId:'p',day:'2026-10-01'}]});
+  assert.equal(result.labels.get('p_2026-10-01'),'1');
+  assert.equal(result.labels.get('p_2026-10-02'),'4');
+  assert.equal(result.labels.get('p_2026-10-03'),'2');
+  rows[1].relatedDay='2026-09-29';
+  assert.equal(sequence(accounts,rows,[],{...prior,cycleStarts:[]}).labels.has('p_2026-10-02'),false);
+ }
+ // Orange imported makeup cannot overwrite the regular ordinal.
+ const legacy=[{studentId:'p',day:'2026-09-28',value:'3',color:''},{studentId:'p',day:'2026-09-29',value:'1',color:'FFFF9900'}];
+ assert.equal(sequence(accounts,[{studentId:'p',day:'2026-09-30',units:1}],legacy).labels.get('p_2026-09-30'),'4');
+});
+
+test('vacation ranges reserve only actual class days, including moves and excluding academy closures',()=>{
+ const s=setup(),{attendanceSequence:sequence}=s.load('attendance-sequence'),{attendanceForecast:forecast}=s.load('attendance-forecast');
+ const account={id:'p',planUnits:8,active:true,schedule:{rules:[{start:'2026-09-01',weekdays:[2,4]}],moves:[{from:'2026-10-06',to:'2026-10-07'}],updatedAt:'a'}};
+ const dates=Array.from({length:8},(_,i)=>`2026-10-0${i+1}`);
+ const records=dates.slice(0,7).map(day=>({studentId:'p',day,units:0,status:'travel',range:{id:'r',start:dates[0],end:dates[6]}}));
+ const result=sequence([account],records,[],{positions:{p:2},cycleStarts:[]});
+ assert.equal(result.labels.get('p_2026-10-01'),'3');
+ assert.equal(result.labels.get('p_2026-10-07'),'4');
+ assert.equal(result.labels.size,2);
+ assert.equal(forecast([account],records,[],{positions:{p:2},cycleStarts:[]},dates,'2026-10-01').get('p_2026-10-08'),'5');
+ const closed={...account,schedule:{...account.schedule,rules:[{start:'2026-09-01',weekdays:[1]}],moves:[]}};
+ assert.equal(sequence([closed],records,[]).labels.size,0); // October 5 is closed.
+ // Removing a reservation removes its ordinal and recalculates the next class.
+ const cancelled=records.map(r=>({...r,status:'cancelled'}));
+ assert.equal(forecast([account],cancelled,[],{positions:{p:2},cycleStarts:[]},dates,'2026-10-01').get('p_2026-10-08'),'3');
 });

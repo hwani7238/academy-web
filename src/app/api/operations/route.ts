@@ -36,7 +36,7 @@ export async function GET(request: Request) {
       timing.measure('notices', () => db.collection('opsNotices').orderBy('createdAt', 'desc').limit(50).get()),
       timing.measure('devices', () => db.collection('opsDevices').get()),
       timing.measure('imports', importSources),
-      timing.measure('history', () => db.collection('opsAttendance').where('day', '<', `${month}-01`).select('studentId', 'day', 'units', 'status').get()),
+      timing.measure('history', () => db.collection('opsAttendance').where('day', '<', `${month}-01`).select('studentId', 'day', 'units', 'status', 'relatedDay', 'range').get()),
       timing.measure('cycles', () => db.collection('opsInvoices').where('creditUnits', '==', 0).select('studentId', 'cycleStart', 'status').get()),
       timing.measure('legacyCorrections', () => db.collection('opsLegacyCorrections').get()),
     ]);
@@ -73,7 +73,8 @@ export async function GET(request: Request) {
     const allLegacy = [...legacyCells.values()].filter((v): v is NonNullable<typeof v> => Boolean(v)).map(row => correctedLegacy(row, correctionsById.get(`${row.studentId}_${row.day}`)));
     const cycleStarts = cycleInvoices.docs.map(d=>d.data()).filter(v=>v.status!=='cancelled' && typeof v.cycleStart==='string').map(v=>({studentId:String(v.studentId),day:String(v.cycleStart)}));
     const beforeMonth = `${month}-01`;
-    const sequenceContext = { positions: attendanceSequence(accounts.docs.map(d=>({...d.data(),id:d.id}) as Account), priorAttendance.docs.map(d=>d.data() as Attendance), allLegacy.filter(r=>r.day<beforeMonth), {positions:{},cycleStarts:cycleStarts.filter(r=>r.day<beforeMonth)}).positions, cycleStarts:cycleStarts.filter(r=>r.day>=beforeMonth && r.day<end.toISOString().slice(0,10)) };
+    const priorSequence = attendanceSequence(accounts.docs.map(d=>({...d.data(),id:d.id}) as Account), priorAttendance.docs.map(d=>d.data() as Attendance), allLegacy.filter(r=>r.day<beforeMonth), {positions:{},cycleStarts:cycleStarts.filter(r=>r.day<beforeMonth)});
+    const sequenceContext = { positions: priorSequence.positions, missedLessons: priorSequence.missedLessons, cycleStarts:cycleStarts.filter(r=>r.day>=beforeMonth && r.day<end.toISOString().slice(0,10)) };
     return Response.json({ ...(revision ? { revision } : {}), day, sequenceContext, legacyAttendance: allLegacy.filter(r=>r.day.startsWith(`${month}-`)), configured: noticeConfigured(), students: students.docs.flatMap<Snapshot['students'][number]>(d => {
       const raw = d.data(); const base = { courseUpdatedAt:raw.courseUpdatedAt || '', name: raw.name || '학생', phone: raw.phone || '', ...(raw.lifecycle ? { lifecycle: raw.lifecycle } : {}) };
       // Preserve existing single-account balances; do not silently duplicate them.
