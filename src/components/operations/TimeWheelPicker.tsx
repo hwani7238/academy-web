@@ -3,8 +3,7 @@ import { useId, useLayoutEffect, useRef } from 'react';
 import { clockToWheel, wheelToClock, type WheelTime } from '@/lib/operations/time-wheel';
 
 const ROW_HEIGHT = 44;
-const PERIODS = ['오전', '오후'];
-const HOURS = Array.from({ length: 12 }, (_, i) => String(i + 1).padStart(2, '0'));
+const HOURS = Array.from({ length: 24 }, (_, i) => String(i).padStart(2, '0'));
 const MINUTES = Array.from({ length: 60 }, (_, i) => String(i).padStart(2, '0'));
 
 function Wheel({ label, options, value, disabled, onChange }: {
@@ -43,11 +42,10 @@ export function TimeWheelPicker({ value, disabled, onChange }: { value: string; 
   const update = (part: Partial<WheelTime>) => onChange(wheelToClock({ ...selected, ...part }));
   return <div className="time-wheel-picker" role="group" aria-label="출석 시간">
     <div className="time-wheel-columns">
-      <Wheel label="오전·오후" options={PERIODS} value={selected.period} disabled={disabled} onChange={period => update({ period: period as 0 | 1 })} />
-      <Wheel label="시" options={HOURS} value={selected.hour - 1} disabled={disabled} onChange={hour => update({ hour: hour + 1 })} />
+      <Wheel label="시" options={HOURS} value={selected.hour} disabled={disabled} onChange={hour => update({ hour })} />
       <Wheel label="분" options={MINUTES} value={selected.minute} disabled={disabled} onChange={minute => update({ minute })} />
     </div>
     <p className="time-wheel-hint">위아래로 스크롤하거나 숫자를 눌러 선택하세요.</p>
-    <output className="time-wheel-value" aria-live="polite">{PERIODS[selected.period]} {selected.hour}시 {String(selected.minute).padStart(2, '0')}분</output>
+    <output className="time-wheel-value" aria-live="polite">{wheelToClock(selected)}</output>
   </div>;
 }
