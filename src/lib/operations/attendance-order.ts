@@ -43,3 +43,12 @@ export function orderAttendanceStudents(students: Snapshot['students'], order: A
     return compareStudents(a, b);
   });
 }
+
+// Returning to this month must restore today rather than silently sorting day 1.
+export function attendanceMonthDay(day: string, offset: number, today: string) {
+  const target = new Date(Date.UTC(Number(day.slice(0, 4)), Number(day.slice(5, 7)) - 1 + offset, 1));
+  const month = target.toISOString().slice(0, 7);
+  if (month === today.slice(0, 7)) return today;
+  const last = new Date(Date.UTC(target.getUTCFullYear(), target.getUTCMonth() + 1, 0)).getUTCDate();
+  return `${month}-${String(Math.min(Number(day.slice(8)), last)).padStart(2, '0')}`;
+}

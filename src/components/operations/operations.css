@@ -69,6 +69,7 @@
 .whee-ops .month-color-legend .payment-first{box-shadow:inset 0 0 0 2px #dc2626}
 
 .whee-ops .monthly-table .attendance-cell.paid-first{background:#ffe1f6;color:#cc1694;border-color:#f594d8}
+.whee-ops .monthly-table .attendance-cell.paid-first small{font-size:9px;line-height:1.1;white-space:normal;word-break:keep-all}
 .whee-ops .month-color-legend .paid-first{background:#ffe1f6;color:#cc1694}
 
 /* Extend the existing Korean calendar holiday marking through the whole column. */
@@ -78,6 +79,7 @@
 .whee-ops .monthly-table thead th.calendar-holiday.month-today{box-shadow:inset 0 -3px #2563eb}
 
 .whee-ops .monthly-table .attendance-cell.forecast{background:transparent;color:#9ca3af;border-color:#e5e7eb;border-style:dashed;font-size:13px}
+.whee-ops .monthly-table .attendance-cell.forecast.paid-first{background:#ffe1f6;color:#cc1694;border-color:#f594d8;border-style:solid}
 .whee-ops .month-color-legend .forecast{color:#9ca3af;border:1px dashed #d1d5db}
 .whee-ops .monthly-table .attendance-cell.payment-first{border-color:#dc2626;border-style:solid;box-shadow:inset 0 0 0 1px #dc2626}
 

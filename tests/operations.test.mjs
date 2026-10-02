@@ -1750,3 +1750,14 @@ test('same-day prepayment stays paid before check-in, after arrival, and across 
  assert.equal(confirmed([after],actual.cycleFirstDays,actual.firstLessonTimes).size,0);
  assert.deepEqual(context,{positions:{p:8},cycleFirstDays:{p:['2026-08-31']},cycleStarts:[]});
 });
+
+test('monthly payment sorting returns to today and never silently falls back to the first day',()=>{
+ const {attendanceMonthDay}=setup().load('attendance-order');
+ const today='2026-10-02';
+ assert.equal(attendanceMonthDay(today,-1,today),'2026-09-02');
+ assert.equal(attendanceMonthDay('2026-09-02',1,today),today);
+ assert.equal(attendanceMonthDay('2026-11-02',-1,today),today);
+ assert.equal(attendanceMonthDay('2026-09-30',1,today),today);
+ assert.equal(attendanceMonthDay('2026-01-31',1,today),'2026-02-28');
+ assert.equal(attendanceMonthDay('2026-12-15',1,today),'2027-01-15');
+});
