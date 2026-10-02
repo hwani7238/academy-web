@@ -1654,3 +1654,43 @@ test('stale plan forms and invalid invoice links reject all changes',async()=>{
  await s.service.configure(input,'owner');
  before=structuredClone([...s.records]);await assert.rejects(s.service.configure({...input,planAmount:220000},'owner'),/변경/);assert.deepEqual([...s.records],before);
 });
+
+test('forecast first lessons show payment due before attendance and clear only for full payment of the same course and pass',()=>{
+ const s=setup(),{unpaidForecastFirstLessons:due}=s.load('attendance-appearance');
+ const forecast=new Map([['person_piano_2026-10-02','1'],['person_piano_2026-10-06','2'],['person_piano_2026-10-30','1'],['person_drums_2026-10-02','1']]);
+ const cycles={person_piano:['2026-09-01'],person_drums:['2026-09-01']};
+ const before=structuredClone(cycles);
+ const invoice={id:'renewal',studentId:'person_piano',units:8,amount:160000,paid:0,status:'open',createdAt:'2026-09-30T02:00:00Z',needsReview:false};
+ const all=['person_piano_2026-10-02','person_piano_2026-10-30','person_drums_2026-10-02'];
+ assert.deepEqual([...due(forecast,[],cycles)],all); // A billing record need not exist yet.
+ assert.deepEqual([...due(forecast,[invoice],cycles)],all);
+ assert.deepEqual([...due(forecast,[{...invoice,paid:80000}],cycles)],all);
+ const paid={...invoice,paid:160000,status:'paid'};
+ assert.deepEqual([...due(forecast,[paid],cycles)],all.slice(1));
+ for(const patch of [{status:'cancelled'},{paid:80000},{needsReview:true}])assert.deepEqual([...due(forecast,[{...paid,...patch}],cycles)],all);
+ // The previous pass's receipt cannot be assigned to October simply because it is being viewed.
+ assert.deepEqual([...due(forecast,[{...paid,createdAt:'2026-08-31T02:00:00Z'}],cycles)],all);
+ assert.deepEqual([...due(forecast,[{...paid,lessonDate:'2026-10-30'}],cycles)],[all[0],all[2]]);
+ assert.deepEqual([...due(forecast,[paid,{...invoice,id:'extra',lessonDate:'2026-10-02'}],cycles)],all);
+ assert.deepEqual(cycles,before);assert.equal(forecast.get('person_piano_2026-10-02'),'1');
+});
+test('October 2 scheduled first lesson remains only a forecast, then attendance and payment preserve its cycle highlight',()=>{
+ const s=setup(),{attendanceForecast:forecast}=s.load('attendance-forecast'),{attendanceSequence:sequence}=s.load('attendance-sequence');
+ const {unpaidForecastFirstLessons:due,confirmedFirstLessons:confirmed}=s.load('attendance-appearance');
+ const account={id:'p',active:true,planUnits:2,remaining:0,schedule:{rules:[{start:'2026-10-01',weekdays:[5]}],moves:[]}};
+ const dates=Array.from({length:31},(_,i)=>`2026-10-${String(i+1).padStart(2,'0')}`);
+ const context={positions:{p:2},cycleFirstDays:{p:['2026-09-18']},cycleStarts:[]};
+ const before=structuredClone(account),records=[];
+ let expected=forecast([account],records,[],context,dates,'2026-10-02');
+ assert.equal(expected.get('p_2026-10-02'),'1');assert.equal(expected.has('p_2026-10-09'),false);
+ assert.deepEqual([...due(expected,[],context.cycleFirstDays)],['p_2026-10-02','p_2026-10-23']);
+ const paid={id:'renewal',studentId:'p',amount:160000,paid:160000,status:'paid',createdAt:'2026-09-30T02:00:00Z',needsReview:false};
+ assert.deepEqual([...due(expected,[paid],context.cycleFirstDays)],['p_2026-10-23']);
+ assert.deepEqual(account,before);assert.equal(records.length,0);
+ records.push({studentId:'p',day:'2026-10-02',units:1,status:'present'});
+ const actual=sequence([account],records,[],context);
+ expected=forecast([account],records,[],context,dates,'2026-10-02');
+ assert.equal(actual.labels.get('p_2026-10-02'),'1');assert.equal(expected.has('p_2026-10-02'),false);
+ assert.deepEqual([...due(expected,[paid],actual.cycleFirstDays)],['p_2026-10-23']);
+ assert.equal(confirmed([paid],actual.cycleFirstDays).has('p_2026-10-02'),true);
+});

@@ -59,7 +59,6 @@
 .whee-ops .monthly-table .attendance-cell.makeup,.whee-ops .monthly-table .attendance-cell.makeup_reserved{background:#fff0d9;color:#b45309}
 .whee-ops .monthly-table .attendance-cell.absent,.whee-ops .monthly-table .attendance-cell.late_cancel{background:#f0f1f4;color:#566174}
 .whee-ops .monthly-table .attendance-cell.payment-due{background:#f1e4ff;color:#7e22ce;border-color:#dec3f5}
-.whee-ops .monthly-table .attendance-cell.payment-first{border-color:#dc2626;box-shadow:inset 0 0 0 1px #dc2626}
 .whee-ops .monthly-table .attendance-cell small{color:inherit}
 .whee-ops .month-color-legend{display:flex;flex-wrap:wrap;gap:8px;padding:0 24px 16px;font-size:12px}
 .whee-ops .month-color-legend span{padding:3px 9px;border-radius:4px}
@@ -80,6 +79,7 @@
 
 .whee-ops .monthly-table .attendance-cell.forecast{background:transparent;color:#9ca3af;border-color:#e5e7eb;border-style:dashed;font-size:13px}
 .whee-ops .month-color-legend .forecast{color:#9ca3af;border:1px dashed #d1d5db}
+.whee-ops .monthly-table .attendance-cell.payment-first{border-color:#dc2626;border-style:solid;box-shadow:inset 0 0 0 1px #dc2626}
 
 .whee-ops .inactive-actions{display:flex;align-items:center;gap:8px}.whee-ops button.inactive-delete{width:38px;min-height:38px;padding:8px;color:#9f2635;background:transparent;border-color:transparent}.whee-ops button.inactive-delete:hover:not(:disabled){background:#fff0f1;border-color:#edc6cc;color:#9f2635}
 

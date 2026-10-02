@@ -46,6 +46,22 @@ export function confirmedFirstLessons(invoices: Invoice[], cycleFirstDays: Recor
   return new Set([...byLesson].filter(([, rows]) => rows.every(i => i.status === 'paid' && i.amount > 0 && i.paid >= i.amount && !i.needsReview)).map(([key]) => key));
 }
 
+// Projected first lessons need the same payment check before the child arrives.
+// Include real cycle dates so an old receipt cannot pay a later forecast cycle.
+export function unpaidForecastFirstLessons(forecast: Map<string, string>, invoices: Invoice[], cycleFirstDays: Record<string, string[]>) {
+  const cycles = Object.fromEntries(Object.entries(cycleFirstDays).map(([id, days]) => [id, [...days]]));
+  const firstKeys: string[] = [];
+  for (const [key, label] of forecast) {
+    if (!isFirstLesson(label, 'present')) continue;
+    const studentId = key.slice(0, -11), day = key.slice(-10);
+    const days = cycles[studentId] ||= [];
+    if (!days.includes(day)) days.push(day);
+    firstKeys.push(key);
+  }
+  const confirmed = confirmedFirstLessons(invoices, cycles);
+  return new Set(firstKeys.filter(key => !confirmed.has(key)));
+}
+
 export function importedAttendanceAppearance(row: Legacy, account?: Account, invoice?: Invoice, confirmed = false) {
   const appearance = legacyAttendanceAppearance(row);
   if (row.status === 'cancelled') return appearance;
