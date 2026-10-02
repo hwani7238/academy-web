@@ -136,3 +136,5 @@
 .whee-ops .billing-view .ops-overview{padding-top:34px;margin-bottom:12px}
 .whee-ops .billing-view .ops-overview.is-collapsed{padding-top:0;margin-bottom:8px}
 .whee-ops .billing-view .ops-overview .summary-grid{margin-bottom:0}
+
+.whee-ops .student-total{margin-left:8px;color:#3868e8;font-variant-numeric:tabular-nums}
