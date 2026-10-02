@@ -1,5 +1,6 @@
 'use client';
 import { BillingList } from './BillingList';
+import { CollapsibleOverview } from './CollapsibleOverview';
 import { Trash2 } from 'lucide-react';
 import { DeleteEnrollmentDialog } from './DeleteEnrollmentDialog';
 import { BalanceReview } from './BalanceReview';
@@ -160,12 +161,12 @@ export function Operations({ demo = false }: { demo?: boolean }) {
   return <div className="whee-ops operations">
     {demo && <div className="demo-banner">가상 학생 체험 · 실제 학생 정보와 연결되지 않으며 메시지·결제가 발생하지 않습니다. <button onClick={() => { const next = sample(); dataRef.current = next; setData(next); setPanel(null); setMessage('체험을 초기화했습니다.'); }}>체험 초기화</button></div>}
     <header className="ops-header"><div><p className="brand">WHEE MUSIC</p><h1>출석·수납 관리</h1></div><div className="header-actions"><span className="subtle">{demo ? '원장님 화면 체험' : user?.email}</span><a href={demo ? '/check-in/demo' : '/check-in'} target="_blank" rel="noreferrer">출석 화면 ↗</a></div></header>
-    <main className={`ops-main${tab==='billing'?' billing-view':''}`}><div className="section-head"><div><h2>조회 날짜 · {day}</h2><p>출석 기록을 보는 날짜입니다. 아이폰 출석은 한국 시간의 오늘 날짜로 자동 저장됩니다.{!demo && ' 출석 현황은 자동으로 업데이트됩니다.'}</p></div><div className="header-actions"><label>출석 조회일<input type="date" value={day} disabled={busy} onInput={e => { if (e.currentTarget.value) setDay(e.currentTarget.value); }} /></label><button disabled={busy} onClick={() => setDay(seoulDay())}>오늘</button></div></div><div className="summary-grid">
+    <main className={`ops-main${tab==='billing'?' billing-view':''}`}><CollapsibleOverview><div className="section-head"><div><h2>조회 날짜 · {day}</h2><p>출석 기록을 보는 날짜입니다. 아이폰 출석은 한국 시간의 오늘 날짜로 자동 저장됩니다.{!demo && ' 출석 현황은 자동으로 업데이트됩니다.'}</p></div><div className="header-actions"><label>출석 조회일<input type="date" value={day} disabled={busy} onInput={e => { if (e.currentTarget.value) setDay(e.currentTarget.value); }} /></label><button disabled={busy} onClick={() => setDay(seoulDay())}>오늘</button></div></div><div className="summary-grid">
       <div><span>{day === seoulDay() ? '오늘 출석' : `${day} 출석`}</span><strong>{presentCount}<small>명</small></strong></div>
       <div><span>결제 요청 대상</span><strong>{open.length}<small>명</small></strong></div>
       <div><span>미납 합계</span><strong>{won(open.reduce((s, i) => s + i.amount - i.paid, 0))}</strong></div>
       <div><span>총 등록 현황</span><strong>{activeAccounts.length}<small>/ {activeStudents.length}건</small></strong>{unconfigured > 0 && <button className="text-button" onClick={() => setTab('students')}>{unconfigured}건 설정 필요 →</button>}</div>
-    </div>
+    </div></CollapsibleOverview>
     <nav className="ops-tabs" aria-label="관리 메뉴">{tabs.map(([id, label]) => <button key={id} aria-current={tab === id ? 'page' : undefined} onClick={() => { setTab(id); if(id==='billing' && day.slice(0,7)!==seoulDay().slice(0,7))setDay(seoulDay()); setMessage(''); }}>{label}{id === 'billing' && open.length > 0 && <b>{open.length}</b>}</button>)}</nav>
     {error && <p className="error" role="alert">{error} {!demo && loadedDay !== day && <button onClick={() => void refresh()}>다시 불러오기</button>}</p>}{message && <p className="success" role="status">{message}</p>}
     <div className={demo && tab === 'today' ? 'workspace-with-kiosk' : ''}><section className="surface">

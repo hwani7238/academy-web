@@ -101,7 +101,7 @@
 .whee-ops .payment-table{table-layout:auto;min-width:730px}.whee-ops .billing-note{white-space:normal;overflow-wrap:anywhere;max-width:280px}
 .whee-ops .billing-detail p{font-size:13px;line-height:1.6}.whee-ops .billing-detail dl{margin:12px 0}.whee-ops .billing-detail dl>div{display:flex;justify-content:space-between;padding:5px 0;font-size:14px}.whee-ops .billing-detail-actions{display:flex;gap:6px;flex-wrap:wrap;margin:14px 0}.whee-ops .billing-detail-actions button{font-size:13px;padding:6px 10px}.whee-ops .billing-api-note{color:#63718a;font-size:12px!important}
 
-.whee-ops .billing-view{padding-top:12px}.whee-ops .billing-view>.section-head{display:none}.whee-ops .billing-view>.summary-grid{margin-bottom:12px}.whee-ops .billing-view>.summary-grid>div{padding:10px 16px}.whee-ops .billing-view>.summary-grid strong{font-size:22px}.whee-ops .billing-view .ops-tabs{margin-bottom:12px}
+.whee-ops .billing-view{padding-top:12px}.whee-ops .billing-view .ops-overview .section-head{display:none}.whee-ops .billing-view .ops-overview .summary-grid{margin-bottom:12px}.whee-ops .billing-view .ops-overview .summary-grid>div{padding:10px 16px}.whee-ops .billing-view .ops-overview .summary-grid strong{font-size:22px}.whee-ops .billing-view .ops-tabs{margin-bottom:12px}
 /* Fixed ledger columns prevent extra screen width from spreading cells apart. */
 .whee-ops .billing-ledgers{display:grid;gap:8px;padding:0 8px;align-items:stretch;justify-content:start}
 .whee-ops .billing-ledger-block{min-width:0;background:#fff;box-shadow:inset 0 0 0 1px #e1e6ee}
@@ -122,3 +122,15 @@
 .whee-ops .billing-ledger .billing-date-start td{border-top:1px solid #c6cede}
 
 .whee-ops .billing-ledger .billing-date-button{display:block;width:100%;min-height:24px;height:24px;padding:0;border:0;border-radius:3px;background:transparent;font-size:12px;font-weight:400;line-height:20px;font-variant-numeric:tabular-nums}.whee-ops .billing-ledger .billing-date-button:hover:not(:disabled){background:#edf3ff;text-decoration:underline}
+
+/* Collapse the date controls and summary cards without remounting the workspace. */
+.whee-ops .ops-overview{position:relative;min-height:30px;margin-bottom:28px}
+.whee-ops .ops-overview .section-head{padding-right:52px}
+.whee-ops .ops-overview .summary-grid{margin-bottom:0}
+.whee-ops .ops-overview.is-collapsed{margin-bottom:8px}
+.whee-ops .ops-overview [hidden]{display:none}
+.whee-ops button.overview-toggle{position:absolute;right:0;top:0;width:30px;height:30px;min-height:30px;padding:4px;border:0;border-radius:6px;background:transparent;color:#63718a}
+.whee-ops button.overview-toggle:hover{background:#e8edf6;color:var(--ink)}
+.whee-ops .billing-view .ops-overview{padding-top:34px;margin-bottom:12px}
+.whee-ops .billing-view .ops-overview.is-collapsed{padding-top:0;margin-bottom:8px}
+.whee-ops .billing-view .ops-overview .summary-grid{margin-bottom:0}
