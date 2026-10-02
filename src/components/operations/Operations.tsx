@@ -145,7 +145,8 @@ export function Operations({ demo = false }: { demo?: boolean }) {
   if (!demo && !user) return <main className="whee-ops gate"><p className="brand">WHEE MUSIC</p><h1>원장님 관리실</h1><p>출석과 수납을 확인하려면 원장 계정으로 로그인해주세요.</p><a className="primary" href="/login">기존 계정으로 로그인</a><a href="/operations/demo">가상 학생으로 먼저 체험하기 →</a></main>;
   if (!data) return <main className="whee-ops gate"><h1>출석·수납 관리</h1><p role="alert">{error || '자료를 불러오고 있습니다.'}</p><button onClick={() => void refresh()}>다시 불러오기</button><a href="/operations/demo">가상 학생으로 체험하기</a></main>;
   const todayAttendance = orderDailyAttendance(dailyCheckins(data.attendance, day), dailyOrder);
-  const presentCount = todayAttendance.length;
+  const personByEnrollment = new Map([...data.accounts, ...data.students].map(s => [s.id, s.sourceStudentId || s.id]));
+  const presentCount = new Set(todayAttendance.map(a => personByEnrollment.get(a.studentId) || a.studentId)).size;
   const activeStudents=data.students.filter(s=>enrollmentState(s.lifecycle,todayDate)==='active');
   const activeStudentCount = new Set(activeStudents.map(s => s.sourceStudentId || s.id)).size;
   const activeIds=new Set(activeStudents.map(s=>s.id));
@@ -167,7 +168,7 @@ export function Operations({ demo = false }: { demo?: boolean }) {
       <div><span>미납 합계</span><strong>{won(open.reduce((s, i) => s + i.amount - i.paid, 0))}</strong></div>
       <div><span>총 등록 현황</span><strong>{activeAccounts.length}<small>/ {activeStudents.length}건</small></strong>{unconfigured > 0 && <button className="text-button" onClick={() => setTab('students')}>{unconfigured}건 설정 필요 →</button>}</div>
     </div></CollapsibleOverview>
-    <nav className="ops-tabs" aria-label="관리 메뉴">{tabs.map(([id, label]) => <button key={id} aria-current={tab === id ? 'page' : undefined} onClick={() => { setTab(id); if(id==='billing' && day.slice(0,7)!==seoulDay().slice(0,7))setDay(seoulDay()); setMessage(''); }}>{label}{id === 'billing' && open.length > 0 && <b>{open.length}</b>}</button>)}</nav>
+    <nav className="ops-tabs" aria-label="관리 메뉴">{tabs.map(([id, label]) => <button key={id} aria-current={tab === id ? 'page' : undefined} onClick={() => { setTab(id); if(id==='billing' && day.slice(0,7)!==seoulDay().slice(0,7))setDay(seoulDay()); setMessage(''); }}>{label}{id === 'billing' && open.length > 0 && <b>{open.length}</b>}{id === 'today' && <b>{presentCount}</b>}</button>)}</nav>
     {error && <p className="error" role="alert">{error} {!demo && loadedDay !== day && <button onClick={() => void refresh()}>다시 불러오기</button>}</p>}{message && <p className="success" role="status">{message}</p>}
     <div className={demo && tab === 'today' ? 'workspace-with-kiosk' : ''}><section className="surface">
     {tab === 'announcements' && <Announcements user={user} data={data} demo={demo}/> }
