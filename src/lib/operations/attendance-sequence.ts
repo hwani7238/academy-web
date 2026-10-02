@@ -6,9 +6,10 @@ export type SequenceContext = {
   positions: Record<string, number>;
   missedLessons?: Record<string, string>;
   cycleFirstDays?: Record<string, string[]>;
+  firstLessonTimes?: Record<string, string>;
   cycleStarts: { studentId: string; day: string }[];
 };
-type RecordRow = Pick<Attendance, 'studentId' | 'day' | 'units' | 'status' | 'relatedDay' | 'range'>;
+type RecordRow = Pick<Attendance, 'studentId' | 'day' | 'units' | 'status' | 'relatedDay' | 'range'> & Partial<Pick<Attendance, 'at'>>;
 type Legacy = NonNullable<Snapshot['legacyAttendance']>[number];
 
 // Display-only chronology: neither payments nor current balances rewrite old lessons.
@@ -19,6 +20,7 @@ export function attendanceSequence(accounts: Pick<Account, 'id' | 'planUnits' | 
   const positions = { ...context?.positions };
   const missedLessons = { ...context?.missedLessons };
   const cycleFirstDays = Object.fromEntries(Object.entries(context?.cycleFirstDays || {}).map(([id, days]) => [id, [...days]]));
+  const firstLessonTimes = { ...context?.firstLessonTimes };
   const labels = new Map<string, string>();
   const days = new Map<string, { studentId: string; day: string; record?: RecordRow; legacy?: Legacy; start?: boolean }>();
   function event(studentId: string, day: string) {
@@ -36,6 +38,7 @@ export function attendanceSequence(accounts: Pick<Account, 'id' | 'planUnits' | 
     function firstDay() {
       const dates = cycleFirstDays[id] ||= [];
       if (!dates.includes(e.day)) dates.push(e.day);
+      if (e.record?.at) firstLessonTimes[key] = e.record.at;
     }
     function advance(units: number) {
       const numbers: number[] = [];
@@ -81,5 +84,5 @@ export function attendanceSequence(accounts: Pick<Account, 'id' | 'planUnits' | 
       if (missed) missedLessons[key] = String(positions[id]);
     }
   }
-  return { positions, labels, missedLessons, cycleFirstDays };
+  return { positions, labels, missedLessons, cycleFirstDays, firstLessonTimes };
 }

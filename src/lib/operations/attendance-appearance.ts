@@ -32,13 +32,13 @@ export function paidFirstLesson(sequence: string | undefined, status: Attendance
 }
 
 // A previous payment must never paint every later pass as paid. Explicit cycle
-// dates win; an ordinary advance renewal belongs only to the first cycle after
-// its creation day. Same-day/ambiguous renewals need an explicit cycle date.
-export function confirmedFirstLessons(invoices: Invoice[], cycleFirstDays: Record<string, string[]>) {
+// dates win; an advance renewal belongs to the next first lesson, including
+// the same day when the invoice precedes that lesson. Ambiguous dates stay unlinked.
+export function confirmedFirstLessons(invoices: Invoice[], cycleFirstDays: Record<string, string[]>, firstLessonTimes: Record<string, string> = {}) {
   const byLesson = new Map<string, Invoice[]>();
   for (const invoice of invoices) {
     if (invoice.status === 'cancelled') continue;
-    const day = invoiceCycleStart(invoice, cycleFirstDays);
+    const day = invoiceCycleStart(invoice, cycleFirstDays, firstLessonTimes);
     if (!day) continue;
     const key = `${invoice.studentId}_${day}`;
     byLesson.set(key, [...(byLesson.get(key) || []), invoice]);
@@ -48,17 +48,19 @@ export function confirmedFirstLessons(invoices: Invoice[], cycleFirstDays: Recor
 
 // Projected first lessons need the same payment check before the child arrives.
 // Include real cycle dates so an old receipt cannot pay a later forecast cycle.
-export function unpaidForecastFirstLessons(forecast: Map<string, string>, invoices: Invoice[], cycleFirstDays: Record<string, string[]>) {
+export function unpaidForecastFirstLessons(forecast: Map<string, string>, invoices: Invoice[], cycleFirstDays: Record<string, string[]>, firstLessonTimes: Record<string, string> = {}) {
   const cycles = Object.fromEntries(Object.entries(cycleFirstDays).map(([id, days]) => [id, [...days]]));
   const firstKeys: string[] = [];
+  const times = { ...firstLessonTimes };
   for (const [key, label] of forecast) {
     if (!isFirstLesson(label, 'present')) continue;
     const studentId = key.slice(0, -11), day = key.slice(-10);
     const days = cycles[studentId] ||= [];
     if (!days.includes(day)) days.push(day);
     firstKeys.push(key);
+    times[key] = 'forecast';
   }
-  const confirmed = confirmedFirstLessons(invoices, cycles);
+  const confirmed = confirmedFirstLessons(invoices, cycles, times);
   return new Set(firstKeys.filter(key => !confirmed.has(key)));
 }
 

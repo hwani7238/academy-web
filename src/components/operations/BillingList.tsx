@@ -26,8 +26,8 @@ export function BillingList({ data, invoices, busy, demo, pay, edit, action, sav
   const layout = useRef<HTMLDivElement>(null);
   const [columns,setColumns]=useState(1);
   useEffect(()=>{const node=layout.current;if(!node)return;const observer=new ResizeObserver(([entry])=>setColumns(Math.max(1,Math.min(4,Math.floor((entry.contentRect.width-8)/308)))));observer.observe(node);return()=>observer.disconnect();},[]);
-  const cycleDays=useMemo(()=>attendanceSequence(data.accounts,data.attendance,data.legacyAttendance||[],data.sequenceContext).cycleFirstDays,[data.accounts,data.attendance,data.legacyAttendance,data.sequenceContext]);
-  const firstDay=(invoice:Invoice)=>invoiceCycleStart(invoice,cycleDays);
+  const cycleState=useMemo(()=>attendanceSequence(data.accounts,data.attendance,data.legacyAttendance||[],data.sequenceContext),[data.accounts,data.attendance,data.legacyAttendance,data.sequenceContext]);
+  const firstDay=(invoice:Invoice)=>invoiceCycleStart(invoice,cycleState.cycleFirstDays,cycleState.firstLessonTimes);
   const subjects = [...new Set(invoices.map(i => identity(data, i.studentId, i.name).subject))].sort(compareGroups);
   const visible = invoices.filter(i => { const who = identity(data, i.studentId, i.name); return (!subject || who.subject === subject) && who.name.includes(search.trim()); })
     .sort((a,b) => (firstDay(a)||'9999').localeCompare(firstDay(b)||'9999') || compareGroups(identity(data,a.studentId,a.name).subject,identity(data,b.studentId,b.name).subject) || compareNames(a.name,b.name));

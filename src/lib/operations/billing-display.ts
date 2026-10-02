@@ -6,14 +6,18 @@ export function paymentDateInput(value: unknown) {
   return day;
 }
 export const paymentDay = (payment: Payment) => payment.paymentDate || seoulDay(new Date(payment.at));
-export function invoiceCycleStart(invoice: Invoice, cycleFirstDays: Record<string, string[]>) {
+export function invoiceCycleStart(invoice: Invoice, cycleFirstDays: Record<string, string[]>, firstLessonTimes: Record<string, string> = {}) {
   if (invoice.lessonDate) return invoice.lessonDate;
   if (invoice.cycleStart) return invoice.cycleStart;
   const created = new Date(invoice.createdAt);
-  // A first registration can start on its creation day; renewal invoices are for the following pass.
+  // A renewal can be paid before its first lesson on the same day. Never attach
+  // an invoice issued after the final paid lesson to that already completed pass.
   const initial = invoice.id === `first_${invoice.studentId}`;
   return Number.isFinite(created.getTime())
-    ? [...(cycleFirstDays[invoice.studentId] || [])].sort().find(day => initial ? day >= seoulDay(created) : day > seoulDay(created)) : undefined;
+    ? [...(cycleFirstDays[invoice.studentId] || [])].sort().find(day => {
+      const issuedDay = seoulDay(created), first = firstLessonTimes[`${invoice.studentId}_${day}`];
+      return day > issuedDay || (day === issuedDay && (initial || first === 'forecast' || new Date(first).getTime() > created.getTime()));
+    }) : undefined;
 }
 export function courseInitial(subject: string) {
   if (subject.includes('피아노')) {

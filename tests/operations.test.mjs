@@ -1721,3 +1721,32 @@ test('monthly payment priority matches selected-day cells for forecast, paid, im
  assert.equal(monthlyPaymentDue({...base,row,sequence:new Map([[key,'3']]),invoice:{...invoice,status:'open',paid:0}}),true);
  assert.equal(monthlyPaymentDue({...base,invoice:{...invoice,status:'open',paid:0},unpaidForecastFirst:new Set()}),false); // No lesson that day.
 });
+
+test('same-day prepayment stays paid before check-in, after arrival, and across a month boundary',()=>{
+ const s=setup(),{attendanceForecast:forecast}=s.load('attendance-forecast'),{attendanceSequence:sequence}=s.load('attendance-sequence');
+ const {unpaidForecastFirstLessons:due,confirmedFirstLessons:confirmed,monthlyPaymentDue}=s.load('attendance-appearance');
+ const {invoiceCycleStart}=s.load('billing-display');
+ const account={id:'p',active:true,planUnits:8,remaining:8,schedule:{rules:[{start:'2026-10-02',weekdays:[1,5]}],moves:[]}};
+ const context={positions:{p:8},cycleFirstDays:{p:['2026-08-31']},cycleStarts:[]};
+ const dates=Array.from({length:31},(_,i)=>`2026-10-${String(i+1).padStart(2,'0')}`);
+ const invoice={id:'renewal',studentId:'p',units:8,amount:150000,paid:150000,status:'paid',createdAt:'2026-10-02T01:00:00Z',needsReview:false};
+ const preview=forecast([account],[],[],context,dates,'2026-10-02');
+ assert.equal(preview.get('p_2026-10-02'),'1');
+ assert.equal(due(preview,[invoice],context.cycleFirstDays).has('p_2026-10-02'),false);
+ for(const patch of [{status:'open',paid:0},{status:'open',paid:50000},{status:'cancelled'},{studentId:'drums'}])assert.equal(due(preview,[{...invoice,...patch}],context.cycleFirstDays).has('p_2026-10-02'),true);
+ const row={studentId:'p',day:'2026-10-02',units:1,status:'present',at:'2026-10-02T05:00:00Z'};
+ const actual=sequence([account],[row],[],context);
+ const paid=confirmed([invoice],actual.cycleFirstDays,actual.firstLessonTimes);
+ assert.equal(paid.has('p_2026-10-02'),true);
+ assert.equal(monthlyPaymentDue({key:'p_2026-10-02',row,sequence:actual.labels,confirmedFirst:paid,cycleFirstDays:actual.cycleFirstDays,unpaidCycles:new Set(),unpaidForecastFirst:new Set()}),false);
+ const next=sequence([account],[],[],{...actual,cycleStarts:[]});
+ assert.equal(confirmed([invoice],next.cycleFirstDays,next.firstLessonTimes).has('p_2026-10-02'),true);
+ const future=new Map([['p_2026-11-02','1']]);
+ assert.equal(due(future,[invoice],next.cycleFirstDays,next.firstLessonTimes).has('p_2026-11-02'),true); // One receipt pays only one pass.
+ // An invoice generated after a one-lesson pass (or two-unit final attendance)
+ // still belongs to the next pass, even though today's ordinal includes 1.
+ const after={...invoice,createdAt:'2026-10-02T06:00:00Z'};
+ assert.equal(invoiceCycleStart(after,{p:['2026-10-02','2026-11-02']},actual.firstLessonTimes),'2026-11-02');
+ assert.equal(confirmed([after],actual.cycleFirstDays,actual.firstLessonTimes).size,0);
+ assert.deepEqual(context,{positions:{p:8},cycleFirstDays:{p:['2026-08-31']},cycleStarts:[]});
+});
