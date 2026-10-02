@@ -26,7 +26,6 @@ import { CourseDialog } from './CourseDialog';
 import { InvoiceEditDialog } from './InvoiceEditDialog';
 import { InvoiceDialog } from './InvoiceDialog';
 import { RegisterStudent } from './RegisterStudent';
-import { ImportStudents } from './ImportStudents';
 import { GROUPS, groupName, compareGroups, compareStudents, compareNames, displayCourseName, displayEnrollmentName } from '@/lib/operations/student-order';
 import { MonthlyAttendance } from './MonthlyAttendance';
 import { CheckIn } from './CheckIn';
@@ -157,7 +156,7 @@ export function Operations({ demo = false }: { demo?: boolean }) {
   const students = activeStudents.filter(s => (s.name.includes(search.trim()) || s.phone.includes(search.trim())) && (!subject || groupName(s) === subject)).sort((a, b) => compareGroups(groupName(a), groupName(b)) || compareStudents(a, b));
   const account = panel?.type === 'account' ? panel.initial : undefined;
   const student = panel?.type === 'account' ? data.students.find(s => s.id === panel.id) : undefined;
-  const tabs = [['students', '총 등록 현황'], ['monthly', '월별 출석표'], ['billing', '청구·수납'], ['today', '당일 출석 현황'], ['announcements', '카카오 공지'], ['notices', '알림 내역'], ['devices', '출석 기기'], ...(!demo ? [['imports', '기존 장부']] : []), ['inactive', '퇴원 및 휴원']];
+  const tabs = [['students', '총 등록 현황'], ['monthly', '월별 출석표'], ['billing', '청구·수납'], ['today', '당일 출석 현황'], ['announcements', '카카오 공지'], ['notices', '알림 내역'], ['devices', '출석 기기'], ['inactive', '퇴원 및 휴원']];
   return <div className="whee-ops operations">
     {demo && <div className="demo-banner">가상 학생 체험 · 실제 학생 정보와 연결되지 않으며 메시지·결제가 발생하지 않습니다. <button onClick={() => { const next = sample(); dataRef.current = next; setData(next); setPanel(null); setMessage('체험을 초기화했습니다.'); }}>체험 초기화</button></div>}
     <header className="ops-header"><div><p className="brand">WHEE MUSIC</p><h1>출석·수납 관리</h1></div><div className="header-actions"><span className="subtle">{demo ? '원장님 화면 체험' : user?.email}</span><a href={demo ? '/check-in/demo' : '/check-in'} target="_blank" rel="noreferrer">출석 화면 ↗</a></div></header>
@@ -171,7 +170,6 @@ export function Operations({ demo = false }: { demo?: boolean }) {
     {error && <p className="error" role="alert">{error} {!demo && loadedDay !== day && <button onClick={() => void refresh()}>다시 불러오기</button>}</p>}{message && <p className="success" role="status">{message}</p>}
     <div className={demo && tab === 'today' ? 'workspace-with-kiosk' : ''}><section className="surface">
     {tab === 'announcements' && <Announcements user={user} data={data} demo={demo}/> }
-    {tab === 'imports' && !demo && <ImportStudents user={user} />}
     {tab === 'monthly' && <MonthlyAttendance data={data} day={day} busy={busy} loading={!demo && loadedDay !== day} onDayChange={setDay} save={act} />}
     {tab === 'today' && <><div className="section-head"><div><h2>당일 출석 현황</h2><p>출석 체크 화면에서 번호로 출석한 학생만 표시합니다. 여행·결석·수동 기록은 월별 출석표에서 확인하세요.</p></div></div>
       {todayAttendance.length ? <div className="table-wrap"><table><thead><tr><th aria-sort={dailyOrder === 'name' ? 'ascending' : 'none'}><span className="attendance-sort-heading">학생<button type="button" className="attendance-sort-button" aria-label="학생 이름 가나다순 정렬" aria-pressed={dailyOrder === 'name'} title="이름 가나다순" onClick={() => setDailyOrder('name')}>ㄱㄴㄷ</button></span></th><th>상태</th><th aria-sort={dailyOrder === 'name' ? 'none' : dailyOrder === 'earliest' ? 'ascending' : 'descending'}><span className="attendance-sort-heading">기록 시간<button type="button" className="attendance-sort-button" aria-label={dailyOrder === 'earliest' ? '나중에 온 순으로 정렬' : '빨리 온 순으로 정렬'} aria-pressed={dailyOrder !== 'name'} title={dailyOrder === 'latest' ? '현재 나중에 온 순 · 누르면 빨리 온 순' : dailyOrder === 'earliest' ? '현재 빨리 온 순 · 누르면 나중에 온 순' : '빨리 온 순으로 정렬'} onClick={() => setDailyOrder(v => v === 'earliest' ? 'latest' : 'earliest')}>{dailyOrder === 'latest' ? '↓' : '↑'}</button></span></th><th>차감</th><th>남은 횟수</th><th>비고</th><th>관리</th></tr></thead><tbody>{todayAttendance.map(a => <tr key={a.id}><td><strong>{displayCourseName(a.name)}</strong><small>{data.accounts.find(s => s.id === a.studentId)?.checkinSuffixes.filter(n => /^[0-9]{4}$/.test(n)).join(' · ') || '—'}</small></td><td>{ATTENDANCE_LABELS[a.status || "present"]}</td><td><button type="button" className="attendance-time-button" disabled={busy} aria-label={`${a.name} 출석 시간 수정`} onClick={() => setTimeAttendance({...a})}><span>{attendanceClock(a) || '시간 미기록'}</span><span aria-hidden="true">⋮</span></button></td><td>{a.units}회</td><td>{data.accounts.find(s => s.id === a.studentId)?.remaining}회</td><td>{a.note || '—'}</td><td><button disabled={busy} onClick={() => setPanel({ type: 'adjust', row: a })}>수정</button></td></tr>)}</tbody></table></div> : <div className="empty"><h3>아직 출석 기록이 없습니다.</h3><p>{demo ? '옆 출석 화면에 1234를 입력하고 김하늘 학생을 선택해보세요. 마지막 수업이 차감되면 청구가 생성됩니다.' : '수강 설정을 저장한 학생이 등록된 아이폰에서 출석하면 여기에 표시됩니다.'}</p></div>}</>}
