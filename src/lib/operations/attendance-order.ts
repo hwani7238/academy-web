@@ -16,7 +16,7 @@ export function orderDailyAttendance(rows: Snapshot['attendance'], order: DailyA
   });
 }
 
-export type AttendanceOrder = 'name' | 'attendance';
+export type AttendanceOrder = 'name' | 'payment';
 export type Arrival = { time?: number };
 
 export function arrivalsOnDay(data: Pick<Snapshot, 'attendance' | 'legacyAttendance'>, day: string) {
@@ -37,20 +37,9 @@ export function arrivalsOnDay(data: Pick<Snapshot, 'attendance' | 'legacyAttenda
   return arrivals;
 }
 
-export function orderAttendanceStudents(students: Snapshot['students'], order: AttendanceOrder, arrivals: Map<string, Arrival>) {
+export function orderAttendanceStudents(students: Snapshot['students'], order: AttendanceOrder, paymentDue: Set<string>) {
   return [...students].sort((a, b) => {
-    if (order === 'attendance') {
-      const aa = arrivals.get(a.id), bb = arrivals.get(b.id);
-      if (Boolean(aa) !== Boolean(bb)) return aa ? -1 : 1;
-      if (aa && bb) {
-        if ((aa.time !== undefined) !== (bb.time !== undefined)) return aa.time !== undefined ? -1 : 1;
-        if (aa.time !== undefined && bb.time !== undefined && aa.time !== bb.time) return aa.time - bb.time;
-      }
-    }
+    if (order === 'payment' && paymentDue.has(a.id) !== paymentDue.has(b.id)) return paymentDue.has(a.id) ? -1 : 1;
     return compareStudents(a, b);
   });
-}
-
-export function arrivalLabel(arrival: Arrival) {
-  return arrival.time === undefined ? '출석 · 시간 미기록' : `출석 ${new Date(arrival.time).toLocaleTimeString('ko-KR', { timeZone: 'Asia/Seoul', hour: '2-digit', minute: '2-digit', hour12: false })}`;
 }

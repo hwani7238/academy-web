@@ -90,3 +90,17 @@ export function isUnpaidAttendance(row: Attendance, cycleFirstDays: Record<strin
   const start = row.unpaidCycleStart || lessonCycleStart(row.studentId, row.day, { [row.studentId]: [...(cycleFirstDays[row.studentId] || []), ...markedStarts] });
   return pending.has(`${row.studentId}_${start}`);
 }
+
+
+// Shared by the monthly cell and its selected-day payment-priority sort.
+export function monthlyPaymentDue({ key, row, original, account, invoice, sequence, confirmedFirst, cycleFirstDays, unpaidCycles, unpaidForecastFirst }: {
+  key: string; row?: Attendance; original?: Legacy; account?: Account; invoice?: Invoice;
+  sequence: Map<string, string>; confirmedFirst: Set<string>; cycleFirstDays: Record<string, string[]>;
+  unpaidCycles: Set<string>; unpaidForecastFirst: Set<string>;
+}): boolean {
+  if (row) return isUnpaidAttendance(row, cycleFirstDays, unpaidCycles)
+    || attendancePaymentDue(row, account, invoice)
+    || (isFirstLesson(sequence.get(key), row.status) && !confirmedFirst.has(key));
+  if (original) return importedAttendanceAppearance(original, account, invoice, confirmedFirst.has(key)).tone === 'payment-due';
+  return unpaidForecastFirst.has(key);
+}

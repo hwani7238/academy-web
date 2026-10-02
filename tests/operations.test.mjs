@@ -154,7 +154,7 @@ test('attendance time correction preserves attendance day, source, units, balanc
  assert.equal(s.load('attendance-time').attendanceClock(before),'');
  assert.equal(s.load('attendance-time').attendanceClock({...before,source:'kiosk',at:new Date(`${day}T15:20:00+09:00`).toISOString()}),'15:20');
 });
-test('monthly roster sorts all rows by Korean name or selected-day arrivals without merging courses',()=>{
+test('monthly roster sorts all rows by Korean name or payment priority without merging courses',()=>{
  const s=setup(),{arrivalsOnDay,orderAttendanceStudents}=s.load('attendance-order');
  const students=Array.from({length:195},(_,i)=>({id:`s${i}`,name:`학생${i}`,phone:''}));
  students[0].name='홍길동 · 피아노';students[1].name='강하늘 · 보컬';students[2].name='김가람 · 드럼';students[3].name='김가람 · 피아노';
@@ -163,9 +163,11 @@ test('monthly roster sorts all rows by Korean name or selected-day arrivals with
  const arrivals=arrivalsOnDay({attendance:[record('s0','present','2026-09-29T05:00:00Z'),record('s2','makeup','2026-09-29T04:00:00Z'),record('s3','cancelled','2026-09-29T03:00:00Z'),record('s4','absent','2026-09-29T02:00:00Z'),record('s5','present','2026-09-29T01:00:00Z','manual'),{...record('s6','present','2026-09-28T01:00:00Z'),day:'2026-09-28'}],legacyAttendance:[{studentId:'s3',day,value:'3',color:''},{studentId:'s7',day,value:'2',color:'FFCCCCCC'},{studentId:'s8',day,value:'2',color:'FFFF00FF'},{studentId:'s9',day,value:'병가',color:''}]},day);
  assert.deepEqual([...arrivals.keys()],['s0','s2','s5','s8']);
  assert.equal(arrivals.get('s5').time,undefined);
- const ordered=orderAttendanceStudents(students,'attendance',arrivals);
- assert.equal(ordered.length,195);assert.deepEqual(ordered.slice(0,4).map(s=>s.id),['s2','s0','s5','s8']);
- assert.equal(orderAttendanceStudents(students,'name',arrivals)[0].id,'s1');
+ const paymentDue=new Set(['s0','s2']);
+ const ordered=orderAttendanceStudents(students,'payment',paymentDue);
+ assert.equal(ordered.length,195);assert.deepEqual(ordered.slice(0,3).map(s=>s.id),['s2','s0','s1']);
+ assert.ok(ordered.findIndex(s=>s.id==='s3')>2);
+ assert.equal(orderAttendanceStudents(students,'name',paymentDue)[0].id,'s1');
  assert.equal(students[0].id,'s0');
  assert.equal(arrivalsOnDay({attendance:[record('s0','present','invalid')],legacyAttendance:[]},day).get('s0').time,undefined);
 });
@@ -1693,4 +1695,29 @@ test('October 2 scheduled first lesson remains only a forecast, then attendance 
  assert.equal(actual.labels.get('p_2026-10-02'),'1');assert.equal(expected.has('p_2026-10-02'),false);
  assert.deepEqual([...due(expected,[paid],actual.cycleFirstDays)],['p_2026-10-23']);
  assert.equal(confirmed([paid],actual.cycleFirstDays).has('p_2026-10-02'),true);
+});
+
+test('monthly payment priority matches selected-day cells for forecast, paid, imported and cancelled lessons',()=>{
+ const s=setup(),{monthlyPaymentDue,unpaidForecastFirstLessons}=s.load('attendance-appearance');
+ const key='piano_2026-10-02',day='2026-10-02';
+ const base={key,sequence:new Map([[key,'1']]),confirmedFirst:new Set(),cycleFirstDays:{piano:[day]},unpaidCycles:new Set(),unpaidForecastFirst:new Set([key])};
+ assert.equal(monthlyPaymentDue(base),true); // Unpaid forecast before checking in.
+ assert.equal(monthlyPaymentDue({...base,key:'piano_2026-10-03'}),false);
+ assert.equal(monthlyPaymentDue({...base,key:'drum_2026-10-02'}),false); // Same student, different enrollment.
+ const invoice={studentId:'piano',cycleStart:day,status:'paid',amount:160000,paid:160000};
+ const forecast=new Map([[key,'1']]);
+ assert.equal(monthlyPaymentDue({...base,unpaidForecastFirst:unpaidForecastFirstLessons(forecast,[invoice],{})}),false);
+ assert.equal(monthlyPaymentDue({...base,unpaidForecastFirst:unpaidForecastFirstLessons(forecast,[{...invoice,status:'open',paid:80000}],{})}),true);
+ const row={studentId:'piano',day,status:'present',units:1};
+ assert.equal(monthlyPaymentDue({...base,row}),true);
+ assert.equal(monthlyPaymentDue({...base,row,confirmedFirst:new Set([key])}),false);
+ for(const status of ['cancelled','absent','travel','sick','makeup_reserved']) assert.equal(monthlyPaymentDue({...base,row:{...row,status,units:0}}),false);
+ const original={studentId:'piano',day,value:'1',color:''};
+ assert.equal(monthlyPaymentDue({...base,original}),true);
+ assert.equal(monthlyPaymentDue({...base,original,confirmedFirst:new Set([key])}),false);
+ assert.equal(monthlyPaymentDue({...base,original,row:{...row,status:'cancelled',units:0}}),false);
+ assert.equal(monthlyPaymentDue({...base,original:{...original,color:'FFCCCCCC'}}),false);
+ assert.equal(monthlyPaymentDue({...base,row,sequence:new Map([[key,'3']]),unpaidCycles:new Set([key])}),true);
+ assert.equal(monthlyPaymentDue({...base,row,sequence:new Map([[key,'3']]),invoice:{...invoice,status:'open',paid:0}}),true);
+ assert.equal(monthlyPaymentDue({...base,invoice:{...invoice,status:'open',paid:0},unpaidForecastFirst:new Set()}),false); // No lesson that day.
 });
