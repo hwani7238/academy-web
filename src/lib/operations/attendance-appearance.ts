@@ -1,0 +1,108 @@
+import { invoiceCycleStart } from './billing-display';
+import { seoulDay, type Account, type Attendance, type Invoice, type Snapshot } from './model';
+
+type Legacy = NonNullable<Snapshot['legacyAttendance']>[number];
+
+export function legacyAttendanceAppearance(row: Legacy) {
+  if (row.status) return { tone: row.status, label: row.status === 'present' ? '' : ({ absent: '결석', makeup: '보강', makeup_reserved: '보강 예약', late_cancel: '당일 취소', travel: '여행', sick: '병가', cancelled: '취소' }[row.status] || '') };
+  const color = row.color.toUpperCase().replace(/^#/, '').replace(/^FF(?=.{6}$)/, '');
+  if (['CCCCCC', 'D9D9D9', 'B7B7B7'].includes(color) || /결석/.test(row.value)) return { tone: 'absent', label: '결석' };
+  if (color === 'FF9900' || /보강/.test(row.value)) return { tone: 'makeup', label: '보강' };
+  if (['FF00FF', '9900FF'].includes(color)) return { tone: 'payment-due', label: '결제' };
+  if (/여행/.test(row.value)) return { tone: 'travel', label: '여행' };
+  if (/병가/.test(row.value)) return { tone: 'sick', label: '병가' };
+  return { tone: 'present', label: '' };
+}
+
+export function attendancePaymentDue(row: Pick<Attendance, 'day' | 'status' | 'units'>, account?: Account, invoice?: Invoice) {
+  if (!invoice || invoice.status !== 'open' || invoice.paid >= invoice.amount || row.units <= 0 || !['present', 'makeup'].includes(row.status || 'present')) return false;
+  if (invoice.cycleStart) return row.day >= invoice.cycleStart;
+  // An ordinary renewal invoice is created on the final paid lesson. Only
+  // subsequent lessons while the balance is negative belong to the unpaid pass.
+  const created = new Date(invoice.createdAt);
+  return Boolean(account && account.remaining < 0 && Number.isFinite(created.getTime()) && row.day > seoulDay(created));
+}
+
+export function isFirstLesson(sequence: string | undefined, status: Attendance['status']) {
+  return (status || 'present') === 'present' && Boolean(sequence?.split('·').some(value => Number(value) === 1));
+}
+
+export function paidFirstLesson(sequence: string | undefined, status: Attendance['status'], paymentDue: boolean, confirmed = false) {
+  return confirmed && !paymentDue && isFirstLesson(sequence, status);
+}
+
+// A previous payment must never paint every later pass as paid. Explicit cycle
+// dates win; an advance renewal belongs to the next first lesson, including
+// the same day when the invoice precedes that lesson. Ambiguous dates stay unlinked.
+export function confirmedFirstLessons(invoices: Invoice[], cycleFirstDays: Record<string, string[]>, firstLessonTimes: Record<string, string> = {}) {
+  const byLesson = new Map<string, Invoice[]>();
+  for (const invoice of invoices) {
+    if (invoice.status === 'cancelled') continue;
+    const day = invoiceCycleStart(invoice, cycleFirstDays, firstLessonTimes);
+    if (!day) continue;
+    const key = `${invoice.studentId}_${day}`;
+    byLesson.set(key, [...(byLesson.get(key) || []), invoice]);
+  }
+  return new Set([...byLesson].filter(([, rows]) => rows.every(i => i.status === 'paid' && i.amount > 0 && i.paid >= i.amount && !i.needsReview)).map(([key]) => key));
+}
+
+// Projected first lessons need the same payment check before the child arrives.
+// Include real cycle dates so an old receipt cannot pay a later forecast cycle.
+export function unpaidForecastFirstLessons(forecast: Map<string, string>, invoices: Invoice[], cycleFirstDays: Record<string, string[]>, firstLessonTimes: Record<string, string> = {}) {
+  const cycles = Object.fromEntries(Object.entries(cycleFirstDays).map(([id, days]) => [id, [...days]]));
+  const firstKeys: string[] = [];
+  const times = { ...firstLessonTimes };
+  for (const [key, label] of forecast) {
+    if (!isFirstLesson(label, 'present')) continue;
+    const studentId = key.slice(0, -11), day = key.slice(-10);
+    const days = cycles[studentId] ||= [];
+    if (!days.includes(day)) days.push(day);
+    firstKeys.push(key);
+    times[key] = 'forecast';
+  }
+  const confirmed = confirmedFirstLessons(invoices, cycles, times);
+  return new Set(firstKeys.filter(key => !confirmed.has(key)));
+}
+
+export function importedAttendanceAppearance(row: Legacy, account?: Account, invoice?: Invoice, confirmed = false) {
+  const appearance = legacyAttendanceAppearance(row);
+  if (row.status === 'cancelled') return appearance;
+  const status = appearance.tone === 'payment-due' ? 'present' : appearance.tone as Attendance['status'];
+  const due = attendancePaymentDue({ day: row.day, status, units: 1 }, account, invoice);
+  if (due) return { tone: 'payment-due', label: '결제 필요' };
+  if (isFirstLesson(row.value, status)) return confirmed
+    ? { tone: 'paid-first', label: '결제 완료' }
+    : { tone: 'payment-due', label: '결제 확인 필요' };
+  return appearance;
+}
+
+
+export function unpaidAttendanceCycles(records: Attendance[], confirmed: Set<string>, prior: string[] = []) {
+  return new Set([...prior, ...records.filter(r => r.status === 'present' && r.unpaidCycleStart).map(r => `${r.studentId}_${r.unpaidCycleStart}`)].filter(key => !confirmed.has(key)));
+}
+
+export function lessonCycleStart(studentId: string, day: string, cycleFirstDays: Record<string, string[]>) {
+  return [...(cycleFirstDays[studentId] || [])].filter(start => start <= day).sort().at(-1) || day;
+}
+
+
+export function isUnpaidAttendance(row: Attendance, cycleFirstDays: Record<string, string[]>, pending: Set<string>) {
+  if ((row.status || 'present') !== 'present') return false;
+  const markedStarts = [...pending].filter(key => key.startsWith(`${row.studentId}_`)).map(key => key.slice(-10));
+  const start = row.unpaidCycleStart || lessonCycleStart(row.studentId, row.day, { [row.studentId]: [...(cycleFirstDays[row.studentId] || []), ...markedStarts] });
+  return pending.has(`${row.studentId}_${start}`);
+}
+
+
+// Shared by the monthly cell and its selected-day payment-priority sort.
+export function monthlyPaymentDue({ key, row, original, account, invoice, sequence, confirmedFirst, cycleFirstDays, unpaidCycles, unpaidForecastFirst }: {
+  key: string; row?: Attendance; original?: Legacy; account?: Account; invoice?: Invoice;
+  sequence: Map<string, string>; confirmedFirst: Set<string>; cycleFirstDays: Record<string, string[]>;
+  unpaidCycles: Set<string>; unpaidForecastFirst: Set<string>;
+}): boolean {
+  if (row) return isUnpaidAttendance(row, cycleFirstDays, unpaidCycles)
+    || attendancePaymentDue(row, account, invoice)
+    || (isFirstLesson(sequence.get(key), row.status) && !confirmedFirst.has(key));
+  if (original) return importedAttendanceAppearance(original, account, invoice, confirmedFirst.has(key)).tone === 'payment-due';
+  return unpaidForecastFirst.has(key);
+}

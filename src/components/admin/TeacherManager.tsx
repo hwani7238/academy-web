@@ -6,6 +6,7 @@ import { createUserWithEmailAndPassword, getAuth, signOut } from "firebase/auth"
 import { collection, deleteDoc, doc, onSnapshot, setDoc, updateDoc } from "firebase/firestore";
 import { db, firebaseConfig } from "@/lib/firebase";
 import { Button } from "@/components/ui/button";
+import { CloseIcon } from "@/components/ui/CloseIcon";
 import { TEACHER_SUBJECTS } from "@/lib/constants";
 
 interface TimestampLike {
@@ -559,13 +560,15 @@ export function TeacherManager() {
                                                     );
                                                     setTransferTargetId("");
                                                 }}
+                                                aria-label={selectedTeacherForStudents === teacher.id ? "닫기" : "학생 조회"}
+                                                title={selectedTeacherForStudents === teacher.id ? "닫기" : "학생 조회"}
                                                 className={`h-8 font-medium ${
                                                     selectedTeacherForStudents === teacher.id 
                                                         ? "text-indigo-600 bg-indigo-50 font-bold px-2 rounded" 
                                                         : "text-slate-600"
                                                 }`}
                                             >
-                                                {selectedTeacherForStudents === teacher.id ? "닫기" : "학생 조회"}
+                                                {selectedTeacherForStudents === teacher.id ? <CloseIcon /> : "학생 조회"}
                                             </Button>
                                             <Button
                                                 variant="ghost"
