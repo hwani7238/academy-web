@@ -1854,3 +1854,36 @@ test('building a weekly timetable in reverse weekday order preserves all placeme
  assert.equal(schedule.rules[0].times[5].start,'14:00');
  assert.equal(schedule.rules[0].times[2].start,'11:40');
 });
+
+test('weekday board shows recurring days without calendar dates, closures or one-off moves',()=>{
+ const s=setup(),{regularTimetableLessons:list}=s.load('timetable');
+ const schedule={rules:[{start:'2026-10-01',weekdays:[1,5],times:{1:{start:'11:40',end:''},5:{start:'14:00',end:''}}}],moves:[{from:'2026-10-02',to:'2026-10-03'}]};
+ const data={students:[{id:'p',name:'피아노'},{id:'d',name:'드럼',lifecycle:{status:'paused',until:'2026-10-06'}},{id:'v',name:'보컬',lifecycle:{status:'withdrawn'}}],accounts:['p','d','v'].map(id=>({id,active:true,schedule}))};
+ const rows=list(data,'2026-10-05');
+ assert.deepEqual(rows.lessons.map(l=>[l.student.id,l.weekday]),[['p',1],['p',5]]);
+ assert.equal(rows.lessons[0].time.start,'11:40');
+ assert.equal(list(data,'2026-10-07').lessons.some(l=>l.student.id==='d'),true);
+});
+test('weekday placement works for Monday on Saturday, preserves Sunday and history, and ignores dated attendance',()=>{
+ const {placeRegularTimetableLesson:place,regularTimetableLessons:list}=setup().load('timetable');
+ const old={rules:[{start:'2026-10-01',weekdays:[0,6],times:{0:{start:'11:00',end:'12:00'},6:{start:'14:00',end:''}}}],moves:[{from:'2026-10-04',to:'2026-10-06'}],updatedAt:'a'};
+ const added=place(old,{weekday:1,time:'11:40',expectedUpdatedAt:'a'},'b','2026-10-03');
+ assert.deepEqual(added.rules.at(-1).weekdays,[1,6,0]);assert.equal(added.rules.at(-1).start,'2026-10-03');assert.deepEqual(added.moves,old.moves);assert.deepEqual(added.rules[0],old.rules[0]);
+ const moved=place(added,{fromWeekday:0,weekday:2,time:'10:20',expectedUpdatedAt:'b'},'c','2026-10-03');
+ assert.deepEqual(moved.rules.at(-1).weekdays,[1,2,6]);assert.deepEqual(moved.rules.at(-1).times[2],{start:'10:20',end:'11:20'});
+ assert.throws(()=>place(moved,{fromWeekday:2,weekday:1,time:'10:20',expectedUpdatedAt:'c'},'d','2026-10-03'),/이미/);
+ assert.throws(()=>place(moved,{weekday:7,time:'10:20',expectedUpdatedAt:'c'},'d','2026-10-03'),/요일/);
+ const future={rules:[{start:'2026-10-12',weekdays:[1],times:{1:{start:'11:00',end:''}}}],moves:[],updatedAt:'a'};
+ const updated=place(future,{weekday:2,time:'11:40',expectedUpdatedAt:'a'},'b','2026-10-03');
+ assert.equal(updated.rules.length,1);assert.equal(updated.rules[0].start,'2026-10-12');
+ assert.deepEqual(list({students:[{id:'p',name:'피아노'}],accounts:[{id:'p',active:true,schedule:updated}]},'2026-10-03').lessons.map(l=>l.weekday),[1,2]);
+});
+test('regular timetable saves only schedule and excludes a withdrawn course in the server',async()=>{
+ const s=setup();await s.seed('piano',7);const before=structuredClone(s.records.get('opsAccounts/piano'));
+ const input={action:'placeRegularTimetableLesson',studentId:'piano',weekday:1,time:'11:40',expectedUpdatedAt:''};
+ const changes=await s.service.saveSchedule(input,'owner');assert.equal(changes.accounts[0].schedule.rules[0].times[1].start,'11:40');
+ const after={...s.records.get('opsAccounts/piano')};delete after.schedule;assert.deepEqual(after,before);
+ assert.equal([...s.records.keys()].some(k=>/^ops(Attendance|Invoices|Notices)\//.test(k)),false);
+ s.records.get('students/piano').courseLifecycles={piano:{status:'withdrawn'}};
+ await assert.rejects(s.service.saveSchedule({...input,expectedUpdatedAt:changes.accounts[0].schedule.updatedAt},'owner'),/휴원·퇴원/);
+});

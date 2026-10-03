@@ -1,4 +1,4 @@
-import {placeTimetableLesson} from './timetable';
+import {placeTimetableLesson,placeRegularTimetableLesson} from './timetable';
 import { legacyAttendanceAppearance } from './attendance-appearance';
 import { guardianPhone, contactAccount } from './student-contact';
 import { invoiceForPlan } from './plan-invoice';
@@ -684,7 +684,11 @@ export async function saveSchedule(input: Record<string, unknown>, actor: string
   if(!account)throw Error('먼저 수강 등록을 완료해주세요.');
   const stamp=new Date(Math.max(Date.now(),Date.parse(account.schedule?.updatedAt||'')+1||0)).toISOString();
   let schedule;
-  if(input.action==='placeTimetableLesson'){
+  if(input.action==='placeRegularTimetableLesson'){
+   const source=(await tx.get(db.doc(`students/${account.sourceStudentId||id}`))).data();
+   if(!source || !account.active || enrollmentState(courseLifecycle(source,id))!=='active')throw Error('휴원·퇴원 또는 중지된 과목은 시간표에 배치할 수 없습니다.');
+   schedule=placeRegularTimetableLesson(account.schedule,input,stamp);
+  }else if(input.action==='placeTimetableLesson'){
    const source=(await tx.get(db.doc(`students/${account.sourceStudentId||id}`))).data();
    const to=validDay(input.to),from=input.from?validDay(input.from):undefined;
    if(!source || !account.active || enrollmentState(courseLifecycle(source,id),to)!=='active')throw Error('휴원·퇴원 또는 중지된 과목은 시간표에 배치할 수 없습니다.');

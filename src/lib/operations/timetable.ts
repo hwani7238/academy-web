@@ -82,3 +82,48 @@ export function placeTimetableLesson(old:LessonSchedule|undefined,input:Record<s
   times[target]=time;
   return changeSchedule(old,{start,weekdays,times,expectedUpdatedAt:input.expectedUpdatedAt},stamp,today);
 }
+
+// The weekday board is a recurring template, independent of dated attendance,
+// one-off moves and holiday closures. Keep future-only setups visible as well.
+export function regularTimetableRule(schedule:LessonSchedule|undefined,today=seoulDay()) {
+  return ruleOn(schedule,today) || schedule?.rules.filter(r=>r.start>today).sort((a,b)=>a.start.localeCompare(b.start))[0];
+}
+export type RegularTimetableLesson={student:Snapshot['students'][number];account:Account;weekday:number;time?:LessonTime};
+export function regularTimetableLessons(data:Pick<Snapshot,'students'|'accounts'>,today=seoulDay()) {
+  const lessons:RegularTimetableLesson[]=[],unset=new Set<string>();
+  const accounts=new Map(data.accounts.map(a=>[a.id,a]));
+  for(const student of data.students){
+    const account=accounts.get(student.id);
+    if(enrollmentState(student.lifecycle,today)!=='active'||account?.active===false)continue;
+    const rule=regularTimetableRule(account?.schedule,today);
+    if(!account||!rule?.weekdays.length){unset.add(student.id);continue;}
+    for(const weekday of rule.weekdays){
+      const time=rule.times?.[weekday];
+      lessons.push({student,account,weekday,time});
+      if(!time)unset.add(student.id);
+    }
+  }
+  lessons.sort((a,b)=>(a.time?.start||'').localeCompare(b.time?.start||'')||compareStudents(a.student,b.student));
+  return {lessons,unset};
+}
+export function placeRegularTimetableLesson(old:LessonSchedule|undefined,input:Record<string,unknown>,stamp:string,today=seoulDay()):LessonSchedule {
+  if((old?.updatedAt||'')!==(input.expectedUpdatedAt||''))throw Error('수업 일정이 변경됐습니다. 다시 배치해주세요.');
+  const target=input.weekday,source=input.fromWeekday;
+  if(!Number.isInteger(target)||Number(target)<0||Number(target)>6 || (source!==undefined&&(!Number.isInteger(source)||Number(source)<0||Number(source)>6)))throw Error('수업 요일을 확인해주세요.');
+  const time=String(input.time||'');
+  if(!/^(1[0-9]|2[01]):[0-5]0$/.test(time))throw Error('10:00~21:50 사이에서 10분 단위로 선택해주세요.');
+  const base=regularTimetableRule(old,today),weekdays=[...(base?.weekdays||[])],times={...base?.times};
+  if(source!==undefined&&!weekdays.includes(Number(source)))throw Error('옮길 수업이 변경됐습니다. 다시 확인해주세요.');
+  if(source!==undefined&&source!==target&&weekdays.includes(Number(target)))throw Error('해당 요일에는 같은 과목 수업이 이미 설정되어 있습니다.');
+  const previous=times[String(source??target)],minutes=(v:string)=>Number(v.slice(0,2))*60+Number(v.slice(3));
+  let end='';
+  if(previous?.end){
+    const endMinutes=minutes(time)+minutes(previous.end)-minutes(previous.start);
+    if(endMinutes>1320)throw Error('기존 수업 길이를 유지하면 22:00를 넘습니다. 더 이른 시간에 배치해주세요.');
+    end=`${String(Math.floor(endMinutes/60)).padStart(2,'0')}:${String(endMinutes%60).padStart(2,'0')}`;
+  }
+  if(source!==undefined){weekdays.splice(weekdays.indexOf(Number(source)),1);delete times[String(source)];}
+  if(!weekdays.includes(Number(target)))weekdays.push(Number(target));
+  times[String(target)]={start:time,end};
+  return changeSchedule(old,{start:base&&base.start>today?base.start:today,weekdays,times,expectedUpdatedAt:input.expectedUpdatedAt},stamp,today);
+}
