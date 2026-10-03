@@ -1,3 +1,4 @@
+import {placeTimetableLesson} from '@/lib/operations/timetable';
 import { guardianPhone, contactAccount } from '@/lib/operations/student-contact';
 import { invoiceForPlan } from '@/lib/operations/plan-invoice';
 import { legacyAttendanceAppearance } from '@/lib/operations/attendance-appearance';
@@ -51,10 +52,10 @@ export function demoAction(current: Snapshot, input: Record<string, unknown>): {
     if(!row||!account)throw Error('이전 출결을 찾을 수 없습니다.');
     if(row.revision!==input.expectedRevision)throw Error('이전 출결이 변경됐습니다.');
     Object.assign(row,legacyCorrectionInput(input),{revision:crypto.randomUUID()});
-  } else if(input.action==='saveSchedule'||input.action==='moveLesson'){
+  } else if(input.action==='saveSchedule'||input.action==='moveLesson'||input.action==='placeTimetableLesson'){
     if(!account)throw Error('먼저 수강 등록을 완료해주세요.');
     const stamp=new Date(Math.max(Date.now(),Date.parse(account.schedule?.updatedAt||'')+1||0)).toISOString();
-    account.schedule=input.action==='moveLesson'?moveLesson(account.schedule,input,data.attendance.filter(r=>r.studentId===account.id),stamp):changeSchedule(account.schedule,input,stamp);
+    account.schedule=input.action==='placeTimetableLesson'?placeTimetableLesson(account.schedule,input,data.attendance.filter(r=>r.studentId===account.id),stamp):input.action==='moveLesson'?moveLesson(account.schedule,input,data.attendance.filter(r=>r.studentId===account.id),stamp):changeSchedule(account.schedule,input,stamp);
   } else if(input.action==='updateStudentPhone'){
     const source=String(input.sourceStudentId),siblings=data.students.filter(s=>(s.sourceStudentId||s.id)===source),target=siblings.find(s=>s.id===input.studentId);
     if(!target)throw Error('학생을 찾을 수 없습니다.');

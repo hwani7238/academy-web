@@ -1773,7 +1773,7 @@ test('lesson times validate, preserve old clients and effective dates, and move 
  assert.deepEqual(lessonTimeOn(moved,'2026-10-13'),{start:'14:00',end:'15:30'});
  const preserved=changeSchedule(next,{start:'2026-10-19',weekdays:[1],expectedUpdatedAt:'b'},'c','2026-10-03');
  assert.deepEqual(preserved.rules.at(-1).times,{1:{start:'14:00',end:'15:30'}});
- for(const time of [{start:'09:59',end:'11:00'},{start:'21:00',end:'22:01'},{start:'14:00',end:'14:00'},{start:'15:00',end:'14:00'},{start:'10:00',end:''},{start:'14:99',end:'15:00'}])assert.throws(()=>changeSchedule(old,{start:'2026-10-12',weekdays:[1],times:{1:time},expectedUpdatedAt:'a'},'b','2026-10-03'),/시간/);
+ for(const time of [{start:'09:59',end:'11:00'},{start:'21:00',end:'22:01'},{start:'14:00',end:'14:00'},{start:'15:00',end:'14:00'},{start:'',end:'11:00'},{start:'14:99',end:'15:00'}])assert.throws(()=>changeSchedule(old,{start:'2026-10-12',weekdays:[1],times:{1:time},expectedUpdatedAt:'a'},'b','2026-10-03'),/시간/);
  const cleared=changeSchedule(old,{start:'2026-10-12',weekdays:[1],times:{1:{start:'',end:''}},expectedUpdatedAt:'a'},'b','2026-10-03');
  assert.equal(lessonTimeOn(cleared,'2026-10-12'),undefined);
  assert.equal(old.rules.length,1);
@@ -1792,4 +1792,65 @@ test('weekly timetable includes simultaneous courses, untimed students and cours
  assert.equal(timetableLessons(data,weekDays('2026-10-21')).lessons.some(l=>l.student.id==='d'),false);
  assert.equal(timetableLessons(data,weekDays('2026-10-26')).lessons.some(l=>l.student.id==='d'),true);
  assert.deepEqual(data,before);
+});
+
+test('timetable drag adds ten-minute starts, moves weekly days and preserves sibling weekdays and lesson lengths',()=>{
+ const {placeTimetableLesson:place,timetableLessons,weekDays}=setup().load('timetable');
+ const old={rules:[{start:'2026-10-01',weekdays:[1,3],times:{1:{start:'11:00',end:'12:00'},3:{start:'14:00',end:'15:00'}}}],moves:[],updatedAt:'a'};
+ const moved=place(old,{from:'2026-10-12',to:'2026-10-13',time:'11:40',expectedUpdatedAt:'a'},[],'b','2026-10-03');
+ assert.deepEqual(moved.rules.at(-1).weekdays,[2,3]);
+ assert.deepEqual(moved.rules.at(-1).times,{2:{start:'11:40',end:'12:40'},3:{start:'14:00',end:'15:00'}});
+ assert.deepEqual(old.rules[0].weekdays,[1,3]);
+ const added=place(undefined,{to:'2026-10-13',time:'21:50',expectedUpdatedAt:''},[],'a','2026-10-03');
+ assert.deepEqual(added.rules[0].times,{2:{start:'21:50',end:''}});
+ const retimed=place(added,{from:'2026-10-13',to:'2026-10-13',time:'11:40',expectedUpdatedAt:'a'},[],'b','2026-10-03');
+ assert.equal(retimed.rules[0].times[2].start,'11:40');
+ const next=timetableLessons({students:[{id:'p',name:'테스트'}],accounts:[{id:'p',active:true,schedule:retimed}]},weekDays('2026-10-20'));
+ assert.equal(next.lessons[0].time.start,'11:40');
+ for(const patch of [{to:'2026-10-02'},{to:'2026-10-05'},{time:'11:45'},{time:'22:00'},{expectedUpdatedAt:'stale'},{to:'2026-10-14'},{time:'21:50'}])assert.throws(()=>place(old,{from:'2026-10-12',to:'2026-10-13',time:'11:40',expectedUpdatedAt:'a',...patch},[],'b','2026-10-03'));
+ assert.throws(()=>place(old,{from:'2026-10-12',to:'2026-10-13',time:'11:40',expectedUpdatedAt:'a'},[{day:'2026-10-12',status:'present',units:1}],'b','2026-10-03'),/출석/);
+ const once={...old,moves:[{from:'2026-10-12',to:'2026-10-13'}]};
+ const changed=place(once,{from:'2026-10-13',to:'2026-10-15',time:'13:20',expectedUpdatedAt:'a'},[],'b','2026-10-03');
+ assert.deepEqual(changed.rules,once.rules);
+ assert.deepEqual(changed.moves,[{from:'2026-10-12',to:'2026-10-15',time:{start:'13:20',end:'14:20'}}]);
+ const {lessonTimeOn}=setup().load('schedule');
+ assert.deepEqual(lessonTimeOn(changed,'2026-10-15'),{start:'13:20',end:'14:20'});
+});
+
+test('timetable excludes withdrawn courses and includes a paused course only after its end date',()=>{
+ const {timetableLessons,weekDays}=setup().load('timetable');
+ const schedule={rules:[{start:'2026-10-01',weekdays:[1,2,3,4,5],times:{1:{start:'10:00',end:''}}}],moves:[]};
+ const data={students:[{id:'p',sourceStudentId:'same',name:'테스트 피아노'},{id:'d',sourceStudentId:'same',name:'테스트 드럼',lifecycle:{status:'withdrawn'}},{id:'v',name:'휴원',lifecycle:{status:'paused',until:'2026-10-14'}}],accounts:['p','d','v'].map(id=>({id,active:true,schedule}))};
+ const result=timetableLessons(data,weekDays('2026-10-14'));
+ assert.equal(result.lessons.some(l=>l.student.id==='d'),false);
+ assert.equal(result.unset.some(l=>l.student.id==='d'),false);
+ assert.equal(result.lessons.filter(l=>l.student.id==='p').length,5);
+ assert.deepEqual(result.lessons.filter(l=>l.student.id==='v').map(l=>l.day),['2026-10-15','2026-10-16']);
+});
+
+test('timetable placements persist atomically without changing balances and reject stale or inactive courses',async()=>{
+ const s=setup();await s.seed('piano',7);await s.seed('drum',3);
+ const day=s.load('model').seoulDay(),accountBefore=structuredClone(s.records.get('opsAccounts/piano'));
+ const input={action:'placeTimetableLesson',studentId:'piano',to:day,time:'11:40',expectedUpdatedAt:''};
+ const changes=await s.service.saveSchedule(input,'owner');
+ assert.equal(changes.accounts[0].schedule.rules[0].times[new Date(day+'T00:00:00Z').getUTCDay()].start,'11:40');
+ const accountAfter={...s.records.get('opsAccounts/piano')};delete accountAfter.schedule;
+ assert.deepEqual(accountAfter,accountBefore);
+ assert.equal(s.records.get('opsAccounts/drum').remaining,3);
+ assert.equal([...s.records.keys()].some(k=>/^ops(Attendance|Invoices|Notices)\//.test(k)),false);
+ await assert.rejects(s.service.saveSchedule(input,'owner'),/변경/);
+ const expectedUpdatedAt=s.records.get('opsAccounts/piano').schedule.updatedAt;
+ s.records.get('students/piano').courseLifecycles={piano:{status:'withdrawn'}};
+ await assert.rejects(s.service.saveSchedule({...input,time:'12:00',expectedUpdatedAt},'owner'),/휴원·퇴원/);
+});
+
+
+test('building a weekly timetable in reverse weekday order preserves all placements',()=>{
+ const {placeTimetableLesson:place}=setup().load('timetable');
+ let schedule;
+ for(const [to,time,stamp] of [['2026-10-16','14:00','a'],['2026-10-13','11:40','b'],['2026-10-12','10:20','c']])schedule=place(schedule,{to,time,expectedUpdatedAt:schedule?.updatedAt||''},[],stamp,'2026-10-03');
+ assert.equal(schedule.rules.length,1);assert.equal(schedule.rules[0].start,'2026-10-12');
+ assert.deepEqual(schedule.rules[0].weekdays,[1,2,5]);
+ assert.equal(schedule.rules[0].times[5].start,'14:00');
+ assert.equal(schedule.rules[0].times[2].start,'11:40');
 });

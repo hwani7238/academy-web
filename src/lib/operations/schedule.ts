@@ -2,7 +2,7 @@ import { seoulDay, validDay, type Attendance } from './model';
 import { academyClosed } from './academy-calendar';
 export type LessonTime = { start: string; end: string };
 export type ScheduleRule = { start: string; weekdays: number[]; times?: Record<string, LessonTime> };
-export type LessonSchedule = { rules: ScheduleRule[]; moves: { from: string; to: string }[]; updatedAt: string };
+export type LessonSchedule = { rules: ScheduleRule[]; moves: { from: string; to: string; time?: LessonTime }[]; updatedAt: string };
 export const WEEKDAYS = ['일', '월', '화', '수', '목', '금', '토'];
 export const WEEK_ORDER = [1, 2, 3, 4, 5, 6, 0];
 export function ruleOn(schedule: LessonSchedule | undefined, day: string) {
@@ -64,18 +64,21 @@ export function moveLesson(old: LessonSchedule | undefined, input: Record<string
   if (records.some(r=>r.day===to && r.status!=='cancelled')) throw Error('옮길 날짜에 출결·여행 기록이 있습니다. 다른 날짜를 선택하거나 해당 기록을 먼저 취소해주세요.');
   const moves=old.moves.filter(m=>m.from!==lesson.origin);
   const originIsRegular=ruleOn(old,lesson.origin)?.weekdays.includes(new Date(`${lesson.origin}T00:00:00Z`).getUTCDay());
-  if (to!==lesson.origin || !originIsRegular) moves.push({from:lesson.origin,to});
+  const time=old.moves.find(m=>m.to===from)?.time;
+  if (to!==lesson.origin || !originIsRegular || time) moves.push({from:lesson.origin,to,...(time?{time}:{})});
   return {...old,moves,updatedAt:stamp};
 }
 
 export function validLessonTime(time: LessonTime): boolean {
   return typeof time.start==='string' && typeof time.end==='string' &&
-    /^([01]\d|2[0-3]):[0-5]\d$/.test(time.start) && /^([01]\d|2[0-3]):[0-5]\d$/.test(time.end) &&
-    time.start>='10:00' && time.end<='22:00' && time.start<time.end;
+     /^([01]\d|2[0-3]):[0-5]\d$/.test(time.start) && time.start>='10:00' && time.start<'22:00' &&
+    (!time.end || (/^([01]\d|2[0-3]):[0-5]\d$/.test(time.end) && time.end<='22:00' && time.start<time.end));
 }
 export function lessonTimeOn(schedule: LessonSchedule | undefined, day: string): LessonTime | undefined {
   const lesson=plannedLesson(schedule,day);
   if(!lesson)return;
+  const override=schedule?.moves.find(m=>m.to===day)?.time;
+  if(override)return override;
   // A one-off date move retains the original lesson's time.
   const weekday=new Date(`${lesson.origin}T00:00:00Z`).getUTCDay();
   return ruleOn(schedule,lesson.origin)?.times?.[weekday];

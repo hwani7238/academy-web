@@ -172,7 +172,7 @@ export function Operations({ demo = false }: { demo?: boolean }) {
     <nav className="ops-tabs" aria-label="관리 메뉴">{tabs.map(([id, label]) => <button key={id} aria-current={tab === id ? 'page' : undefined} onClick={() => { setTab(id); if(id==='billing' && day.slice(0,7)!==seoulDay().slice(0,7))setDay(seoulDay()); setMessage(''); }}>{label}{id === 'billing' && open.length > 0 && <b>{open.length}</b>}{id === 'today' && <b>{presentCount}</b>}</button>)}</nav>
     {error && <p className="error" role="alert">{error} {!demo && loadedDay !== day && <button onClick={() => void refresh()}>다시 불러오기</button>}</p>}{message && <p className="success" role="status">{message}</p>}
     <div className={demo && tab === 'today' ? 'workspace-with-kiosk' : ''}><section className="surface">
-    {tab === 'timetable' && <Timetable data={data} busy={busy} edit={setScheduleAccount}/> }
+    {tab === 'timetable' && <Timetable data={data} busy={busy} edit={setScheduleAccount} save={act}/> }
     {tab === 'announcements' && <Announcements user={user} data={data} demo={demo}/> }
     {tab === 'monthly' && <MonthlyAttendance data={data} day={day} busy={busy} loading={!demo && loadedDay !== day} onDayChange={setDay} save={act} />}
     {tab === 'today' && <><div className="section-head"><div><h2>당일 출석 현황</h2><p>출석 체크 화면에서 번호로 출석한 학생만 표시합니다. 여행·결석·수동 기록은 월별 출석표에서 확인하세요.</p></div></div>
