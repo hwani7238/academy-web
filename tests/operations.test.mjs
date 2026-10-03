@@ -1761,3 +1761,35 @@ test('monthly payment sorting returns to today and never silently falls back to 
  assert.equal(attendanceMonthDay('2026-01-31',1,today),'2026-02-28');
  assert.equal(attendanceMonthDay('2026-12-15',1,today),'2027-01-15');
 });
+
+test('lesson times validate, preserve old clients and effective dates, and move with their original lesson',()=>{
+ const s=setup(),{changeSchedule,lessonTimeOn}=s.load('schedule');
+ const old={rules:[{start:'2026-10-01',weekdays:[1,3],times:{1:{start:'10:00',end:'11:00'},3:{start:'21:15',end:'22:00'}}}],moves:[],updatedAt:'a'};
+ const next=changeSchedule(old,{start:'2026-10-12',weekdays:[1,3],times:{1:{start:'14:00',end:'15:30'},3:{start:'21:15',end:'22:00'}},expectedUpdatedAt:'a'},'b','2026-10-03');
+ assert.deepEqual(lessonTimeOn(next,'2026-10-07'),{start:'21:15',end:'22:00'});
+ assert.deepEqual(lessonTimeOn(next,'2026-10-12'),{start:'14:00',end:'15:30'});
+ const moved={...next,moves:[{from:'2026-10-12',to:'2026-10-13'}]};
+ assert.equal(lessonTimeOn(moved,'2026-10-12'),undefined);
+ assert.deepEqual(lessonTimeOn(moved,'2026-10-13'),{start:'14:00',end:'15:30'});
+ const preserved=changeSchedule(next,{start:'2026-10-19',weekdays:[1],expectedUpdatedAt:'b'},'c','2026-10-03');
+ assert.deepEqual(preserved.rules.at(-1).times,{1:{start:'14:00',end:'15:30'}});
+ for(const time of [{start:'09:59',end:'11:00'},{start:'21:00',end:'22:01'},{start:'14:00',end:'14:00'},{start:'15:00',end:'14:00'},{start:'10:00',end:''},{start:'14:99',end:'15:00'}])assert.throws(()=>changeSchedule(old,{start:'2026-10-12',weekdays:[1],times:{1:time},expectedUpdatedAt:'a'},'b','2026-10-03'),/시간/);
+ const cleared=changeSchedule(old,{start:'2026-10-12',weekdays:[1],times:{1:{start:'',end:''}},expectedUpdatedAt:'a'},'b','2026-10-03');
+ assert.equal(lessonTimeOn(cleared,'2026-10-12'),undefined);
+ assert.equal(old.rules.length,1);
+});
+test('weekly timetable includes simultaneous courses, untimed students and course-level leave without mutating records',()=>{
+ const {weekDays,timetableLessons,lessonSlot}=setup().load('timetable');
+ assert.deepEqual(weekDays('2026-11-01'),['2026-10-26','2026-10-27','2026-10-28','2026-10-29','2026-10-30','2026-10-31','2026-11-01']);
+ const days=weekDays('2026-10-14'),schedule={rules:[{start:'2026-10-01',weekdays:[1],times:{1:{start:'14:15',end:'15:00'}}}],moves:[]};
+ const data={students:[{id:'p',name:'가나 · 피아노',sourceStudentId:'same'},{id:'d',name:'가나 · 드럼',sourceStudentId:'same',lifecycle:{status:'paused',until:'2026-10-20'}},{id:'v',name:'다라 · 보컬'},{id:'u',name:'마바 · 기타'},{id:'new',name:'신규'}],accounts:[{id:'p',active:true,schedule},{id:'d',active:true,schedule},{id:'v',active:true,schedule},{id:'u',active:true,schedule:{...schedule,rules:[{start:'2026-10-01',weekdays:[1]}]}}]};
+ const before=structuredClone(data),result=timetableLessons(data,days);
+ assert.deepEqual(result.lessons.map(l=>l.student.id).sort(),['p','u','v']);
+ assert.deepEqual(result.unset.map(l=>l.student.id).sort(),['new','u']);
+ assert.equal(result.lessons.filter(l=>l.time?.start==='14:15').length,2);
+ assert.equal(lessonSlot({start:'14:15',end:'15:00'}),8);
+ assert.equal(lessonSlot({start:'21:59',end:'22:00'}),23);
+ assert.equal(timetableLessons(data,weekDays('2026-10-21')).lessons.some(l=>l.student.id==='d'),false);
+ assert.equal(timetableLessons(data,weekDays('2026-10-26')).lessons.some(l=>l.student.id==='d'),true);
+ assert.deepEqual(data,before);
+});

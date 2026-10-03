@@ -27,6 +27,7 @@ import { InvoiceEditDialog } from './InvoiceEditDialog';
 import { InvoiceDialog } from './InvoiceDialog';
 import { RegisterStudent } from './RegisterStudent';
 import { GROUPS, groupName, compareGroups, compareStudents, compareNames, displayCourseName, displayEnrollmentName } from '@/lib/operations/student-order';
+import { Timetable } from './Timetable';
 import { MonthlyAttendance } from './MonthlyAttendance';
 import { CheckIn } from './CheckIn';
 import { checkInName } from '@/lib/operations/course-label';
@@ -158,7 +159,7 @@ export function Operations({ demo = false }: { demo?: boolean }) {
   const students = activeStudents.filter(s => (s.name.includes(search.trim()) || s.phone.includes(search.trim())) && (!subject || groupName(s) === subject)).sort((a, b) => compareGroups(groupName(a), groupName(b)) || compareStudents(a, b));
   const account = panel?.type === 'account' ? panel.initial : undefined;
   const student = panel?.type === 'account' ? data.students.find(s => s.id === panel.id) : undefined;
-  const tabs = [['students', '총 등록 현황'], ['monthly', '월별 출석표'], ['billing', '청구·수납'], ['today', '당일 출석 현황'], ['announcements', '카카오 공지'], ['notices', '알림 내역'], ['devices', '출석 기기'], ['inactive', '퇴원 및 휴원']];
+  const tabs = [['students', '총 등록 현황'], ['monthly', '월별 출석표'], ['billing', '청구·수납'], ['today', '당일 출석 현황'], ['timetable', '총 시간표'], ['announcements', '카카오 공지'], ['notices', '알림 내역'], ['devices', '출석 기기'], ['inactive', '퇴원 및 휴원']];
   return <div className="whee-ops operations">
     {demo && <div className="demo-banner">가상 학생 체험 · 실제 학생 정보와 연결되지 않으며 메시지·결제가 발생하지 않습니다. <button onClick={() => { const next = sample(); dataRef.current = next; setData(next); setPanel(null); setMessage('체험을 초기화했습니다.'); }}>체험 초기화</button></div>}
     <header className="ops-header"><div><p className="brand">WHEE MUSIC</p><h1>출석·수납 관리</h1></div><div className="header-actions"><span className="subtle">{demo ? '원장님 화면 체험' : user?.email}</span><a href={demo ? '/check-in/demo' : '/check-in'} target="_blank" rel="noreferrer">출석 화면 ↗</a></div></header>
@@ -171,6 +172,7 @@ export function Operations({ demo = false }: { demo?: boolean }) {
     <nav className="ops-tabs" aria-label="관리 메뉴">{tabs.map(([id, label]) => <button key={id} aria-current={tab === id ? 'page' : undefined} onClick={() => { setTab(id); if(id==='billing' && day.slice(0,7)!==seoulDay().slice(0,7))setDay(seoulDay()); setMessage(''); }}>{label}{id === 'billing' && open.length > 0 && <b>{open.length}</b>}{id === 'today' && <b>{presentCount}</b>}</button>)}</nav>
     {error && <p className="error" role="alert">{error} {!demo && loadedDay !== day && <button onClick={() => void refresh()}>다시 불러오기</button>}</p>}{message && <p className="success" role="status">{message}</p>}
     <div className={demo && tab === 'today' ? 'workspace-with-kiosk' : ''}><section className="surface">
+    {tab === 'timetable' && <Timetable data={data} busy={busy} edit={setScheduleAccount}/> }
     {tab === 'announcements' && <Announcements user={user} data={data} demo={demo}/> }
     {tab === 'monthly' && <MonthlyAttendance data={data} day={day} busy={busy} loading={!demo && loadedDay !== day} onDayChange={setDay} save={act} />}
     {tab === 'today' && <><div className="section-head"><div><h2>당일 출석 현황</h2><p>출석 체크 화면에서 번호로 출석한 학생만 표시합니다. 여행·결석·수동 기록은 월별 출석표에서 확인하세요.</p></div></div>

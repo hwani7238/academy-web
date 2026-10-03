@@ -1,6 +1,7 @@
 import { seoulDay, validDay, type Attendance } from './model';
 import { academyClosed } from './academy-calendar';
-export type ScheduleRule = { start: string; weekdays: number[] };
+export type LessonTime = { start: string; end: string };
+export type ScheduleRule = { start: string; weekdays: number[]; times?: Record<string, LessonTime> };
 export type LessonSchedule = { rules: ScheduleRule[]; moves: { from: string; to: string }[]; updatedAt: string };
 export const WEEKDAYS = ['일', '월', '화', '수', '목', '금', '토'];
 export const WEEK_ORDER = [1, 2, 3, 4, 5, 6, 0];
@@ -32,7 +33,21 @@ export function changeSchedule(old: LessonSchedule | undefined, input: Record<st
   let rules=(old?.rules || []).filter(r=>r.start!==start);
   if (input.remove !== true) {
     if (!Array.isArray(input.weekdays) || input.weekdays.length>7 || input.weekdays.some(n=>!Number.isInteger(n)||n<0||n>6)) throw Error('수업 요일을 확인해주세요.');
-    rules=[...rules,{start,weekdays:WEEK_ORDER.filter(n=>(input.weekdays as number[]).includes(n))}];
+    const weekdays=WEEK_ORDER.filter(n=>(input.weekdays as number[]).includes(n));
+    // Older clients may save weekdays only; retain times for weekdays still selected.
+    const source=input.times===undefined ? ruleOn(old,start)?.times || {} : input.times;
+    if (!source || typeof source!=='object' || Array.isArray(source)) throw Error('수업 시간을 확인해주세요.');
+    const times: Record<string,LessonTime>={};
+    for(const day of weekdays){
+      const value=(source as Record<string,unknown>)[day];
+      if(value===undefined)continue;
+      if(!value || typeof value!=='object')throw Error('수업 시간을 확인해주세요.');
+      const time=value as LessonTime;
+      if(!time.start && !time.end)continue;
+      if(!validLessonTime(time))throw Error('수업 시간은 10:00~22:00 사이로, 종료는 시작보다 늦게 입력해주세요.');
+      times[day]={start:time.start,end:time.end};
+    }
+    rules=[...rules,{start,weekdays,...(Object.keys(times).length?{times}:{})}];
   } else if (!old?.rules.some(r=>r.start===start)) throw Error('변경할 일정이 없습니다.');
   return {rules:rules.sort((a,b)=>a.start.localeCompare(b.start)),moves:old?.moves || [],updatedAt:stamp};
 }
@@ -51,4 +66,17 @@ export function moveLesson(old: LessonSchedule | undefined, input: Record<string
   const originIsRegular=ruleOn(old,lesson.origin)?.weekdays.includes(new Date(`${lesson.origin}T00:00:00Z`).getUTCDay());
   if (to!==lesson.origin || !originIsRegular) moves.push({from:lesson.origin,to});
   return {...old,moves,updatedAt:stamp};
+}
+
+export function validLessonTime(time: LessonTime): boolean {
+  return typeof time.start==='string' && typeof time.end==='string' &&
+    /^([01]\d|2[0-3]):[0-5]\d$/.test(time.start) && /^([01]\d|2[0-3]):[0-5]\d$/.test(time.end) &&
+    time.start>='10:00' && time.end<='22:00' && time.start<time.end;
+}
+export function lessonTimeOn(schedule: LessonSchedule | undefined, day: string): LessonTime | undefined {
+  const lesson=plannedLesson(schedule,day);
+  if(!lesson)return;
+  // A one-off date move retains the original lesson's time.
+  const weekday=new Date(`${lesson.origin}T00:00:00Z`).getUTCDay();
+  return ruleOn(schedule,lesson.origin)?.times?.[weekday];
 }
