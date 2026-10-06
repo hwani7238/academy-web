@@ -150,3 +150,5 @@
 .whee-ops .timetable-selection{min-height:52px}.whee-ops .timetable-student-list button,.whee-ops button.timetable-lesson{touch-action:none;user-select:none;-webkit-user-select:none}
 
 .whee-ops .timetable-feedback{min-height:36px;margin:0!important}.whee-ops .timetable-feedback.has-error{color:#b42335;background:#fff2f3}
+
+.whee-ops .pass-history-row{display:grid;grid-template-columns:minmax(0,1fr) 90px 36px;gap:8px;align-items:end;margin:12px 0}.whee-ops .pass-history-row input{min-width:0;padding:8px}.whee-ops .pass-history-row label{font-size:12px}

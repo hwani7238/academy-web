@@ -1887,3 +1887,31 @@ test('regular timetable saves only schedule and excludes a withdrawn course in t
  s.records.get('students/piano').courseLifecycles={piano:{status:'withdrawn'}};
  await assert.rejects(s.service.saveSchedule({...input,expectedUpdatedAt:changes.accounts[0].schedule.updatedAt},'owner'),/휴원·퇴원/);
 });
+
+test('a 12-lesson September pass resets to a 16-lesson pass on October 2 without relabeling the previous final lesson',()=>{
+ const s=setup(),{attendanceSequence:sequence}=s.load('attendance-sequence'),{passCycleStarts}=s.load('pass-history');
+ const accounts=[{id:'p',planUnits:16,passHistory:[{start:'2026-09-01',units:12},{start:'2026-10-02',units:16}]}];
+ const legacy=[{studentId:'p',day:'2026-09-01',value:'1',color:''},{studentId:'p',day:'2026-09-22',value:'10',color:''}];
+ const row=day=>({studentId:'p',day,units:1,status:'present',at:day+'T06:00:00Z'}),records=['2026-09-30','2026-10-01','2026-10-02','2026-10-03'].map(row);
+ const result=sequence(accounts,records,legacy);
+ assert.equal(result.labels.get('p_2026-09-30'),'11');assert.equal(result.labels.get('p_2026-10-01'),'12');assert.equal(result.labels.get('p_2026-10-02'),'1');assert.equal(result.labels.get('p_2026-10-03'),'2');
+ const starts=passCycleStarts(accounts),prior=sequence(accounts,[row('2026-09-30')],legacy,{positions:{},cycleStarts:starts.filter(r=>r.day<'2026-10-01')});
+ const current=sequence(accounts,records.filter(r=>r.day>='2026-10-01'),[],{...prior,cycleStarts:starts.filter(r=>r.day>='2026-10-01')});
+ assert.deepEqual([...current.labels],[...result.labels].filter(([key])=>key>='p_2026-10-01'));
+ const {invoiceCycleStart}=s.load('billing-display');
+ assert.equal(invoiceCycleStart({id:'paid',studentId:'p',status:'paid',createdAt:'2026-10-01T08:58:36Z'},current.cycleFirstDays,current.firstLessonTimes),'2026-10-02');
+ assert.equal(sequence(accounts,[row('2026-09-30')],legacy).positions.p,11);
+});
+test('pass history correction preserves remaining, payments and configuration while auditing the change',async()=>{
+ const s=setup();await s.seed('p',14);s.records.get('opsAccounts/p').planUnits=16;
+ const before=structuredClone(s.records.get('opsAccounts/p'));
+ const history=[{start:'2026-09-01',units:12},{start:'2026-10-02',units:16}];
+ await s.service.savePassHistory({studentId:'p',history,expectedUpdatedAt:before.updatedAt},'owner');
+ const after=s.records.get('opsAccounts/p');assert.deepEqual(after.passHistory,history);assert.equal(after.remaining,14);assert.equal(after.planUnits,16);assert.equal(after.planAmount,before.planAmount);
+ assert.equal([...s.records.keys()].some(k=>/^ops(Attendance|Invoices|Payments|Notices)\//.test(k)),false);
+ await assert.rejects(s.service.savePassHistory({studentId:'p',history,expectedUpdatedAt:before.updatedAt},'owner'),/변경/);
+ await s.service.configure({studentId:'p',planUnits:16,planAmount:250000,phone:'01000001234',phones:['1234'],active:true},'owner');
+ assert.deepEqual(s.records.get('opsAccounts/p').passHistory,history);
+ const {passHistoryInput}=s.load('pass-history');
+ for(const history of [[],[{start:'bad',units:16}],[{start:'2999-01-01',units:16}],[{start:'2026-10-02',units:12}],[{start:'2026-10-02',units:16},{start:'2026-10-02',units:16}]])assert.throws(()=>passHistoryInput(history,16,'2026-10-06'));
+});

@@ -1,3 +1,4 @@
+import {passHistoryInput,passCycleStarts} from '@/lib/operations/pass-history';
 import {placeTimetableLesson,placeRegularTimetableLesson} from '@/lib/operations/timetable';
 import { guardianPhone, contactAccount } from '@/lib/operations/student-contact';
 import { invoiceForPlan } from '@/lib/operations/plan-invoice';
@@ -52,6 +53,10 @@ export function demoAction(current: Snapshot, input: Record<string, unknown>): {
     if(!row||!account)throw Error('이전 출결을 찾을 수 없습니다.');
     if(row.revision!==input.expectedRevision)throw Error('이전 출결이 변경됐습니다.');
     Object.assign(row,legacyCorrectionInput(input),{revision:crypto.randomUUID()});
+  } else if(input.action==='savePassHistory'){
+    if(!account||account.updatedAt!==input.expectedUpdatedAt)throw Error('수강 정보가 변경됐습니다. 다시 확인해주세요.');
+    account.passHistory=passHistoryInput(input.history,account.planUnits);account.updatedAt=at;
+    data.sequenceContext={...data.sequenceContext,positions:data.sequenceContext?.positions||{},cycleStarts:[...(data.sequenceContext?.cycleStarts||[]).filter(r=>r.studentId!==account.id),...passCycleStarts([account])]};
   } else if(input.action==='saveSchedule'||input.action==='moveLesson'||input.action==='placeTimetableLesson'||input.action==='placeRegularTimetableLesson'){
     if(!account)throw Error('먼저 수강 등록을 완료해주세요.');
     const stamp=new Date(Math.max(Date.now(),Date.parse(account.schedule?.updatedAt||'')+1||0)).toISOString();

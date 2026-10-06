@@ -1,3 +1,4 @@
+import {passCycleStarts} from '@/lib/operations/pass-history';
 import { courseGroup, type Imported } from '@/lib/operations/course-label';
 import { correctedLegacy, type LegacyCorrection } from '@/lib/operations/legacy-correction';
 import { attendanceSequence } from '@/lib/operations/attendance-sequence';
@@ -72,7 +73,7 @@ export async function GET(request: Request) {
     const invoiceRows = namedRows(invoices) as Snapshot['invoices'];
     const correctionsById = new Map(legacyCorrections.docs.map(d => [d.id, d.data() as LegacyCorrection]));
     const allLegacy = [...legacyCells.values()].filter((v): v is NonNullable<typeof v> => Boolean(v)).map(row => correctedLegacy(row, correctionsById.get(`${row.studentId}_${row.day}`)));
-    const cycleStarts = cycleInvoices.docs.map(d=>d.data()).filter(v=>v.status!=='cancelled' && typeof v.cycleStart==='string').map(v=>({studentId:String(v.studentId),day:String(v.cycleStart)}));
+    const cycleStarts = [...passCycleStarts(accounts.docs.map(d=>({...d.data(),id:d.id}) as Account)), ...cycleInvoices.docs.map(d=>d.data()).filter(v=>v.status!=='cancelled' && typeof v.cycleStart==='string').map(v=>({studentId:String(v.studentId),day:String(v.cycleStart)}))];
     const beforeMonth = `${month}-01`;
     const priorSequence = attendanceSequence(accounts.docs.map(d=>({...d.data(),id:d.id}) as Account), priorAttendance.docs.map(d=>d.data() as Attendance), allLegacy.filter(r=>r.day<beforeMonth), {positions:{},cycleStarts:cycleStarts.filter(r=>r.day<beforeMonth)});
     const sequenceContext = { positions: priorSequence.positions, missedLessons: priorSequence.missedLessons, cycleFirstDays: priorSequence.cycleFirstDays, firstLessonTimes: priorSequence.firstLessonTimes, cycleStarts:cycleStarts.filter(r=>r.day>=beforeMonth && r.day<end.toISOString().slice(0,10)) };
@@ -94,6 +95,7 @@ export async function POST(request: Request) {
     switch (input.action) {
       case 'correctLegacyAttendance': return Response.json(await service.correctLegacyAttendance(input,actor));
       case 'deleteEnrollment': case 'restoreEnrollment': return Response.json({ok:true,changes:await service.deleteEnrollment(input,actor)});
+      case 'savePassHistory': await service.savePassHistory(input,actor); return Response.json({ok:true});
       case 'saveSchedule': case 'moveLesson': case 'placeTimetableLesson': case 'placeRegularTimetableLesson': return Response.json({ok:true,changes:await service.saveSchedule(input,actor)});
       case 'saveStudentInfo': await service.saveStudentInfo(input,actor); return Response.json({ok:true});
       case 'updateStudentPhone': return Response.json({ok:true,changes:await service.updateStudentPhone(input,actor)});

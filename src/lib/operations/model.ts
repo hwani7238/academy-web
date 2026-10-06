@@ -1,5 +1,6 @@
 import type { Lifecycle } from './lifecycle';
 export type Account = {
+  passHistory?: import('./pass-history').PassHistoryEntry[];
   schedule?: import('./schedule').LessonSchedule;
   attendanceGroup?: string; displaySubject?: string;
   sourceStudentId?: string; subject?: string; importId?: string; openingAsOf?: string;

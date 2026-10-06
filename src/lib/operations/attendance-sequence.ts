@@ -1,3 +1,4 @@
+import {passUnitsOn,passCycleStarts} from './pass-history';
 import type { Account, Attendance, Snapshot } from './model';
 import { legacyAttendanceAppearance } from './attendance-appearance';
 import { plannedLesson } from './schedule';
@@ -14,8 +15,8 @@ type Legacy = NonNullable<Snapshot['legacyAttendance']>[number];
 
 // Display-only chronology: neither payments nor current balances rewrite old lessons.
 // Imported numbers anchor the sequence; modern records take precedence on the same day.
-export function attendanceSequence(accounts: Pick<Account, 'id' | 'planUnits' | 'schedule'>[], records: RecordRow[], legacy: Legacy[], context?: SequenceContext) {
-  const plans = new Map(accounts.map(a => [a.id, a.planUnits]));
+export function attendanceSequence(accounts: Pick<Account, 'id' | 'planUnits' | 'schedule' | 'passHistory'>[], records: RecordRow[], legacy: Legacy[], context?: SequenceContext) {
+  const plans = new Map(accounts.map(a => [a.id, a]));
   const schedules = new Map(accounts.map(a => [a.id, a.schedule]));
   const positions = { ...context?.positions };
   const missedLessons = { ...context?.missedLessons };
@@ -30,9 +31,10 @@ export function attendanceSequence(accounts: Pick<Account, 'id' | 'planUnits' | 
   }
   for (const r of legacy) event(r.studentId, r.day).legacy = r;
   for (const r of records) event(r.studentId, r.day).record = r;
-  for (const r of context?.cycleStarts || []) event(r.studentId, r.day).start = true;
+  const lastDay=[...records,...legacy].reduce((last,r)=>r.day>last?r.day:last,'');
+  for (const r of context?.cycleStarts || passCycleStarts(accounts).filter(r=>r.day<=lastDay)) event(r.studentId, r.day).start = true;
   for (const e of [...days.values()].sort((a, b) => a.day.localeCompare(b.day))) {
-    const id = e.studentId, plan = plans.get(id), key = `${id}_${e.day}`;
+    const id = e.studentId, account = plans.get(id), plan = account ? passUnitsOn(account,e.day) : undefined, key = `${id}_${e.day}`;
     const status = e.record ? (e.record.status || 'present') : (e.legacy ? legacyAttendanceAppearance(e.legacy).tone : 'present');
     const missed = ['absent', 'travel', 'sick', 'late_cancel'].includes(status);
     function firstDay() {

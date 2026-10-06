@@ -1,3 +1,4 @@
+import {passHistoryInput} from './pass-history';
 import {placeTimetableLesson,placeRegularTimetableLesson} from './timetable';
 import { legacyAttendanceAppearance } from './attendance-appearance';
 import { guardianPhone, contactAccount } from './student-contact';
@@ -163,7 +164,7 @@ export async function configure(input: Record<string, unknown>, actor: string) {
     const overrideGroup=student.data()?.operationsCourseGroups?.[subject] as string|undefined;
     const overrideSubject=overrideGroup?(overrideGroup.includes('피아노')?'피아노':overrideGroup):undefined;
     const remaining = old ? old.remaining : integer(input.remaining, -1000, 1000, '현재 남은 횟수');
-    const saved = { id, ...(old?.schedule ? {schedule:old.schedule} : {}), ...(old?.importId ? { importId: old.importId, openingAsOf: old.openingAsOf } : {}), ...(old?.attendanceGroup ? { attendanceGroup: old.attendanceGroup } : {}), ...(old?.displaySubject ? { displaySubject: old.displaySubject } : {}), ...(subject ? { sourceStudentId, subject } : {}), name: subject ? `${student.data()?.name || '학생'} · ${subject}` : student.data()?.name || '학생', phone, checkinSuffixes: codes, planUnits, planAmount, remaining, openInvoiceId: old?.openInvoiceId || null, active: input.active !== false, autoBilling: input.autoBilling === true, updatedAt: now(), ...(overrideGroup?{attendanceGroup:overrideGroup,displaySubject:overrideSubject,name:`${student.data()?.name} · ${overrideSubject}`}:{}) };
+    const saved = { id, ...(old?.passHistory ? {passHistory:old.passHistory} : {}), ...(old?.schedule ? {schedule:old.schedule} : {}), ...(old?.importId ? { importId: old.importId, openingAsOf: old.openingAsOf } : {}), ...(old?.attendanceGroup ? { attendanceGroup: old.attendanceGroup } : {}), ...(old?.displaySubject ? { displaySubject: old.displaySubject } : {}), ...(subject ? { sourceStudentId, subject } : {}), name: subject ? `${student.data()?.name || '학생'} · ${subject}` : student.data()?.name || '학생', phone, checkinSuffixes: codes, planUnits, planAmount, remaining, openInvoiceId: old?.openInvoiceId || null, active: input.active !== false, autoBilling: input.autoBilling === true, updatedAt: now(), ...(overrideGroup?{attendanceGroup:overrideGroup,displaySubject:overrideSubject,name:`${student.data()?.name} · ${overrideSubject}`}:{}) };
     const firstInvoice = !old && input.firstBilling === true ? firstEnrollmentInvoice(saved as Account, validDay(input.firstLessonDate), saved.updatedAt) : null;
     let revisedInvoice: Invoice | undefined, invoiceBefore: Invoice | undefined;
     let billingNotice: FirebaseFirestore.DocumentSnapshot | undefined;
@@ -709,5 +710,18 @@ export async function saveSchedule(input: Record<string, unknown>, actor: string
   tx.update(ref,{schedule});
   audit(tx,db,actor,input.action==='moveLesson'?'move-lesson':'lesson-schedule',id,{before:account.schedule||null,after:schedule});
   return {accounts:[{...account,id,schedule}]};
+ });
+}
+
+export async function savePassHistory(input:Record<string,unknown>,actor:string){
+ const id=key(input.studentId),db=database(),ref=db.doc(`opsAccounts/${id}`);
+ return db.runTransaction(async tx=>{
+  const account=(await tx.get(ref)).data() as Account|undefined;
+  if(!account)throw Error('수강권을 찾을 수 없습니다.');
+  if(account.updatedAt!==input.expectedUpdatedAt)throw Error('수강 정보가 변경됐습니다. 창을 닫고 다시 확인해주세요.');
+  const passHistory=passHistoryInput(input.history,account.planUnits);
+  const updatedAt=new Date(Math.max(Date.now(),Date.parse(account.updatedAt)+1)).toISOString();
+  tx.update(ref,{passHistory,updatedAt});
+  audit(tx,db,actor,'pass-history',id,{before:account.passHistory||[],after:passHistory});
  });
 }
