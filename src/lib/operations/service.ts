@@ -257,7 +257,7 @@ export async function checkIn(studentId: string, digits: string, actor: string) 
     tx.set(attendanceRef, { id: attendanceId, studentId: id, name: account.name, day, at: now(), units, status: reservation ? 'makeup' : 'present', source: 'kiosk', note: reservation?.note || '', ...(reservation ? {relatedDay:reservation.relatedDay} : {}), updatedAt: now() });
     tx.update(ref, { ...account, remaining, openInvoiceId, updatedAt: now() });
     if (!previousNotice?.exists) enqueue(tx, db, `attendance_${attendanceId}`, account, 'attendance', { student_name: account.name, attendance_time: new Date().toLocaleTimeString('ko-KR', { timeZone: 'Asia/Seoul', hour: '2-digit', minute: '2-digit', hour12: false }) });
-    audit(tx, db, actor, 'check-in', id, { attendanceId, units, remaining, ...(reservation ? {relatedDay:reservation.relatedDay, completedReservation:true} : {}) });
+    audit(tx, db, actor, 'check-in', id, { attendanceId, units, remaining, ...(activation?{passCreditUnits:account.planUnits}:{}), ...(reservation ? {relatedDay:reservation.relatedDay, completedReservation:true} : {}) });
     return { duplicate: false, name };
   });
 }
@@ -486,7 +486,7 @@ export async function recordAttendance(input: Record<string, unknown>, actor: st
     const updatedAccount={...account,remaining,openInvoiceId,updatedAt:stamp};
     tx.set(ref, attendance);
     tx.update(accountRef, { ...account, remaining, openInvoiceId, updatedAt: stamp });
-    audit(tx, db, actor, 'record-attendance', studentId, { attendanceId: id, before: old?.units || 0, ...values, remaining });
+    audit(tx, db, actor, 'record-attendance', studentId, { attendanceId: id, before: old?.units || 0, ...values, remaining, ...(activation?{passCreditUnits:account.planUnits}:{}) });
     if(account.nextPass)return;
     const invoices:Invoice[]=openInvoiceId && openInvoiceId!==account.openInvoiceId ? [{id:openInvoiceId,studentId:account.id,name:account.name,units:account.planUnits,amount:account.planAmount,paid:0,status:'open',needsReview:false,createdAt:stamp}] : currentInvoice?.exists ? [{...currentInvoice.data(),id:currentInvoice.id,...(review?{needsReview:true}:{})} as Invoice] : [];
     if(activation)return; // Full refresh also loads the new cycle boundary and invoice date.
