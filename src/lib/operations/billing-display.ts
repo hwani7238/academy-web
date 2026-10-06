@@ -9,6 +9,7 @@ export const paymentDay = (payment: Payment) => payment.paymentDate || seoulDay(
 export function invoiceCycleStart(invoice: Invoice, cycleFirstDays: Record<string, string[]>, firstLessonTimes: Record<string, string> = {}) {
   if (invoice.lessonDate) return invoice.lessonDate;
   if (invoice.cycleStart) return invoice.cycleStart;
+  if (invoice.reservedPass) return undefined;
   const created = new Date(invoice.createdAt);
   // A renewal can be paid before its first lesson on the same day. Never attach
   // an invoice issued after the final paid lesson to that already completed pass.

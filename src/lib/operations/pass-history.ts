@@ -13,8 +13,8 @@ export function passHistoryInput(value:unknown,currentUnits:number,today=seoulDa
  if(rows.at(-1)!.units!==currentUnits)throw Error('마지막 수강권 횟수는 현재 수강 설정과 같아야 합니다. 현재 등록 횟수를 먼저 확인해주세요.');
  return rows;
 }
-export function passUnitsOn(account:Pick<Account,'planUnits'|'passHistory'>,day:string){
- return account.passHistory?.filter(r=>r.start<=day).sort((a,b)=>b.start.localeCompare(a.start))[0]?.units||account.planUnits;
+export function passUnitsOn(account:Pick<Account,'planUnits'|'passHistory'|'initialPlanUnits'>,day:string){
+ return account.passHistory?.filter(r=>r.start<=day).sort((a,b)=>b.start.localeCompare(a.start))[0]?.units||account.initialPlanUnits||account.planUnits;
 }
 export function passCycleStarts(accounts:Pick<Account,'id'|'passHistory'>[]){
  return accounts.flatMap(a=>(a.passHistory||[]).map(r=>({studentId:a.id,day:r.start})));

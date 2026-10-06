@@ -1915,3 +1915,83 @@ test('pass history correction preserves remaining, payments and configuration wh
  const {passHistoryInput}=s.load('pass-history');
  for(const history of [[],[{start:'bad',units:16}],[{start:'2999-01-01',units:16}],[{start:'2026-10-02',units:12}],[{start:'2026-10-02',units:16},{start:'2026-10-02',units:16}]])assert.throws(()=>passHistoryInput(history,16,'2026-10-06'));
 });
+
+test('next pass reservation leaves current and other courses intact and creates an approval-only separate invoice',async()=>{
+ const s=setup();await s.seed('piano',3);await s.seed('drum',4);
+ await s.service.createCurrentCycleInvoice({studentId:'piano',cycleStart:'2026-09-01',expectedUpdatedAt:s.records.get('opsAccounts/piano').updatedAt},'owner');
+ const before=structuredClone(s.records.get('opsAccounts/piano')),drum=structuredClone(s.records.get('opsAccounts/drum'));
+ await s.service.saveNextPass({studentId:'piano',expectedUpdatedAt:before.updatedAt,units:16,amount:250000,mode:'depleted'},'owner');
+ const a=s.records.get('opsAccounts/piano'),i=s.records.get(`opsInvoices/${a.nextPass.invoiceId}`);
+ assert.equal(a.planUnits,8);assert.equal(a.planAmount,160000);assert.equal(a.remaining,3);assert.equal(a.openInvoiceId,before.openInvoiceId);
+ assert.equal(i.units,16);assert.equal(i.amount,250000);assert.equal(i.creditUnits,0);assert.equal(i.reservedPass,true);
+ assert.equal([...s.records.keys()].filter(k=>k.startsWith('opsInvoices/')).length,2);
+ assert.deepEqual(s.records.get('opsAccounts/drum'),drum);assert.equal([...s.records.keys()].some(k=>k.startsWith('opsNotices/')),false);
+ assert.equal(s.load('billing-display').invoiceCycleStart(i,{piano:['2999-01-01']}),undefined);
+ await assert.rejects(s.service.saveNextPass({studentId:'piano',expectedUpdatedAt:before.updatedAt,units:12,amount:210000,mode:'depleted'},'owner'),/변경/);
+});
+test('prepaid reserved pass activates once on kiosk arrival with new sequence and no second credit at payment',async()=>{
+ const s=setup();await s.seed('piano',0);const today=s.load('model').seoulDay();
+ await s.service.saveNextPass({studentId:'piano',expectedUpdatedAt:s.records.get('opsAccounts/piano').updatedAt,units:16,amount:250000,mode:'depleted'},'owner');
+ const invoiceId=s.records.get('opsAccounts/piano').nextPass.invoiceId,i=s.records.get(`opsInvoices/${invoiceId}`);
+ await s.service.payment({invoiceId,requestId:'prepaid',amount:250000,method:'카드',expectedInvoiceUpdatedAt:i.updatedAt},'owner');
+ assert.equal(s.records.get('opsAccounts/piano').remaining,0);
+ const results=await Promise.all([s.service.checkIn('piano','1234','device'),s.service.checkIn('piano','1234','device')]);
+ assert.equal(results.filter(r=>r.duplicate).length,1);
+ const a=s.records.get('opsAccounts/piano');assert.equal(a.remaining,15);assert.equal(a.planUnits,16);assert.equal(a.planAmount,250000);assert.equal(a.nextPass,null);assert.equal(a.openInvoiceId,null);
+ assert.equal(s.records.get(`opsInvoices/${invoiceId}`).cycleStart,today);
+ const record=s.records.get(`opsAttendance/piano_${today}`),seq=s.load('attendance-sequence').attendanceSequence([a],[record],[]);
+ assert.equal(seq.labels.get(`piano_${today}`),'1');
+ await s.service.recordAttendance({studentId:'piano',day:today,status:'cancelled',units:0,expectedUpdatedAt:record.updatedAt},'owner');
+ assert.equal(s.records.get('opsAccounts/piano').remaining,16);
+ await s.service.checkIn('piano','1234','device');assert.equal(s.records.get('opsAccounts/piano').remaining,15);
+ assert.equal([...s.records.values()].filter(r=>r.action==='activate-next-pass').length,1);
+});
+test('dated unpaid pass carries unused lessons, preserves the old debt and late payment cannot double credit',async()=>{
+ const s=setup();await s.seed('piano',3);const today=s.load('model').seoulDay();
+ await s.service.createCurrentCycleInvoice({studentId:'piano',cycleStart:'2026-09-01',expectedUpdatedAt:s.records.get('opsAccounts/piano').updatedAt},'owner');const oldId=s.records.get('opsAccounts/piano').openInvoiceId;
+ await s.service.saveNextPass({studentId:'piano',expectedUpdatedAt:s.records.get('opsAccounts/piano').updatedAt,units:12,amount:210000,mode:'date',start:today},'owner');
+ const id=s.records.get('opsAccounts/piano').nextPass.invoiceId;
+ await s.service.recordAttendance({studentId:'piano',day:today,status:'travel',units:0},'owner');
+ assert.ok(s.records.get('opsAccounts/piano').nextPass);assert.equal(s.records.get('opsAccounts/piano').remaining,3);
+ let r=s.records.get(`opsAttendance/piano_${today}`);
+ await s.service.recordAttendance({studentId:'piano',day:today,status:'present',units:1,expectedUpdatedAt:r.updatedAt},'owner');
+ assert.equal(s.records.get('opsAccounts/piano').remaining,14);assert.equal(s.records.get(`opsInvoices/${oldId}`).status,'open');
+ const i=s.records.get(`opsInvoices/${id}`);
+ await s.service.payment({invoiceId:id,requestId:'late-pay',amount:210000,method:'현금',expectedInvoiceUpdatedAt:i.updatedAt},'owner');
+ assert.equal(s.records.get('opsAccounts/piano').remaining,14);
+ r=s.records.get(`opsAttendance/piano_${today}`);
+ await s.service.recordAttendance({studentId:'piano',day:today,status:'present',units:1,expectedUpdatedAt:r.updatedAt},'owner');assert.equal(s.records.get('opsAccounts/piano').remaining,14);
+ const account=s.records.get('opsAccounts/piano'),audit=[...s.records.entries()].filter(([k])=>k.startsWith('opsAudit/')).map(([id,row])=>({id,...row})),invoices=[...s.records.entries()].filter(([k])=>k.startsWith('opsInvoices/')).map(([,row])=>row);
+ const report=s.load('balance-review').reviewBalance(account,undefined,audit,[r],invoices);assert.equal(report.ledger,14);
+});
+test('a reservation can be edited/cancelled atomically, but receipts and reserved invoice edits are protected',async()=>{
+ const s=setup();await s.seed('piano',2);const input={studentId:'piano',units:12,amount:210000,mode:'depleted'};
+ const save=extra=>s.service.saveNextPass({...input,expectedUpdatedAt:s.records.get('opsAccounts/piano').updatedAt,...extra},'owner');
+ await save({});const id=s.records.get('opsAccounts/piano').nextPass.invoiceId;
+ await save({units:16,amount:250000});assert.equal(s.records.get('opsAccounts/piano').nextPass.invoiceId,id);assert.equal(s.records.get(`opsInvoices/${id}`).amount,250000);
+ await assert.rejects(s.service.invoiceAction({invoiceId:id,action:'cancelInvoice'},'owner'),/예약/);
+ await save({cancel:true});assert.equal(s.records.get(`opsInvoices/${id}`).status,'cancelled');assert.equal(s.records.get('opsAccounts/piano').remaining,2);
+ await save({});const nextId=s.records.get('opsAccounts/piano').nextPass.invoiceId,i=s.records.get(`opsInvoices/${nextId}`);
+ await s.service.payment({invoiceId:nextId,requestId:'partial',amount:10000,method:'현금',expectedInvoiceUpdatedAt:i.updatedAt},'owner');
+ await assert.rejects(save({cancel:true}),/수납/);
+ const {nextPassInput}=s.load('next-pass');for(const v of [{units:0},{amount:0},{mode:'bad'},{mode:'date',start:'2000-01-01'}])assert.throws(()=>nextPassInput({...input,...v},'test'));
+});
+test('depletion does not start early or duplicate reserved invoice and past lessons retain old pass units',async()=>{
+ const s=setup();await s.seed('piano',1);const today=s.load('model').seoulDay(),yesterday=new Date(Date.parse(today)-86400000).toISOString().slice(0,10);
+ await s.service.saveNextPass({studentId:'piano',expectedUpdatedAt:s.records.get('opsAccounts/piano').updatedAt,units:16,amount:250000,mode:'depleted'},'owner');
+ s.records.get('opsAccounts/piano').nextPass.reservedOn=yesterday;
+ await s.service.recordAttendance({studentId:'piano',day:yesterday,status:'present',units:1},'owner');
+ assert.equal(s.records.get('opsAccounts/piano').remaining,0);assert.equal(s.records.get('opsAccounts/piano').planUnits,8);assert.equal([...s.records.keys()].filter(k=>k.startsWith('opsInvoices/')).length,1);
+ await s.service.checkIn('piano','1234','device');const account=s.records.get('opsAccounts/piano');assert.equal(account.remaining,15);
+ assert.equal(s.load('pass-history').passUnitsOn(account,yesterday),8);assert.equal(s.load('pass-history').passUnitsOn(account,today),16);
+});
+
+test('a future dated reservation does not activate on an earlier arrival or a makeup lesson',async()=>{
+ const s=setup();await s.seed('piano',0);const today=s.load('model').seoulDay();
+ await s.service.saveNextPass({studentId:'piano',expectedUpdatedAt:s.records.get('opsAccounts/piano').updatedAt,units:12,amount:210000,mode:'date',start:'2999-01-01'},'owner');
+ const id=s.records.get('opsAccounts/piano').nextPass.invoiceId;
+ await s.service.checkIn('piano','1234','device');assert.equal(s.records.get('opsAccounts/piano').remaining,-1);assert.equal(s.records.get('opsAccounts/piano').planUnits,8);assert.ok(s.records.get('opsAccounts/piano').nextPass);
+ assert.equal([...s.records.keys()].filter(k=>k.startsWith('opsInvoices/')).length,1);
+ const a=s.records.get('opsAccounts/piano');assert.equal(s.load('next-pass').nextPassDue({...a,nextPass:{...a.nextPass,start:today}},today,'makeup'),false);
+ await assert.rejects(s.service.linkInvoiceLesson({invoiceId:id,lessonDate:today,expectedUpdatedAt:s.records.get(`opsInvoices/${id}`).updatedAt},'owner'),/예약/);
+});

@@ -1,3 +1,4 @@
+import {nextPassInput,nextPassDue,activateNextPass} from './next-pass';
 import {passHistoryInput} from './pass-history';
 import {placeTimetableLesson,placeRegularTimetableLesson} from './timetable';
 import { legacyAttendanceAppearance } from './attendance-appearance';
@@ -29,6 +30,7 @@ function enqueue(tx: Transaction, db: Firestore, id: string, account: Account, k
   tx.create(db.doc(`opsNotices/${id}`), { id, studentId: account.id, name: account.name, phone: account.phone, kind, parameters, status: 'queued', createdAt: now() });
 }
 function newInvoice(tx: Transaction, db: Firestore, account: Account, id: string, reason: string, createdAt = now()) {
+  if(account.nextPass)return account.openInvoiceId || account.nextPass.invoiceId;
   const invoice: Invoice = { id, studentId: account.id, name: account.name, units: account.planUnits, amount: account.planAmount, paid: 0, status: 'open', needsReview: false, createdAt };
   tx.create(db.doc(`opsInvoices/${id}`), { ...invoice, reason });
   if (account.autoBilling) enqueue(tx, db, `billing_${id}`, account, 'billing', { student_name: account.name, amount: String(invoice.amount), lesson_count: String(invoice.units) });
@@ -164,11 +166,11 @@ export async function configure(input: Record<string, unknown>, actor: string) {
     const overrideGroup=student.data()?.operationsCourseGroups?.[subject] as string|undefined;
     const overrideSubject=overrideGroup?(overrideGroup.includes('피아노')?'피아노':overrideGroup):undefined;
     const remaining = old ? old.remaining : integer(input.remaining, -1000, 1000, '현재 남은 횟수');
-    const saved = { id, ...(old?.passHistory ? {passHistory:old.passHistory} : {}), ...(old?.schedule ? {schedule:old.schedule} : {}), ...(old?.importId ? { importId: old.importId, openingAsOf: old.openingAsOf } : {}), ...(old?.attendanceGroup ? { attendanceGroup: old.attendanceGroup } : {}), ...(old?.displaySubject ? { displaySubject: old.displaySubject } : {}), ...(subject ? { sourceStudentId, subject } : {}), name: subject ? `${student.data()?.name || '학생'} · ${subject}` : student.data()?.name || '학생', phone, checkinSuffixes: codes, planUnits, planAmount, remaining, openInvoiceId: old?.openInvoiceId || null, active: input.active !== false, autoBilling: input.autoBilling === true, updatedAt: now(), ...(overrideGroup?{attendanceGroup:overrideGroup,displaySubject:overrideSubject,name:`${student.data()?.name} · ${overrideSubject}`}:{}) };
+    const saved = { id, ...(old?.nextPass?{nextPass:old.nextPass}:{}), ...(old?.initialPlanUnits?{initialPlanUnits:old.initialPlanUnits}:{}), ...(old?.passHistory ? {passHistory:old.passHistory} : {}), ...(old?.schedule ? {schedule:old.schedule} : {}), ...(old?.importId ? { importId: old.importId, openingAsOf: old.openingAsOf } : {}), ...(old?.attendanceGroup ? { attendanceGroup: old.attendanceGroup } : {}), ...(old?.displaySubject ? { displaySubject: old.displaySubject } : {}), ...(subject ? { sourceStudentId, subject } : {}), name: subject ? `${student.data()?.name || '학생'} · ${subject}` : student.data()?.name || '학생', phone, checkinSuffixes: codes, planUnits, planAmount, remaining, openInvoiceId: old?.openInvoiceId || null, active: input.active !== false, autoBilling: input.autoBilling === true, updatedAt: now(), ...(overrideGroup?{attendanceGroup:overrideGroup,displaySubject:overrideSubject,name:`${student.data()?.name} · ${overrideSubject}`}:{}) };
     const firstInvoice = !old && input.firstBilling === true ? firstEnrollmentInvoice(saved as Account, validDay(input.firstLessonDate), saved.updatedAt) : null;
     let revisedInvoice: Invoice | undefined, invoiceBefore: Invoice | undefined;
     let billingNotice: FirebaseFirestore.DocumentSnapshot | undefined;
-    if (old?.openInvoiceId && (input.syncOpenInvoice === true || old.planUnits !== planUnits || old.planAmount !== planAmount)) {
+    if (old?.openInvoiceId && old.openInvoiceId!==old.nextPass?.invoiceId && (input.syncOpenInvoice === true || old.planUnits !== planUnits || old.planAmount !== planAmount)) {
       const invoiceSnap = await tx.get(db.doc(`opsInvoices/${old.openInvoiceId}`));
       if (!invoiceSnap.exists) throw Error('연결된 미납 청구를 찾을 수 없습니다. 청구·수납에서 확인해주세요.');
       invoiceBefore = { ...invoiceSnap.data(), id: invoiceSnap.id } as Invoice;
@@ -227,7 +229,7 @@ export async function checkIn(studentId: string, digits: string, actor: string) 
   const invoiceId = randomUUID();
   return db.runTransaction(async tx => {
     const [accountSnap, attended] = await Promise.all([tx.get(ref), tx.get(attendanceRef)]);
-    const account = accountSnap.data() as Account | undefined;
+    let account = accountSnap.data() as Account | undefined;
     if (!account?.active || !account.checkinSuffixes.includes(digits)) throw new HttpError(404, '등록된 학생을 찾을 수 없습니다.');
     const owner = (await tx.get(db.doc(`students/${account.sourceStudentId || id}`))).data();
     if (!owner || enrollmentState(courseLifecycle(owner,id)) !== 'active') throw new HttpError(409, '휴원·퇴원 상태입니다. 선생님께 복귀 처리를 요청해주세요.');
@@ -248,10 +250,12 @@ export async function checkIn(studentId: string, digits: string, actor: string) 
     const previousNotice = attended.exists ? await tx.get(db.doc(`opsNotices/attendance_${attendanceId}`)) : null;
     const source = reservation ? await makeupSource(tx, db, account, day, reservation.relatedDay || '', attendanceId) : undefined;
     const units = source?.charged ? 0 : 1;
+    const activation=nextPassDue(account,day,reservation?'makeup':'present')?await tx.get(db.doc(`opsInvoices/${account.nextPass!.invoiceId}`)):null;
+    if(activation){account=activateNextPass(account,activation.data() as Invoice,day,now());tx.update(activation.ref,{reservedPass:false,cycleStart:day,lessonDate:day,updatedAt:now()});audit(tx,db,actor,'activate-next-pass',id,{invoiceId:activation.id,day,units:account.planUnits});}
     const remaining = adjustBalance(account.remaining, 0, units);
     const openInvoiceId = remaining <= 0 && units > 0 && !account.openInvoiceId ? newInvoice(tx, db, account, invoiceId, '수업 횟수 소진') : account.openInvoiceId;
     tx.set(attendanceRef, { id: attendanceId, studentId: id, name: account.name, day, at: now(), units, status: reservation ? 'makeup' : 'present', source: 'kiosk', note: reservation?.note || '', ...(reservation ? {relatedDay:reservation.relatedDay} : {}), updatedAt: now() });
-    tx.update(ref, { remaining, openInvoiceId, updatedAt: now() });
+    tx.update(ref, { ...account, remaining, openInvoiceId, updatedAt: now() });
     if (!previousNotice?.exists) enqueue(tx, db, `attendance_${attendanceId}`, account, 'attendance', { student_name: account.name, attendance_time: new Date().toLocaleTimeString('ko-KR', { timeZone: 'Asia/Seoul', hour: '2-digit', minute: '2-digit', hour12: false }) });
     audit(tx, db, actor, 'check-in', id, { attendanceId, units, remaining, ...(reservation ? {relatedDay:reservation.relatedDay, completedReservation:true} : {}) });
     return { duplicate: false, name };
@@ -269,7 +273,7 @@ export async function adjust(input: Record<string, unknown>, actor: string) {
     const currentInvoice = account.openInvoiceId ? await tx.get(db.doc(`opsInvoices/${account.openInvoiceId}`)) : null;
     const remaining = adjustBalance(account.remaining, attendance.units, units);
     const openInvoiceId = remaining <= 0 && !account.openInvoiceId ? newInvoice(tx, db, account, invoiceId, '횟수 수정 후 소진') : account.openInvoiceId;
-    if (remaining > 0 && currentInvoice?.exists) tx.update(currentInvoice.ref, { needsReview: true });
+    if (remaining > 0 && currentInvoice?.exists && !currentInvoice.data()?.reservedPass) tx.update(currentInvoice.ref, { needsReview: true });
     tx.update(ref, { remaining, openInvoiceId, updatedAt: now() });
     tx.update(attendanceRef, { units, note, updatedAt: now() });
     audit(tx, db, actor, 'adjust', account.id, { attendanceId: id, before: attendance.units, after: units, note, remaining });
@@ -295,6 +299,7 @@ export async function createInvoice(studentId: unknown, actor: string) {
   await db.runTransaction(async tx => {
     const ref = db.doc(`opsAccounts/${id}`); const account = (await tx.get(ref)).data() as Account | undefined;
     if (!account?.active) throw new Error('수강 설정을 먼저 저장해주세요.');
+    if(account.nextPass)throw Error('다음 수강권의 예약 청구가 이미 있습니다. 청구·수납에서 확인해주세요.');
     if (account.openInvoiceId) throw new Error('아직 완료하지 않은 청구가 있습니다.');
     newInvoice(tx, db, account, invoiceId, '원장 등록');
     tx.update(ref, { openInvoiceId: invoiceId, updatedAt: now() }); audit(tx, db, actor, 'invoice', id, { invoiceId });
@@ -334,6 +339,7 @@ export async function editInvoice(input: Record<string, unknown>, actor: string)
     if (cycleStart > seoulDay() && old.id !== `first_${old.studentId}`) throw Error('재등록일은 오늘 또는 이전 날짜로 입력해주세요.');
     if ((old.updatedAt || '') !== (input.expectedUpdatedAt || '')) throw Error('청구 내용이 변경됐습니다. 창을 닫고 다시 확인해주세요.');
     const account = (await tx.get(db.doc(`opsAccounts/${old.studentId}`))).data() as Account | undefined;
+    if (old.reservedPass) throw Error('예약 청구는 총 등록 현황의 수강권을 눌러 수정해주세요.');
     if (!account || account.openInvoiceId !== id) throw Error('현재 청구 연결을 확인해주세요.');
     const noticeRef = db.doc(`opsNotices/billing_${id}`), notice = (await tx.get(noticeRef)).data();
     if (notice && !['queued', 'blocked', 'review', 'cancelled'].includes(notice.status)) throw Error('결제 안내 처리 기록이 있어 수정할 수 없습니다. 발송 결과를 먼저 확인해주세요.');
@@ -358,6 +364,7 @@ export async function linkInvoiceLesson(input: Record<string, unknown>, actor: s
     const ref = db.doc(`opsInvoices/${id}`), invoice = (await tx.get(ref)).data() as Invoice | undefined;
     if (!invoice || invoice.status !== 'open') throw Error('진행 중인 청구를 확인해주세요.');
     if ((invoice.updatedAt || '') !== (input.expectedUpdatedAt || '')) throw Error('청구 내용이 변경됐습니다. 창을 닫고 다시 확인해주세요.');
+    if(invoice.reservedPass)throw Error('예약 청구의 날짜는 총 등록 현황에서 수강권 예약을 변경해주세요.');
     if (invoice.lessonDate === lessonDate) return { invoices: [invoice] };
     const others = await tx.get(db.collection('opsInvoices').where('studentId', '==', invoice.studentId));
     if (others.docs.some(d => d.id !== id && d.data().status !== 'cancelled' && (d.data().lessonDate || d.data().cycleStart) === lessonDate)) throw Error('이 1회차 날짜에 연결된 다른 청구가 있습니다. 수납 기록을 확인해주세요.');
@@ -376,6 +383,7 @@ export async function invoiceAction(input: Record<string, unknown>, actor: strin
     const accountRef = db.doc(`opsAccounts/${invoice.studentId}`); const account = (await tx.get(accountRef)).data() as Account;
     const noticeRef = db.doc(`opsNotices/billing_${id}`); const notice = await tx.get(noticeRef);
     if (input.action === 'cancelInvoice') {
+      if(invoice.reservedPass)throw Error('예약 청구는 총 등록 현황의 수강권에서 예약을 취소해주세요.');
       if (invoice.paid !== 0) throw new Error('수납된 청구는 취소할 수 없습니다.');
       if (notice.data()?.status === 'processing') throw new Error('발송 처리 중입니다. 잠시 후 확인해주세요.');
       tx.update(ref, { status: 'cancelled' });
@@ -455,7 +463,7 @@ export async function recordAttendance(input: Record<string, unknown>, actor: st
   return db.runTransaction(async tx => {
     const ref = db.doc(`opsAttendance/${id}`); const accountRef = db.doc(`opsAccounts/${studentId}`);
     const [previous, accountSnap] = await Promise.all([tx.get(ref), tx.get(accountRef)]);
-    const old = previous.data() as Attendance | undefined; const account = accountSnap.data() as Account | undefined;
+    const old = previous.data() as Attendance | undefined; let account = accountSnap.data() as Account | undefined;
     if (!account) throw new Error('먼저 수강 설정을 저장해주세요.');
     const currentInvoice = account.openInvoiceId ? await tx.get(db.doc(`opsInvoices/${account.openInvoiceId}`)) : null;
     if (old && Object.entries(values).every(([k,v]) => (old as unknown as Record<string, unknown>)[k] === v)) return { attendance:[old], accounts:[account], invoices: currentInvoice?.exists ? [{...currentInvoice.data(),id:currentInvoice.id} as Invoice] : [] };
@@ -467,17 +475,21 @@ export async function recordAttendance(input: Record<string, unknown>, actor: st
       if (values.status === 'makeup' && original.charged) values.units = 0;
     }
     const stamp=now();
+    const activation=nextPassDue(account,values.day,values.status,old?.status || (old?'present':undefined))?await tx.get(db.doc(`opsInvoices/${account.nextPass!.invoiceId}`)):null;
+    if(activation){account=activateNextPass(account,activation.data() as Invoice,values.day,stamp);tx.update(activation.ref,{reservedPass:false,cycleStart:values.day,lessonDate:values.day,updatedAt:stamp});audit(tx,db,actor,'activate-next-pass',studentId,{invoiceId:activation.id,day:values.day,units:account.planUnits});}
     const remaining = adjustBalance(account.remaining, old?.units || 0, values.units);
     const openInvoiceId = remaining <= 0 && values.units > (old?.units || 0) && !account.openInvoiceId ? newInvoice(tx, db, account, invoiceId, '수동 출결 기록 후 소진', stamp) : account.openInvoiceId;
     const review = remaining > 0 && values.units < (old?.units || 0);
-    if (review && currentInvoice?.exists) tx.update(currentInvoice.ref, { needsReview: true });
+    if (review && currentInvoice?.exists && !currentInvoice.data()?.reservedPass) tx.update(currentInvoice.ref, { needsReview: true });
     const attendance:Attendance={ ...old, ...values, id, studentId, name: account.name, source: old?.source || 'manual', at: old?.at || stamp, updatedAt: stamp };
     delete attendance.range;
     const updatedAccount={...account,remaining,openInvoiceId,updatedAt:stamp};
     tx.set(ref, attendance);
-    tx.update(accountRef, { remaining, openInvoiceId, updatedAt: stamp });
+    tx.update(accountRef, { ...account, remaining, openInvoiceId, updatedAt: stamp });
     audit(tx, db, actor, 'record-attendance', studentId, { attendanceId: id, before: old?.units || 0, ...values, remaining });
+    if(account.nextPass)return;
     const invoices:Invoice[]=openInvoiceId && openInvoiceId!==account.openInvoiceId ? [{id:openInvoiceId,studentId:account.id,name:account.name,units:account.planUnits,amount:account.planAmount,paid:0,status:'open',needsReview:false,createdAt:stamp}] : currentInvoice?.exists ? [{...currentInvoice.data(),id:currentInvoice.id,...(review?{needsReview:true}:{})} as Invoice] : [];
+    if(activation)return; // Full refresh also loads the new cycle boundary and invoice date.
     return { attendance:[attendance], accounts:[updatedAccount], invoices };
   });
 }
@@ -517,12 +529,13 @@ export async function correctRemaining(input: Record<string, unknown>, actor: st
     if(remaining<=0 && !openInvoiceId){
       openInvoiceId=newInvoice(tx,db,{...account,autoBilling:false},randomUUID(),'잔여 횟수 정정 후 소진',at);
       invoice={id:openInvoiceId,studentId,name:account.name,units:account.planUnits,amount:account.planAmount,paid:0,status:'open',needsReview:false,createdAt:at};
-    }else if(remaining!==account.remaining && invoice?.status==='open'){
+    }else if(remaining!==account.remaining && invoice?.status==='open' && !invoice.reservedPass){
       invoice={...invoice,needsReview:true};tx.update(invoiceSnap!.ref,{needsReview:true});
     }
     const updated={...account,remaining,openInvoiceId,updatedAt:at};
     tx.update(ref,{remaining,openInvoiceId,updatedAt:at});
     tx.create(auditRef,{actor,action:'correct-remaining',studentId,digest,detail:{before:account.remaining,after:remaining,note},at});
+    if(account.nextPass)return;
     return {accounts:[updated],invoices:invoice?[invoice]:[]};
   });
 }
@@ -723,5 +736,34 @@ export async function savePassHistory(input:Record<string,unknown>,actor:string)
   const updatedAt=new Date(Math.max(Date.now(),Date.parse(account.updatedAt)+1)).toISOString();
   tx.update(ref,{passHistory,updatedAt});
   audit(tx,db,actor,'pass-history',id,{before:account.passHistory||[],after:passHistory});
+ });
+}
+
+export async function saveNextPass(input:Record<string,unknown>,actor:string){
+ const id=key(input.studentId),db=database(),ref=db.doc(`opsAccounts/${id}`),newId=randomUUID();
+ return db.runTransaction(async tx=>{
+  const account=(await tx.get(ref)).data() as Account|undefined;
+  if(!account?.active)throw Error('수강 등록을 먼저 확인해주세요.');
+  if(account.updatedAt!==input.expectedUpdatedAt)throw Error('수강 정보가 변경됐습니다. 창을 닫고 다시 확인해주세요.');
+  const previous=account.nextPass;
+  const cycles=await tx.get(db.collection('opsInvoices').where('studentId','==',id));
+  if(input.cancel!==true&&input.mode==='date'&&cycles.docs.some(d=>d.id!==previous?.invoiceId&&d.data().status!=='cancelled'&&(d.data().lessonDate||d.data().cycleStart)===input.start))throw Error('해당 날짜에 다른 수강권 청구가 있습니다. 1회차 날짜를 확인해주세요.');
+  const invoiceRef=db.doc(`opsInvoices/${previous?.invoiceId||newId}`);
+  const old=previous?(await tx.get(invoiceRef)).data() as Invoice:undefined;
+  const noticeRef=db.doc(`opsNotices/billing_${invoiceRef.id}`),notice=previous?await tx.get(noticeRef):null;
+  if(old?.paid)throw Error('예약 수강권에 수납 내역이 있습니다. 수납 내역을 확인한 뒤 변경해주세요.');
+  if(notice?.exists&&!['cancelled','failed','blocked'].includes(notice.data()?.status))throw Error('결제 안내가 발송 요청된 예약입니다. 안내 상태를 먼저 확인해주세요.');
+  const stamp=new Date(Math.max(Date.now(),Date.parse(account.updatedAt)+1)).toISOString();
+  if(input.cancel===true){
+   if(!previous)throw Error('취소할 예약이 없습니다.');
+   tx.update(invoiceRef,{status:'cancelled',updatedAt:stamp});
+   tx.update(ref,{nextPass:null,openInvoiceId:account.openInvoiceId===previous.invoiceId?null:account.openInvoiceId,updatedAt:stamp});
+  }else{
+   const nextPass=nextPassInput(input,invoiceRef.id);
+   const invoice:Invoice={id:invoiceRef.id,studentId:id,name:account.name,units:nextPass.units,amount:nextPass.amount,paid:0,status:'open',needsReview:false,createdAt:old?.createdAt||stamp,updatedAt:stamp,creditUnits:0,reservedPass:true,lessonDate:nextPass.start};
+   tx.set(invoiceRef,invoice);tx.update(ref,{nextPass,updatedAt:stamp});
+  }
+  if(notice?.exists)tx.update(noticeRef,{status:'cancelled'});
+  audit(tx,db,actor,input.cancel?'cancel-next-pass':'reserve-next-pass',id,{before:previous||null,invoiceId:invoiceRef.id,...(input.cancel?{}:{after:nextPassInput(input,invoiceRef.id)})});
  });
 }

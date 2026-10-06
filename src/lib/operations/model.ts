@@ -1,5 +1,7 @@
 import type { Lifecycle } from './lifecycle';
 export type Account = {
+  nextPass?: import('./next-pass').NextPass | null;
+  initialPlanUnits?: number;
   passHistory?: import('./pass-history').PassHistoryEntry[];
   schedule?: import('./schedule').LessonSchedule;
   attendanceGroup?: string; displaySubject?: string;
@@ -12,7 +14,7 @@ export const ATTENDANCE_LABELS = { present: "출석", absent: "결석", makeup: 
 export type AttendanceStatus = keyof typeof ATTENDANCE_LABELS;
 export type LegacyAttendance = { studentId: string; day: string; value: string; color: string; status?: AttendanceStatus; note?: string; revision?: string };
 export type Attendance = { unpaidCycleStart?: string; range?: {id:string;start:string;end:string}; arrivalAt?: string; status?: AttendanceStatus; source?: "kiosk" | "manual"; relatedDay?: string; id: string; studentId: string; name: string; day: string; at: string; units: number; note: string; updatedAt: string };
-export type Invoice = { lessonDate?: string; updatedAt?: string; creditUnits?: number; cycleStart?: string; id: string; studentId: string; name: string; units: number; amount: number; paid: number; status: 'open' | 'paid' | 'cancelled'; needsReview: boolean; createdAt: string };
+export type Invoice = { reservedPass?: boolean; lessonDate?: string; updatedAt?: string; creditUnits?: number; cycleStart?: string; id: string; studentId: string; name: string; units: number; amount: number; paid: number; status: 'open' | 'paid' | 'cancelled'; needsReview: boolean; createdAt: string };
 export type Payment = { paymentDate?: string; id: string; invoiceId: string; studentId: string; amount: number; method: string; at: string; note: string };
 export type Notice = { id: string; studentId: string; name: string; kind: 'attendance' | 'billing'; status: string; createdAt: string; requestId?: string; error?: string };
 export type Device = { id: string; name: string; active: boolean; createdAt: string };
