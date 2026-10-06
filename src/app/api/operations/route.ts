@@ -122,6 +122,7 @@ export async function POST(request: Request) {
       case 'currentCycleInvoice': return Response.json({ok:true,changes:await service.createCurrentCycleInvoice(input,actor)});
       case 'invoice': await service.createInvoice(input.studentId, actor); break;
       case 'editInvoice': await service.editInvoice(input, actor); return Response.json({ok:true});
+      case 'monthlyPayment': await service.monthlyPayment(input,actor); return Response.json({ok:true});
       case 'payment': await service.payment(input, actor); break;
       case 'sendInvoice': case 'cancelInvoice': case 'confirmInvoice': await service.invoiceAction(input, actor); break;
       case 'pair': return Response.json(await service.issuePair(actor));

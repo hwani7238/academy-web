@@ -1,3 +1,4 @@
+import {monthlyInvoice} from '@/lib/operations/monthly-payment';
 import {nextPassInput,nextPassDue,activateNextPass} from '@/lib/operations/next-pass';
 import {passHistoryInput,passCycleStarts} from '@/lib/operations/pass-history';
 import {placeTimetableLesson,placeRegularTimetableLesson} from '@/lib/operations/timetable';
@@ -219,6 +220,22 @@ export function demoAction(current: Snapshot, input: Record<string, unknown>): {
     a.remaining = adjustBalance(a.remaining, attendance.units, Number(input.units)); attendance.units = Number(input.units); attendance.note = String(input.note || '').trim().slice(0, 500);
     if (a.remaining <= 0) invoice(a);
     else { const open = data.invoices.find(i => i.id === a.openInvoiceId); if (open) open.needsReview = true; }
+  } else if(input.action==='monthlyPayment'){
+    if(!account)throw Error('수강 정보를 확인해주세요.');const day=validDay(input.lessonDate);
+    const id=String(input.invoiceId||`monthly_${account.id}_${day}`),existing=data.payments.find(p=>p.id===input.requestId);
+    if(existing)return {data,result};
+    const rows=[...data.invoices,...(data.settledInvoices||[])];let i=rows.find(i=>i.id===id);
+    if(i&&i.studentId!==account.id)throw Error('다른 과목의 청구입니다.');
+    if(rows.some(i=>i.id!==id&&i.status!=='cancelled'&&(i.lessonDate||i.cycleStart)===day))throw Error('이 날짜의 다른 청구가 있습니다.');
+    if(input.linkOnly){if(!i||i.status!=='paid')throw Error('수납 완료된 내역을 확인해주세요.');i.lessonDate=day;i.updatedAt=at;}
+    else{
+      if(account.updatedAt!==input.expectedUpdatedAt)throw Error('수강 정보가 변경됐습니다.');
+      if(!i){i=monthlyInvoice(account,id,day,input,at);data.invoices.push(i);}
+      const paymentDate=paymentDateInput(input.paymentDate),paid=settle(i,Number(input.amount));
+      Object.assign(i,{lessonDate:day,paid:paid.paid,status:paid.complete?'paid':'open',updatedAt:at});
+      if(paid.complete){account.remaining+=i.creditUnits??i.units;if(account.openInvoiceId===id)account.openInvoiceId=null;}else account.openInvoiceId||=id;
+      account.updatedAt=at;data.payments.unshift({id:String(input.requestId),invoiceId:id,studentId:account.id,amount:Number(input.amount),method:String(input.method),paymentDate,at,note:String(input.note||'')});
+    }
   } else if (input.action === 'payment') {
     const paymentDate = paymentDateInput(input.paymentDate);
     const existing = data.payments.find(p => p.id === input.requestId);

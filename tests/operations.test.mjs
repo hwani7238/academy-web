@@ -2024,3 +2024,39 @@ test('confirming a projected first lesson is idempotent, dated, course scoped an
  await s.service.payment({invoiceId:rows[0].id,requestId:'advance-1',amount:160000,method:'현금'},'owner');assert.equal(s.records.get('opsAccounts/p').remaining,9);
  assert.equal((await s.service.prepareUpcomingInvoice(input,'owner')).status,'paid');
 });
+
+test('monthly payment records an old first lesson without crediting the already imported balance or changing attendance',async()=>{
+ const s=setup();await s.seed('p',5);await s.seed('drum',2);const day='2026-09-01',a=s.records.get('opsAccounts/p');
+ const input={studentId:'p',lessonDate:day,requestId:'monthly-pay-1',expectedUpdatedAt:a.updatedAt,amount:160000,invoiceAmount:160000,addUnits:false,method:'카드',paymentDate:'2026-09-05'};
+ await Promise.all([s.service.monthlyPayment(input,'owner'),s.service.monthlyPayment(input,'owner')]);
+ assert.equal(s.records.get('opsAccounts/p').remaining,5);assert.equal(s.records.get('opsAccounts/drum').remaining,2);
+ const invoices=[...s.records.values()].filter(i=>i.studentId==='p'&&i.status==='paid');assert.equal(invoices.length,1);assert.equal(invoices[0].lessonDate,day);assert.equal(invoices[0].creditUnits,0);
+ assert.equal([...s.records.keys()].filter(k=>k.startsWith('opsPayments/')).length,1);assert.equal([...s.records.keys()].some(k=>k.startsWith('opsAttendance/')||k.startsWith('opsNotices/')),false);
+ assert.ok(s.load('attendance-appearance').confirmedFirstLessons(invoices,{p:[day]}).has(`p_${day}`));
+ await assert.rejects(s.service.monthlyPayment({...input,amount:150000},'owner'),/중복/);
+});
+test('monthly payment reuses the selected cycle, supports partial payment, and credits a new pass only once on full settlement',async()=>{
+ const s=setup();await s.seed('p',1);await s.service.createInvoice('p','owner');const id=s.records.get('opsAccounts/p').openInvoiceId,day='2026-10-07';
+ const input={studentId:'p',invoiceId:id,lessonDate:day,requestId:'part-one',expectedUpdatedAt:s.records.get('opsAccounts/p').updatedAt,expectedInvoiceUpdatedAt:'',amount:60000,method:'현금'};
+ await s.service.monthlyPayment(input,'owner');assert.equal(s.records.get('opsInvoices/'+id).status,'open');assert.equal(s.records.get('opsAccounts/p').remaining,1);
+ const last={...input,requestId:'part-two',amount:100000,expectedUpdatedAt:s.records.get('opsAccounts/p').updatedAt,expectedInvoiceUpdatedAt:s.records.get('opsInvoices/'+id).updatedAt};
+ await s.service.monthlyPayment(last,'owner');await s.service.monthlyPayment(last,'owner');assert.equal(s.records.get('opsInvoices/'+id).status,'paid');assert.equal(s.records.get('opsAccounts/p').remaining,9);
+ assert.equal([...s.records.keys()].filter(k=>k.startsWith('opsInvoices/')).length,1);
+});
+test('linking an existing paid receipt to a monthly first lesson does not record another payment or add units',async()=>{
+ const s=setup();await s.seed('p',1);await s.service.createInvoice('p','owner');const id=s.records.get('opsAccounts/p').openInvoiceId;
+ await s.service.payment({invoiceId:id,requestId:'already-paid',amount:160000,method:'현금'},'owner');
+ const before=s.records.get('opsAccounts/p').remaining,input={studentId:'p',invoiceId:id,lessonDate:'2026-09-10',requestId:'link-receipt',linkOnly:true,expectedInvoiceUpdatedAt:''};
+ await s.service.monthlyPayment(input,'owner');await s.service.monthlyPayment(input,'owner');assert.equal(s.records.get('opsInvoices/'+id).lessonDate,'2026-09-10');assert.equal(s.records.get('opsAccounts/p').remaining,before);assert.equal([...s.records.keys()].filter(k=>k.startsWith('opsPayments/')).length,1);
+ await assert.rejects(s.service.monthlyPayment({...input,lessonDate:'2026-09-11'},'owner'),/다른 수강권/);
+});
+test('monthly payment rejects another course, conflicting cycle, stale balance, and future receipt dates',async()=>{
+ const s=setup();await s.seed('p',1);await s.seed('d',3);await s.service.createInvoice('d','owner');const foreign=s.records.get('opsAccounts/d').openInvoiceId;
+ const base={studentId:'p',lessonDate:'2026-09-01',requestId:'validation',expectedUpdatedAt:s.records.get('opsAccounts/p').updatedAt,amount:160000,invoiceAmount:160000,addUnits:false,method:'현금'};
+ await assert.rejects(s.service.monthlyPayment({...base,invoiceId:foreign},'owner'),/다른 과목/);
+ await assert.rejects(s.service.monthlyPayment({...base,expectedUpdatedAt:'stale'},'owner'),/변경/);
+ await assert.rejects(s.service.monthlyPayment({...base,paymentDate:'2999-01-01'},'owner'),/결제받은 날짜/);
+ await s.service.monthlyPayment(base,'owner');
+ await assert.rejects(s.service.monthlyPayment({...base,requestId:'second'},'owner'),/변경/);
+ assert.equal([...s.records.keys()].filter(k=>k.startsWith('opsPayments/')).length,1);
+});

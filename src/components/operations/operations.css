@@ -154,3 +154,5 @@
 .whee-ops .pass-history-row{display:grid;grid-template-columns:minmax(0,1fr) 90px 36px;gap:8px;align-items:end;margin:12px 0}.whee-ops .pass-history-row input{min-width:0;padding:8px}.whee-ops .pass-history-row label{font-size:12px}
 
 .next-pass-fields{display:grid;grid-template-columns:1fr 1.6fr;gap:12px}.pass-current{background:#f4f6fc;padding:12px;border-radius:8px}.pass-current strong{display:block;margin-top:4px}.next-pass-label{color:#4860ad!important;font-size:11px!important}.next-pass-actions{display:flex;gap:8px}.next-pass-actions .primary{flex:1}.pass-history-link{margin-top:16px}.quick-attendance h3{font-size:15px;margin:12px 0}
+
+.whee-ops .monthly-table .monthly-payment-trigger{display:block;width:100%;min-height:20px;padding:1px 0;border:0;border-radius:2px;background:#f7ecff;color:#7e22ce;font-size:9px;line-height:11px;white-space:normal;word-break:keep-all;text-decoration:underline;text-underline-offset:2px}.whee-ops .monthly-table .has-monthly-payment .attendance-cell{min-height:20px}.whee-ops .monthly-payment-dialog .check{flex-wrap:wrap}.whee-ops .monthly-payment-dialog .check small{width:100%;margin-left:24px}

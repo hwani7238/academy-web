@@ -1,3 +1,4 @@
+import {monthlyInvoice} from './monthly-payment';
 import {nextPassInput,nextPassDue,activateNextPass} from './next-pass';
 import {passHistoryInput} from './pass-history';
 import {placeTimetableLesson,placeRegularTimetableLesson} from './timetable';
@@ -787,5 +788,42 @@ export async function prepareUpcomingInvoice(input:Record<string,unknown>,actor:
   const stamp=now();const invoice:Invoice={id:invoiceId,studentId:id,name:account.name,units:account.planUnits,amount:account.planAmount,paid:0,status:'open',needsReview:false,createdAt:stamp,lessonDate:day};
   tx.create(invoiceRef,invoice);tx.update(ref,{openInvoiceId:account.openInvoiceId||invoiceId,updatedAt:stamp});
   audit(tx,db,actor,'invoice',id,{invoiceId,lessonDate:day,reason:'출석표 1회차 청구 확정'});return invoice;
+ });
+}
+
+// Confirm the selected monthly cycle and its receipt in one transaction.
+// Merely opening the dialog never creates invoices, credits, or notices.
+export async function monthlyPayment(input:Record<string,unknown>,actor:string){
+ const studentId=key(input.studentId),day=validDay(input.lessonDate),requestId=key(input.requestId),db=database();
+ const selectedId=input.invoiceId?key(input.invoiceId):'',invoiceId=selectedId||`monthly_${hash(JSON.stringify([studentId,day]))}`;
+ const ref=db.doc(`opsInvoices/${invoiceId}`),accountRef=db.doc(`opsAccounts/${studentId}`),paymentRef=db.doc(`opsPayments/${requestId}`);
+ const linkOnly=input.linkOnly===true;
+ const paymentDate=linkOnly?'':paymentDateInput(input.paymentDate),method=text(input.method,30);
+ if(!linkOnly&&!(METHODS as readonly string[]).includes(method))throw Error('결제 수단을 선택해주세요.');
+ return db.runTransaction(async tx=>{
+  const [accountSnap,invoiceSnap,receipt,all]=await Promise.all([tx.get(accountRef),tx.get(ref),tx.get(paymentRef),tx.get(db.collection('opsInvoices').where('studentId','==',studentId))]);
+  if(receipt.exists){const previous=receipt.data()!;if(previous.invoiceId!==invoiceId||previous.studentId!==studentId||previous.amount!==input.amount||previous.method!==method||previous.paymentDate!==paymentDate||previous.lessonDate!==day)throw Error('중복 요청 내용이 다릅니다.');return;}
+  const account=accountSnap.data() as Account|undefined,old=invoiceSnap.data() as Invoice|undefined;
+  if(!account)throw Error('수강 정보를 찾을 수 없습니다.');
+  if(old&&old.studentId!==studentId)throw Error('다른 과목의 청구입니다.');
+  if(selectedId&&!old)throw Error('청구를 찾을 수 없습니다.');
+  if(all.docs.some(d=>d.id!==invoiceId&&d.data().status!=='cancelled'&&(d.data().lessonDate||d.data().cycleStart)===day))throw Error('이 1회차에 연결된 다른 청구가 있습니다. 창을 닫고 다시 확인해주세요.');
+  if(old&&(old.lessonDate||old.cycleStart)&&(old.lessonDate||old.cycleStart)!==day)throw Error('다른 수강권 날짜에 연결된 청구입니다.');
+  if(linkOnly){
+   if(!old||old.status!=='paid'||old.paid<old.amount||old.needsReview)throw Error('수납 완료된 내역을 확인해주세요.');
+   if(old.lessonDate===day)return;
+   if((old.updatedAt||'')!==(input.expectedInvoiceUpdatedAt||''))throw Error('청구가 변경됐습니다. 다시 확인해주세요.');
+   tx.update(ref,{lessonDate:day,updatedAt:now()});audit(tx,db,actor,'invoice-lesson-date',studentId,{invoiceId,after:day,linkedExistingPayment:true});return;
+  }
+  if(account.updatedAt!==input.expectedUpdatedAt)throw Error('수강 정보가 변경됐습니다. 창을 닫고 다시 확인해주세요.');
+  if(old&&(!selectedId||(old.updatedAt||'')!==(input.expectedInvoiceUpdatedAt||'')))throw Error('청구가 변경됐습니다. 창을 닫고 다시 확인해주세요.');
+  const stamp=now(),invoice=old||monthlyInvoice(account,invoiceId,day,input,stamp);
+  if(invoice.reservedPass&&!invoice.lessonDate)throw Error('예약 수강권의 시작일을 먼저 확인해주세요.');
+  const {paid,complete}=settle(invoice,input.amount as number);
+  const saved={...invoice,lessonDate:day,paid,status:complete?'paid':'open',updatedAt:stamp};
+  if(old)tx.update(ref,saved);else tx.create(ref,saved);
+  tx.create(paymentRef,{id:requestId,invoiceId,studentId,amount:input.amount,method,paymentDate,lessonDate:day,at:stamp,note:text(input.note),actor});
+  tx.update(accountRef,{remaining:account.remaining+(complete?(invoice.creditUnits??invoice.units):0),openInvoiceId:complete?(account.openInvoiceId===invoiceId?null:account.openInvoiceId):(account.openInvoiceId||invoiceId),updatedAt:stamp});
+  audit(tx,db,actor,'payment',studentId,{invoiceId,amount:input.amount,method,paymentDate,complete,source:'monthly',lessonDate:day});
  });
 }
