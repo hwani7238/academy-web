@@ -1995,3 +1995,32 @@ test('a future dated reservation does not activate on an earlier arrival or a ma
  const a=s.records.get('opsAccounts/piano');assert.equal(s.load('next-pass').nextPassDue({...a,nextPass:{...a.nextPass,start:today}},today,'makeup'),false);
  await assert.rejects(s.service.linkInvoiceLesson({invoiceId:id,lessonDate:today,expectedUpdatedAt:s.records.get(`opsInvoices/${id}`).updatedAt},'owner'),/예약/);
 });
+
+test('travel preserves makeup credit while next ordinal 1 appears in upcoming billing, using monthly calendar rules',()=>{
+ const s=setup(),{billingProjection}=s.load('upcoming-billing');
+ const account={id:'p',name:'방진서',active:true,remaining:1,planUnits:12,planAmount:180000,schedule:{rules:[{start:'2026-10-01',weekdays:[3,5,6]}],moves:[]}};
+ const data={day:'2026-10-06',accounts:[account],students:[{id:'p'}],invoices:[],settledInvoices:[],legacyAttendance:[{studentId:'p',day:'2026-10-02',value:'11',color:''}],attendance:[{studentId:'p',day:'2026-10-03',status:'travel',units:0}],sequenceContext:{positions:{},cycleStarts:[]}};
+ const before=structuredClone(data),rows=billingProjection(data,'2026-10-06').upcoming;
+ assert.equal(rows.length,1);assert.equal(rows[0].lessonDate,'2026-10-07');assert.equal(rows[0].amount,180000);assert.equal(rows[0].units,12);assert.equal(rows[0].projected,true);assert.deepEqual(data,before);
+ for(const status of ['open','paid']){const invoice={...rows[0],projected:undefined,status,paid:status==='paid'?180000:0};assert.equal(billingProjection({...data,invoices:status==='open'?[invoice]:[],settledInvoices:status==='paid'?[invoice]:[]},'2026-10-06').upcoming.length,0);}
+ assert.equal(billingProjection({...data,cancelledInvoiceKeys:['p_2026-10-07']},'2026-10-06').upcoming.some(i=>i.lessonDate==='2026-10-07'),false);
+ for(const status of ['paused','withdrawn'])assert.equal(billingProjection({...data,students:[{id:'p',lifecycle:{status}}]},'2026-10-06').upcoming.length,0);
+ account.schedule.moves=[{from:'2026-10-07',to:'2026-10-08'}];assert.equal(billingProjection(data,'2026-10-06').upcoming[0].lessonDate,'2026-10-08');
+ account.nextPass={invoiceId:'reserved'};assert.equal(billingProjection(data,'2026-10-06').upcoming.length,0);
+});
+test('billing uses next-month leave records and an unpaid actual first lesson remains visible after arrival',()=>{
+ const s=setup(),{billingProjection}=s.load('upcoming-billing');
+ const data={day:'2026-10-30',accounts:[{id:'p',name:'p',active:true,remaining:1,planUnits:4,planAmount:100000,schedule:{rules:[{start:'2026-10-01',weekdays:[1]}],moves:[]}}],students:[{id:'p'}],invoices:[],settledInvoices:[],legacyAttendance:[{studentId:'p',day:'2026-10-26',value:'3',color:''}],attendance:[],forecastAttendance:[{studentId:'p',day:'2026-11-02',status:'travel',units:0}]};
+ assert.equal(billingProjection(data,'2026-10-30').upcoming[0].lessonDate,'2026-11-09');
+ const actual={...data,day:'2026-10-06',legacyAttendance:[],forecastAttendance:[],attendance:[{studentId:'p',day:'2026-10-05',status:'present',units:1}]};
+ assert.equal(billingProjection(actual,'2026-10-06').upcoming[0].lessonDate,'2026-10-05');
+});
+test('confirming a projected first lesson is idempotent, dated, course scoped and never sends a message or changes the balance',async()=>{
+ const s=setup();await s.seed('p',1);await s.seed('d',3);const today=s.load('model').seoulDay(),tomorrow=new Date(Date.parse(today)+86400000).toISOString().slice(0,10),weekday=new Date(tomorrow).getUTCDay();
+ s.records.get('opsAccounts/p').schedule={rules:[{start:today,weekdays:[weekday]}],moves:[],updatedAt:'schedule-v1'};
+ const a=structuredClone(s.records.get('opsAccounts/p')),input={studentId:'p',lessonDate:tomorrow,expectedUpdatedAt:a.updatedAt,expectedScheduleUpdatedAt:'schedule-v1'};
+ const rows=await Promise.all([s.service.prepareUpcomingInvoice(input,'owner'),s.service.prepareUpcomingInvoice(input,'owner')]);assert.equal(rows[0].id,rows[1].id);assert.equal(rows[0].lessonDate,tomorrow);assert.equal(rows[0].amount,160000);
+ assert.equal(s.records.get('opsAccounts/p').remaining,1);assert.equal(s.records.get('opsAccounts/d').remaining,3);assert.equal([...s.records.keys()].filter(k=>k.startsWith('opsInvoices/')).length,1);assert.equal([...s.records.keys()].some(k=>k.startsWith('opsNotices/')),false);
+ await s.service.payment({invoiceId:rows[0].id,requestId:'advance-1',amount:160000,method:'현금'},'owner');assert.equal(s.records.get('opsAccounts/p').remaining,9);
+ assert.equal((await s.service.prepareUpcomingInvoice(input,'owner')).status,'paid');
+});

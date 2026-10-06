@@ -1,4 +1,5 @@
 'use client';
+import {billingProjection} from '@/lib/operations/upcoming-billing';
 import { BillingList } from './BillingList';
 import { CollapsibleOverview } from './CollapsibleOverview';
 import { Trash2 } from 'lucide-react';
@@ -14,7 +15,7 @@ import { autoRefresh, ATTENDANCE_POLL_MS } from '@/lib/operations/auto-refresh';
 import { enrollmentState } from '@/lib/operations/lifecycle';
 import { LifecycleDialog } from './LifecycleDialog';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { User } from 'firebase/auth';
 import { Account, Attendance, Invoice, Snapshot, METHODS, seoulDay, ATTENDANCE_LABELS } from '@/lib/operations/model';
 import { AttendanceTimeDialog } from './AttendanceTimeDialog';
@@ -144,6 +145,7 @@ export function Operations({ demo = false }: { demo?: boolean }) {
     if (action === 'configure') { input.phones = String(f.get('phones')).split(/[,\n]/); input.autoBilling = f.get('autoBilling') === 'on'; input.firstBilling = f.get('firstBilling') === 'on'; input.active = f.get('active') === 'on'; }
     void act(input).then(() => setPanel(null)).catch(() => {});
   };
+  const projectedBilling=useMemo(()=>data?billingProjection(data):undefined,[data]);
   if (!authReady) return <main className="whee-ops gate"><h1>출석·수납 관리</h1><p>계정을 확인하고 있습니다.</p></main>;
   if (!demo && !user) return <main className="whee-ops gate"><p className="brand">WHEE MUSIC</p><h1>원장님 관리실</h1><p>출석과 수납을 확인하려면 원장 계정으로 로그인해주세요.</p><a className="primary" href="/login">기존 계정으로 로그인</a><a href="/operations/demo">가상 학생으로 먼저 체험하기 →</a></main>;
   if (!data) return <main className="whee-ops gate"><h1>출석·수납 관리</h1><p role="alert">{error || '자료를 불러오고 있습니다.'}</p><button onClick={() => void refresh()}>다시 불러오기</button><a href="/operations/demo">가상 학생으로 체험하기</a></main>;
@@ -156,7 +158,7 @@ export function Operations({ demo = false }: { demo?: boolean }) {
   const activeAccounts=data.accounts.filter(a=>activeIds.has(a.id));
   const inactiveStudents=data.students.filter(s=>Boolean(s.lifecycle?.deletedAt)===showDeleted && enrollmentState(s.lifecycle,todayDate)!=='active' && (!inactiveSubject || groupName(s)===inactiveSubject)).sort((a,b)=>compareGroups(groupName(a),groupName(b))||compareStudents(a,b));
   const unconfigured = activeStudents.length - activeAccounts.length;
-  const open = data.invoices.filter(i => i.status === 'open').sort((a,b)=>invoiceDay(a).localeCompare(invoiceDay(b)) || compareNames(a.name,b.name) || a.id.localeCompare(b.id));
+  const open = [...data.invoices,...(projectedBilling?.upcoming||[])].filter(i => i.status === 'open').sort((a,b)=>invoiceDay(a).localeCompare(invoiceDay(b)) || compareNames(a.name,b.name) || a.id.localeCompare(b.id));
   const subjects = [...new Set([...GROUPS, ...data.students.map(groupName)])].sort(compareGroups);
   const students = activeStudents.filter(s => (s.name.includes(search.trim()) || s.phone.includes(search.trim())) && (!subject || groupName(s) === subject)).sort((a, b) => compareGroups(groupName(a), groupName(b)) || compareStudents(a, b));
   const account = panel?.type === 'account' ? panel.initial : undefined;
@@ -168,7 +170,7 @@ export function Operations({ demo = false }: { demo?: boolean }) {
     <main className={`ops-main${tab==='billing'?' billing-view':''}`}><CollapsibleOverview><div className="section-head"><div><h2>조회 날짜 · {day}</h2><p>출석 기록을 보는 날짜입니다. 아이폰 출석은 한국 시간의 오늘 날짜로 자동 저장됩니다.{!demo && ' 출석 현황은 자동으로 업데이트됩니다.'}</p></div><div className="header-actions"><label>출석 조회일<input type="date" value={day} disabled={busy} onInput={e => { if (e.currentTarget.value) setDay(e.currentTarget.value); }} /></label><button disabled={busy} onClick={() => setDay(seoulDay())}>오늘</button></div></div><div className="summary-grid">
       <div><span>{day === seoulDay() ? '오늘 출석' : `${day} 출석`}</span><strong>{presentCount}<small>명</small></strong></div>
       <div><span>결제 요청 대상</span><strong>{open.length}<small>명</small></strong></div>
-      <div><span>미납 합계</span><strong>{won(open.reduce((s, i) => s + i.amount - i.paid, 0))}</strong></div>
+      <div><span>미납 합계</span><strong>{won(data.invoices.reduce((s, i) => s + i.amount - i.paid, 0))}</strong></div>
       <div><span>총 등록 현황</span><strong>{activeAccounts.length}<small>/ {activeStudents.length}건</small></strong>{unconfigured > 0 && <button className="text-button" onClick={() => setTab('students')}>{unconfigured}건 설정 필요 →</button>}</div>
     </div></CollapsibleOverview>
     <nav className="ops-tabs" aria-label="관리 메뉴">{tabs.map(([id, label]) => <button key={id} aria-current={tab === id ? 'page' : undefined} onClick={() => { setTab(id); if(id==='billing' && day.slice(0,7)!==seoulDay().slice(0,7))setDay(seoulDay()); setMessage(''); }}>{label}{id === 'billing' && open.length > 0 && <b>{open.length}</b>}{id === 'today' && <b>{presentCount}</b>}</button>)}</nav>

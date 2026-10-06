@@ -60,6 +60,11 @@ export function demoAction(current: Snapshot, input: Record<string, unknown>): {
     if(!row||!account)throw Error('이전 출결을 찾을 수 없습니다.');
     if(row.revision!==input.expectedRevision)throw Error('이전 출결이 변경됐습니다.');
     Object.assign(row,legacyCorrectionInput(input),{revision:crypto.randomUUID()});
+  } else if(input.action==='prepareUpcomingInvoice'){
+    if(!account)throw Error('수강 정보를 확인해주세요.');
+    const day=String(input.lessonDate);const existing=[...data.invoices,...(data.settledInvoices||[])].find(i=>i.studentId===account.id&&(i.lessonDate||i.cycleStart)===day&&i.status!=='cancelled');
+    if(existing)result.invoice=existing;
+    else{if(account.updatedAt!==input.expectedUpdatedAt)throw Error('수강 정보가 변경됐습니다.');const id=`upcoming_${account.id}_${day}`;const i={id,studentId:account.id,name:account.name,units:account.planUnits,amount:account.planAmount,paid:0,status:'open' as const,needsReview:false,createdAt:at,lessonDate:day};data.invoices.push(i);account.openInvoiceId||=id;account.updatedAt=at;result.invoice=i;}
   } else if(input.action==='saveNextPass'){
     if(!account||account.updatedAt!==input.expectedUpdatedAt)throw Error('수강 정보가 변경됐습니다. 다시 확인해주세요.');
     const old=[...data.invoices,...(data.settledInvoices||[])].find(i=>i.id===account.nextPass?.invoiceId);
@@ -230,6 +235,7 @@ export function demoAction(current: Snapshot, input: Record<string, unknown>): {
   } else if (input.action === 'pair') result = { code: '체험에서는 실제 기기를 등록하지 않습니다.' };
   else if (input.action === 'process') result = { submitted: 0 };
   data.settledInvoices = [...(data.settledInvoices || []), ...data.invoices.filter(i => i.status === 'paid')];
+  data.cancelledInvoiceKeys=[...new Set([...(data.cancelledInvoiceKeys||[]),...data.invoices.filter(i=>i.status==='cancelled'&&(i.lessonDate||i.cycleStart)).map(i=>`${i.studentId}_${i.lessonDate||i.cycleStart}`)])];
   data.invoices = data.invoices.filter(i => i.status === 'open');
   return { data, result };
 }

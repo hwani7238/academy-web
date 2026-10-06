@@ -767,3 +767,25 @@ export async function saveNextPass(input:Record<string,unknown>,actor:string){
   audit(tx,db,actor,input.cancel?'cancel-next-pass':'reserve-next-pass',id,{before:previous||null,invoiceId:invoiceRef.id,...(input.cancel?{}:{after:nextPassInput(input,invoiceRef.id)})});
  });
 }
+
+export async function prepareUpcomingInvoice(input:Record<string,unknown>,actor:string){
+ const id=key(input.studentId),day=validDay(input.lessonDate),today=seoulDay();
+ if(day<`${today.slice(0,7)}-01`||Date.parse(day)>Date.parse(today)+32*86400000)throw Error('현재 월 또는 가까운 예정 수업일을 확인해주세요.');
+ const db=database(),ref=db.doc(`opsAccounts/${id}`),invoiceId=`upcoming_${hash(JSON.stringify([id,day]))}`,invoiceRef=db.doc(`opsInvoices/${invoiceId}`);
+ return db.runTransaction(async tx=>{
+  const account=(await tx.get(ref)).data() as Account|undefined;
+  if(!account?.active)throw Error('수강 등록 상태를 확인해주세요.');
+  const [owner,all]=await Promise.all([tx.get(db.doc(`students/${account.sourceStudentId||id}`)),tx.get(db.collection('opsInvoices').where('studentId','==',id))]);
+  if(enrollmentState(courseLifecycle(owner.data()||{},id),today)!=='active')throw Error('휴원·퇴원 중인 과목입니다.');
+  const linked=all.docs.find(d=>d.data().status!=='cancelled'&&(d.data().lessonDate||d.data().cycleStart)===day);
+  if(linked)return {...linked.data(),id:linked.id} as Invoice;
+  if(all.docs.some(d=>d.id===invoiceId))throw Error('취소한 청구가 있는 날짜입니다. 기존 청구 내역을 확인해주세요.');
+  if(account.updatedAt!==input.expectedUpdatedAt||(account.schedule?.updatedAt||'')!==(input.expectedScheduleUpdatedAt||''))throw Error('출결 또는 수강 정보가 변경됐습니다. 다시 확인해주세요.');
+  if(account.nextPass)throw Error('다음 수강권의 예약 청구를 확인해주세요.');
+  if(day>today&&!plannedLesson(account.schedule,day))throw Error('수업 예정일이 변경됐습니다. 출석표를 확인해주세요.');
+  if(all.docs.some(d=>d.data().status==='open'&&!d.data().lessonDate&&!d.data().cycleStart))throw Error('날짜 미확인 청구를 먼저 확인해주세요.');
+  const stamp=now();const invoice:Invoice={id:invoiceId,studentId:id,name:account.name,units:account.planUnits,amount:account.planAmount,paid:0,status:'open',needsReview:false,createdAt:stamp,lessonDate:day};
+  tx.create(invoiceRef,invoice);tx.update(ref,{openInvoiceId:account.openInvoiceId||invoiceId,updatedAt:stamp});
+  audit(tx,db,actor,'invoice',id,{invoiceId,lessonDate:day,reason:'출석표 1회차 청구 확정'});return invoice;
+ });
+}

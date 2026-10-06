@@ -1,3 +1,4 @@
+import {billingHorizon} from '@/lib/operations/upcoming-billing';
 import {passCycleStarts} from '@/lib/operations/pass-history';
 import { courseGroup, type Imported } from '@/lib/operations/course-label';
 import { correctedLegacy, type LegacyCorrection } from '@/lib/operations/legacy-correction';
@@ -28,11 +29,12 @@ export async function GET(request: Request) {
       if (params.get('since') === revision) return Response.json({ unchanged: true, revision }, { headers: { 'Cache-Control': 'no-store', 'Server-Timing': timing.header() } });
     }
     const month = day.slice(0, 7); const end = new Date(`${month}-01T00:00:00Z`); end.setUTCMonth(end.getUTCMonth() + 1);
+    const forecastEnd=billingHorizon()>end.toISOString().slice(0,10)?billingHorizon():end.toISOString().slice(0,10);
     const [students, accounts, attendance, invoices, payments, notices, devices, imports, priorAttendance, cycleInvoices, legacyCorrections] = await Promise.all([
       timing.measure('students', () => db.collection('students').select('name', 'phone', 'instruments', 'instrument', 'lifecycle', 'courseLifecycles', 'operationsCourseGroups', 'courseUpdatedAt', 'phoneUpdatedAt').get()),
       timing.measure('accounts', () => db.collection('opsAccounts').get()),
-      timing.measure('attendance', () => db.collection('opsAttendance').where('day', '>=', `${month}-01`).where('day', '<', end.toISOString().slice(0, 10)).get()),
-      timing.measure('invoices', () => db.collection('opsInvoices').where('status', 'in', ['open', 'paid']).get()),
+      timing.measure('attendance', () => db.collection('opsAttendance').where('day', '>=', `${month}-01`).where('day', '<', forecastEnd).get()),
+      timing.measure('invoices', () => db.collection('opsInvoices').where('status', 'in', ['open', 'paid', 'cancelled']).get()),
       timing.measure('payments', () => db.collection('opsPayments').orderBy('at', 'desc').limit(100).get()),
       timing.measure('notices', () => db.collection('opsNotices').orderBy('createdAt', 'desc').limit(50).get()),
       timing.measure('devices', () => db.collection('opsDevices').get()),
@@ -71,6 +73,7 @@ export async function GET(request: Request) {
     const rows = (snap: FirebaseFirestore.QuerySnapshot) => snap.docs.map(d => ({ ...d.data(), id: d.id }));
     const namedRows = (snap: FirebaseFirestore.QuerySnapshot) => snap.docs.map(d => { const value=d.data(); return {...value,id:d.id,name:accountById.get(value.studentId)?.name||value.name}; });
     const invoiceRows = namedRows(invoices) as Snapshot['invoices'];
+    const attendanceRows=namedRows(attendance) as Attendance[];
     const correctionsById = new Map(legacyCorrections.docs.map(d => [d.id, d.data() as LegacyCorrection]));
     const allLegacy = [...legacyCells.values()].filter((v): v is NonNullable<typeof v> => Boolean(v)).map(row => correctedLegacy(row, correctionsById.get(`${row.studentId}_${row.day}`)));
     const cycleStarts = [...passCycleStarts(accounts.docs.map(d=>({...d.data(),id:d.id}) as Account)), ...cycleInvoices.docs.map(d=>d.data()).filter(v=>v.status!=='cancelled' && typeof v.cycleStart==='string').map(v=>({studentId:String(v.studentId),day:String(v.cycleStart)}))];
@@ -78,7 +81,7 @@ export async function GET(request: Request) {
     const priorSequence = attendanceSequence(accounts.docs.map(d=>({...d.data(),id:d.id}) as Account), priorAttendance.docs.map(d=>d.data() as Attendance), allLegacy.filter(r=>r.day<beforeMonth), {positions:{},cycleStarts:cycleStarts.filter(r=>r.day<beforeMonth)});
     const sequenceContext = { positions: priorSequence.positions, missedLessons: priorSequence.missedLessons, cycleFirstDays: priorSequence.cycleFirstDays, firstLessonTimes: priorSequence.firstLessonTimes, cycleStarts:cycleStarts.filter(r=>r.day>=beforeMonth && r.day<end.toISOString().slice(0,10)) };
     const unpaidCycleKeys = [...new Set(priorAttendance.docs.map(d=>d.data()).filter(r=>r.status==='present' && r.unpaidCycleStart).map(r=>`${r.studentId}_${r.unpaidCycleStart}`))];
-    return Response.json({ unpaidCycleKeys, ...(revision ? { revision } : {}), day, sequenceContext, legacyAttendance: allLegacy.filter(r=>r.day.startsWith(`${month}-`)), configured: noticeConfigured(), students: students.docs.flatMap<Snapshot['students'][number]>(d => {
+    return Response.json({ cancelledInvoiceKeys:invoiceRows.filter(i=>i.status==='cancelled'&&(i.lessonDate||i.cycleStart)).map(i=>`${i.studentId}_${i.lessonDate||i.cycleStart}`), unpaidCycleKeys, ...(revision ? { revision } : {}), day, sequenceContext, legacyAttendance: allLegacy.filter(r=>r.day.startsWith(`${month}-`)), configured: noticeConfigured(), students: students.docs.flatMap<Snapshot['students'][number]>(d => {
       const raw = d.data(); const base = { phoneUpdatedAt:raw.phoneUpdatedAt || '', courseUpdatedAt:raw.courseUpdatedAt || '', name: raw.name || '학생', phone: raw.phone || '', ...(raw.lifecycle ? { lifecycle: raw.lifecycle } : {}) };
       // Preserve existing single-account balances; do not silently duplicate them.
       if (accountById.has(d.id)) { const account = accountById.get(d.id)!; const attendanceGroup = courseGroup({ ...account, name: account.name || base.name }, raw, sourcesByStudent.get(d.id)); return [{ ...base, id: d.id, lifecycle:courseLifecycle(raw,d.id), instruments: service.studentSubjects(raw), ...(attendanceGroup ? { attendanceGroup } : {}) }]; }
@@ -86,7 +89,7 @@ export async function GET(request: Request) {
       if (!subjects.length) return [{ ...base, id: d.id, lifecycle:courseLifecycle(raw,d.id), instruments: [] }];
       const known = (subjectsByStudent.get(d.id) || []);
       return [...new Set([...subjects, ...known])].map(subject => { const id = service.enrollmentId(d.id, subject); const overrideGroup=raw.operationsCourseGroups?.[subject]; const display = overrideGroup ? (overrideGroup.includes('피아노')?'피아노':overrideGroup) : accountById.get(id)?.displaySubject || subject; const attendanceGroup = courseGroup({ ...accountById.get(id), subject, name: base.name }, raw, sourcesByStudent.get(d.id)); return { ...base, id, lifecycle:courseLifecycle(raw,id), sourceStudentId: d.id, subject, ...(attendanceGroup ? { attendanceGroup } : {}), name: `${base.name} · ${display}`, instruments: [display] }; });
-    }), accounts: rows(accounts), attendance: namedRows(attendance), invoices: invoiceRows.filter(i=>i.status==='open'), settledInvoices: invoiceRows.filter(i=>i.status==='paid'), payments: rows(payments), notices: notices.docs.map(d => { const n = d.data(); return { id: d.id, studentId: n.studentId, name: n.name, kind: n.kind, status: n.status, createdAt: n.createdAt, requestId: n.requestId || '', error: n.error || '' }; }), devices: devices.docs.map(d => { const v = d.data(); return { id: d.id, name: v.name, active: v.active && v.expiresAt > Date.now(), createdAt: v.createdAt }; }) }, { headers: { 'Cache-Control': 'no-store', 'Server-Timing': timing.header() } });
+    }), accounts: rows(accounts), attendance: attendanceRows.filter(r=>String(r.day).startsWith(`${month}-`)), forecastAttendance: attendanceRows.filter(r=>!String(r.day).startsWith(`${month}-`)), invoices: invoiceRows.filter(i=>i.status==='open'), settledInvoices: invoiceRows.filter(i=>i.status==='paid'), payments: rows(payments), notices: notices.docs.map(d => { const n = d.data(); return { id: d.id, studentId: n.studentId, name: n.name, kind: n.kind, status: n.status, createdAt: n.createdAt, requestId: n.requestId || '', error: n.error || '' }; }), devices: devices.docs.map(d => { const v = d.data(); return { id: d.id, name: v.name, active: v.active && v.expiresAt > Date.now(), createdAt: v.createdAt }; }) }, { headers: { 'Cache-Control': 'no-store', 'Server-Timing': timing.header() } });
   } catch (error) { return failure(error); }
 }
 export async function POST(request: Request) {
@@ -95,6 +98,7 @@ export async function POST(request: Request) {
     switch (input.action) {
       case 'correctLegacyAttendance': return Response.json(await service.correctLegacyAttendance(input,actor));
       case 'deleteEnrollment': case 'restoreEnrollment': return Response.json({ok:true,changes:await service.deleteEnrollment(input,actor)});
+      case 'prepareUpcomingInvoice': return Response.json({ok:true,invoice:await service.prepareUpcomingInvoice(input,actor)});
       case 'saveNextPass': await service.saveNextPass(input,actor); return Response.json({ok:true});
       case 'savePassHistory': await service.savePassHistory(input,actor); return Response.json({ok:true});
       case 'saveSchedule': case 'moveLesson': case 'placeTimetableLesson': case 'placeRegularTimetableLesson': return Response.json({ok:true,changes:await service.saveSchedule(input,actor)});
