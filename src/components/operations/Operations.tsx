@@ -1,5 +1,5 @@
 'use client';
-import {billingProjection} from '@/lib/operations/upcoming-billing';
+import {billingProjection, finalLessonInvoices} from '@/lib/operations/upcoming-billing';
 import { BillingList } from './BillingList';
 import { CollapsibleOverview } from './CollapsibleOverview';
 import { Trash2 } from 'lucide-react';
@@ -158,7 +158,7 @@ export function Operations({ demo = false }: { demo?: boolean }) {
   const activeAccounts=data.accounts.filter(a=>activeIds.has(a.id));
   const inactiveStudents=data.students.filter(s=>Boolean(s.lifecycle?.deletedAt)===showDeleted && enrollmentState(s.lifecycle,todayDate)!=='active' && (!inactiveSubject || groupName(s)===inactiveSubject)).sort((a,b)=>compareGroups(groupName(a),groupName(b))||compareStudents(a,b));
   const unconfigured = activeStudents.length - activeAccounts.length;
-  const open = [...data.invoices,...(projectedBilling?.upcoming||[])].filter(i => i.status === 'open').sort((a,b)=>invoiceDay(a).localeCompare(invoiceDay(b)) || compareNames(a.name,b.name) || a.id.localeCompare(b.id));
+  const open = finalLessonInvoices(data, [...data.invoices,...(projectedBilling?.upcoming||[])], todayDate).sort((a,b)=>invoiceDay(a).localeCompare(invoiceDay(b)) || compareNames(a.name,b.name) || a.id.localeCompare(b.id));
   const subjects = [...new Set([...GROUPS, ...data.students.map(groupName)])].sort(compareGroups);
   const students = activeStudents.filter(s => (s.name.includes(search.trim()) || s.phone.includes(search.trim())) && (!subject || groupName(s) === subject)).sort((a, b) => compareGroups(groupName(a), groupName(b)) || compareStudents(a, b));
   const account = panel?.type === 'account' ? panel.initial : undefined;
@@ -169,7 +169,7 @@ export function Operations({ demo = false }: { demo?: boolean }) {
     <header className="ops-header"><div><p className="brand">WHEE MUSIC</p><h1>출석·수납 관리</h1></div><div className="header-actions"><span className="subtle">{demo ? '원장님 화면 체험' : user?.email}</span><a href={demo ? '/check-in/demo' : '/check-in'} target="_blank" rel="noreferrer">출석 화면 ↗</a></div></header>
     <main className={`ops-main${tab==='billing'?' billing-view':tab==='monthly'?' monthly-view':''}`}><CollapsibleOverview><div className="section-head"><div><h2>조회 날짜 · {day}</h2><p>출석 기록을 보는 날짜입니다. 아이폰 출석은 한국 시간의 오늘 날짜로 자동 저장됩니다.{!demo && ' 출석 현황은 자동으로 업데이트됩니다.'}</p></div><div className="header-actions"><label>출석 조회일<input type="date" value={day} disabled={busy} onInput={e => { if (e.currentTarget.value) setDay(e.currentTarget.value); }} /></label><button disabled={busy} onClick={() => setDay(seoulDay())}>오늘</button></div></div><div className="summary-grid">
       <div><span>{day === seoulDay() ? '오늘 출석' : `${day} 출석`}</span><strong>{presentCount}<small>명</small></strong></div>
-      <div><span>결제 요청 대상</span><strong>{open.length}<small>명</small></strong></div>
+      <div><span>결제 요청 대상</span><strong>{open.length}<small>건</small></strong></div>
       <div><span>미납 합계</span><strong>{won(data.invoices.reduce((s, i) => s + i.amount - i.paid, 0))}</strong></div>
       <div><span>총 등록 현황</span><strong>{activeAccounts.length}<small>/ {activeStudents.length}건</small></strong>{unconfigured > 0 && <button className="text-button" onClick={() => setTab('students')}>{unconfigured}건 설정 필요 →</button>}</div>
     </div></CollapsibleOverview>
