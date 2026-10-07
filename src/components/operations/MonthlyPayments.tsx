@@ -2,7 +2,7 @@
 import {useEffect,useId,useMemo,useState} from 'react';
 import {seoulDay,type Payment,type Snapshot} from '@/lib/operations/model';
 import {paymentDay,courseInitial} from '@/lib/operations/billing-display';
-import {monthlyPayments,paymentMonthBounds} from '@/lib/operations/payment-month';
+import {monthlyPayments,paymentMonthBounds,receiptMethodGroup} from '@/lib/operations/payment-month';
 import {groupName} from '@/lib/operations/student-order';
 
 const won=(amount:number)=>amount.toLocaleString('ko-KR')+'원';
@@ -32,7 +32,7 @@ export function MonthlyPayments({data,demo}:{data:Snapshot;demo:boolean}){
  const summary=useMemo(()=>monthlyPayments(demo?data.payments:result?.month===month?result.payments:[],month),[demo,data.payments,result,month]);
  const tabs=[{method:'',label:'전체 수납',amount:summary.total,count:summary.rows.length},...summary.methods.map(m=>({...m,label:m.method}))];
  const selectedTab=Math.max(0,tabs.findIndex(t=>t.method===method));
- const visible=summary.rows.filter(p=>!method||p.method===method);
+ const visible=summary.rows.filter(p=>!method||receiptMethodGroup(p.method)===method);
  function move(offset:number){
   const date=new Date(month+'-01T00:00:00Z');date.setUTCMonth(date.getUTCMonth()+offset);
   setMonth(date.toISOString().slice(0,7));

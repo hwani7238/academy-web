@@ -2060,3 +2060,17 @@ test('monthly payment rejects another course, conflicting cycle, stale balance, 
  await assert.rejects(s.service.monthlyPayment({...base,requestId:'second'},'owner'),/변경/);
  assert.equal([...s.records.keys()].filter(k=>k.startsWith('opsPayments/')).length,1);
 });
+
+
+test('monthly receipts group transfers with cash without losing records or double-counting totals',()=>{
+ const {monthlyPayments,receiptMethodGroup}=setup().load('payment-month');
+ const methods=['현금','계좌이체','지역화폐','카드'];
+ const rows=methods.map((method,index)=>({id:String(index),method,amount:(index+1)*10000,paymentDate:'2026-10-07',at:'2026-10-07T01:00:00.000Z'}));
+ const result=monthlyPayments([...rows,{...rows[0],id:'previous',paymentDate:'2026-09-30'}],'2026-10');
+ assert.deepEqual(result.methods.map(m=>m.method),['현금','지역화폐','카드']);
+ assert.deepEqual(result.methods[0],{method:'현금',count:2,amount:30000});
+ assert.equal(result.total,100000);assert.equal(result.rows.length,4);
+ assert.equal(result.methods.reduce((sum,m)=>sum+m.amount,0),result.total);
+ assert.equal(result.rows.filter(p=>receiptMethodGroup(p.method)==='현금').length,2);
+ assert.equal(rows[1].method,'계좌이체');
+});

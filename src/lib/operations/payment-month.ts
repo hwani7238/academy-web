@@ -1,5 +1,7 @@
 import {paymentDay} from './billing-display';
-import {METHODS,type Payment} from './model';
+import {type Payment} from './model';
+
+export const receiptMethodGroup=(method:string)=>method==='계좌이체'?'현금':method;
 
 export function paymentMonthBounds(month: string) {
  if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) throw new Error('조회 월을 확인해주세요.');
@@ -14,8 +16,8 @@ export function monthlyPayments(payments: Payment[], month: string) {
  paymentMonthBounds(month);
  const rows = payments.filter(p=>paymentDay(p).slice(0,7)===month)
   .sort((a,b)=>paymentDay(b).localeCompare(paymentDay(a))||b.at.localeCompare(a.at)||a.id.localeCompare(b.id));
- const methods = [...new Set<string>([...METHODS,...rows.map(p=>p.method)])];
+ const methods = [...new Set<string>(['현금','지역화폐','카드',...rows.map(p=>receiptMethodGroup(p.method))])];
  return {rows,total:rows.reduce((sum,p)=>sum+p.amount,0),
-  methods:methods.map(method=>({method,count:rows.filter(p=>p.method===method).length,
-   amount:rows.filter(p=>p.method===method).reduce((sum,p)=>sum+p.amount,0)}))};
+  methods:methods.map(method=>({method,count:rows.filter(p=>receiptMethodGroup(p.method)===method).length,
+   amount:rows.filter(p=>receiptMethodGroup(p.method)===method).reduce((sum,p)=>sum+p.amount,0)}))};
 }
