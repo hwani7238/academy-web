@@ -39,7 +39,7 @@ export function BillingList({ data, invoices, busy, demo, pay, edit, action, sav
   const chunks=Array.from({length:columnCount},(_,index)=>visible.slice(index*perColumn,(index+1)*perColumn));
   const selectedInvoice = invoices.find(i => i.id === selected);
   return <div className="billing-compact" ref={layout}>
-    <div className="section-head billing-heading"><div><h2>청구·수납</h2><p>1회차 날짜순 · 가까운 32일의 예정 1회차도 함께 표시합니다. 예정일은 출석표 일정에 따라 바뀝니다.</p></div>
+    <div className="section-head billing-heading"><div><h2>청구·수납</h2><p>잔여 1회 이하인 학생의 청구만 표시합니다. 마지막 수업을 마친 미수납 학생도 포함합니다.</p></div>
       <label>과목<select value={subject} onChange={e=>setSubject(e.target.value)}><option value="">전체 과목</option>{subject && !subjects.includes(subject) && <option value={subject}>{subject}</option>}{subjects.map(s=><option key={s}>{s}</option>)}</select></label>
       <label>학생 찾기<input placeholder="이름" value={search} onChange={e=>setSearch(e.target.value)}/></label>
     </div>
