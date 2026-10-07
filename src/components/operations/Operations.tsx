@@ -1,0 +1,227 @@
+'use client';
+import {billingProjection, finalLessonInvoices} from '@/lib/operations/upcoming-billing';
+import { BillingList } from './BillingList';
+import { CollapsibleOverview } from './CollapsibleOverview';
+import { Trash2 } from 'lucide-react';
+import { DeleteEnrollmentDialog } from './DeleteEnrollmentDialog';
+import { BalanceReview } from './BalanceReview';
+import {NextPassDialog} from './NextPassDialog';
+import { ScheduleDialog } from './ScheduleDialog';
+import { ScheduleSummary } from './ScheduleSummary';
+import { CloseButton } from './CloseButton';
+import { PaymentAmountInput } from './PaymentAmountInput';
+import { applySnapshotChanges, reconcileSnapshot, type SnapshotChanges } from '@/lib/operations/snapshot-changes';
+import { autoRefresh, ATTENDANCE_POLL_MS } from '@/lib/operations/auto-refresh';
+import { enrollmentState } from '@/lib/operations/lifecycle';
+import { LifecycleDialog } from './LifecycleDialog';
+
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import type { User } from 'firebase/auth';
+import { Account, Attendance, Invoice, Snapshot, METHODS, seoulDay, ATTENDANCE_LABELS } from '@/lib/operations/model';
+import { AttendanceTimeDialog } from './AttendanceTimeDialog';
+import { orderDailyAttendance, type DailyAttendanceOrder } from '@/lib/operations/attendance-order';
+import { dailyCheckins } from '@/lib/operations/daily-checkins';
+import { attendanceClock } from '@/lib/operations/attendance-time';
+import { AttendanceEdit } from './AttendanceEdit';
+import { Announcements } from './Announcements';
+import { CourseDialog } from './CourseDialog';
+import { InvoiceEditDialog } from './InvoiceEditDialog';
+import { InvoiceDialog } from './InvoiceDialog';
+import { RegisterStudent } from './RegisterStudent';
+import { GROUPS, groupName, compareGroups, compareStudents, compareNames, displayCourseName, displayEnrollmentName } from '@/lib/operations/student-order';
+import { Timetable } from './Timetable';
+import { MonthlyAttendance } from './MonthlyAttendance';
+import { CheckIn } from './CheckIn';
+import { checkInName } from '@/lib/operations/course-label';
+import { sample, demoAction } from './demo';
+import './operations.css';
+const invoiceDay = (invoice: Invoice) => invoice.lessonDate || invoice.cycleStart || seoulDay(new Date(invoice.createdAt));
+const won = (n: number) => `${n.toLocaleString('ko-KR')}원`;
+const time = (v: string) => new Date(v).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul', month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+const STATUS: Record<string, string> = { queued: '발송 대기', blocked: '설정 필요', processing: '처리 중 · 결과 확인', submitted: 'NHN 접수', failed: '발송 실패', unknown: '결과 확인 필요', cancelled: '취소', demo: '체험 기록', review: '청구 확인 필요' };
+type Panel = { type: 'balance'; row: Account; requestId: string } | { type: 'account'; id: string; initial?: Account; invoice?: Invoice } | { type: 'adjust'; row: Attendance } | { type: 'payment'; row: Invoice; requestId: string } | null;
+export function Operations({ demo = false }: { demo?: boolean }) {
+  const [data, setData] = useState<Snapshot | null>(() => demo ? sample() : null); const dataRef = useRef(data); const refreshVersion = useRef(0); const mutation = useRef(false); const pendingRefresh = useRef(false); const latestRefresh = useRef<() => void>(() => {});
+  const [user, setUser] = useState<User | null>(null); const [authReady, setAuthReady] = useState(demo);
+  const [tab, setTab] = useState(demo ? 'today' : 'monthly'); const [day, setDay] = useState(seoulDay()); const [search, setSearch] = useState('');
+  const [lifecycleTarget,setLifecycleTarget]=useState<{student:Snapshot['students'][number];status:'paused'|'withdrawn'}|null>(null);
+  const [reviewingBalances,setReviewingBalances]=useState(false);
+  const [passAccount,setPassAccount]=useState<Account|null>(null);
+  const [scheduleAccount,setScheduleAccount]=useState<Account|null>(null);
+  const [loadedDay, setLoadedDay] = useState('');
+  const [todayDate,setTodayDate]=useState(seoulDay());
+  useEffect(()=>{const timer=setInterval(()=>setTodayDate(seoulDay()),30000);return ()=>clearInterval(timer);},[]);
+  const [courseStudent,setCourseStudent]=useState<Snapshot['students'][number]|null>(null);
+  const [invoiceAccount,setInvoiceAccount]=useState<Account|null>(null);
+  const [editingInvoice, setEditingInvoice] = useState<Invoice | null>(null);
+  const [dailyOrder, setDailyOrder] = useState<DailyAttendanceOrder>('earliest');
+  const [timeAttendance, setTimeAttendance] = useState<Attendance | null>(null);
+  const [registering, setRegistering] = useState(false);
+  const [subject, setSubject] = useState('');
+  const [inactiveSubject, setInactiveSubject] = useState('');
+  const [showDeleted, setShowDeleted] = useState(false);
+  const [deletingStudent, setDeletingStudent] = useState<Snapshot['students'][number] | null>(null);
+  const [busy, setBusy] = useState(false); const [error, setError] = useState(''); const [message, setMessage] = useState(''); const [panel, setPanel] = useState<Panel>(null); const [pairCode, setPairCode] = useState('');
+  useEffect(() => { if (demo) return; let stopped = false; let off: (() => void) | undefined;
+    void Promise.all([import('@/lib/firebase-auth'), import('firebase/auth')]).then(([f, a]) => { if (!stopped) off = a.onAuthStateChanged(f.auth, u => { setUser(u); setAuthReady(true); }); });
+    return () => { stopped = true; off?.(); };
+  }, [demo]);
+  const api = useCallback(async (body?: Record<string, unknown>, since?: string | null) => {
+    if (!user) throw new Error('원장 계정으로 로그인해주세요.');
+    const response = await fetch(`/api/operations?day=${day}${body || since === null ? '' : `&sync=1${since ? `&since=${encodeURIComponent(since)}` : ''}`}`, { method: body ? 'POST' : 'GET', cache: 'no-store', ...(!body ? { signal: AbortSignal.timeout(20000) } : {}), headers: { 'Authorization': `Bearer ${await user.getIdToken()}`, ...(body ? { 'Content-Type': 'application/json' } : {}) }, ...(body ? { body: JSON.stringify(body) } : {}) });
+    const result = await response.json(); if (!response.ok) throw new Error(result.error); return result;
+  }, [user, day]);
+  const refresh = useCallback(async (force = false, since?: string) => {
+    if (mutation.current && !force) { pendingRefresh.current = true; return false as const; }
+    const version = ++refreshVersion.current;
+    try {
+      const result = await api(undefined, force ? null : since);
+      if (version !== refreshVersion.current) return false as const;
+      if (!result.unchanged) {
+        const snapshot = { ...result };
+        delete snapshot.revision;
+        const next = reconcileSnapshot(dataRef.current, snapshot as Snapshot);
+        if (next !== dataRef.current) { setData(next); dataRef.current = next; }
+        setLoadedDay(day);
+      }
+      setError('');
+      return { revision: result.revision as string, refreshed: !result.unchanged };
+    } catch (e) {
+      if (version === refreshVersion.current) setError(e instanceof Error ? e.message : '불러오지 못했습니다.');
+      return false as const;
+    }
+  }, [api, day]);
+  latestRefresh.current = () => { void refresh(); };
+  useEffect(() => {
+    if (demo || !user) return;
+    const live = autoRefresh({
+      visible: () => document.visibilityState === 'visible',
+      refresh: since => refresh(false, since),
+    });
+    const resume = () => { void live.check(true); };
+    resume();
+    const timer = setInterval(() => { void live.check(); }, ATTENDANCE_POLL_MS);
+    document.addEventListener('visibilitychange', resume);
+    window.addEventListener('focus', resume);
+    window.addEventListener('online', resume);
+    const invalidateRefresh = () => { refreshVersion.current++; };
+    return () => {
+      live.stop(); clearInterval(timer); invalidateRefresh();
+      document.removeEventListener('visibilitychange', resume);
+      window.removeEventListener('focus', resume);
+      window.removeEventListener('online', resume);
+    };
+  // Reconnect only when the user or selected date changes; keep forms and filters mounted.
+  }, [demo, user, day, refresh]);
+  const act = useCallback(async (input: Record<string, unknown>) => {
+    if (mutation.current) throw new Error('앞선 저장이 처리 중입니다.');
+    mutation.current = true; refreshVersion.current++;
+    setBusy(true); setError(''); setMessage('');
+    try {
+      let result: Record<string, unknown>;
+      if (demo) { const next = demoAction(dataRef.current!, input); setData(next.data); dataRef.current = next.data; result = next.result; }
+      else {
+        result = await api(input);
+        if (result.changes && dataRef.current) {
+          const next = applySnapshotChanges(dataRef.current, result.changes as SnapshotChanges);
+          dataRef.current = next; setData(next);
+        } else { await refresh(true); }
+      }
+      setMessage(input.action === 'deleteEnrollment' ? '목록에서 삭제했습니다. 삭제된 항목에서 복원할 수 있습니다.' : input.action === 'restoreEnrollment' ? '복원했습니다.' : input.action === 'process' ? (demo ? '체험에서는 실제 메시지를 보내지 않습니다.' : '발송 대기 항목을 처리했습니다. 결과를 확인해주세요.') : '저장했습니다.');
+      return result;
+    } catch (e) { setError(e instanceof Error ? e.message : '처리하지 못했습니다.'); throw e; } finally { mutation.current = false; setBusy(false); if (pendingRefresh.current) { pendingRefresh.current = false; latestRefresh.current(); } }
+  }, [api, demo, refresh]);
+  const click = (input: Record<string, unknown>) => { void act(input).catch(() => {}); };
+  const submit = (e: React.FormEvent<HTMLFormElement>, action: string, extra: Record<string, unknown>) => {
+    e.preventDefault(); const f = new FormData(e.currentTarget); const values = Object.fromEntries(f.entries());
+    const input: Record<string, unknown> = { ...values, ...extra, action };
+    for (const field of ['planUnits', 'planAmount', 'remaining', 'units', 'amount']) if (f.has(field)) input[field] = Number(field === 'amount' ? String(f.get(field)).replace(/,/g, '') : f.get(field));
+    if (action === 'payment' && panel?.type === 'payment') {
+      const amountInput = e.currentTarget.elements.namedItem('amount') as HTMLInputElement;
+      const amount = input.amount as number;
+      amountInput.setCustomValidity(Number.isSafeInteger(amount) && amount >= 1 && amount <= panel.row.amount - panel.row.paid ? '' : `1원부터 ${(panel.row.amount - panel.row.paid).toLocaleString('ko-KR')}원까지 입력해주세요.`);
+      if (!amountInput.reportValidity()) return;
+    }
+    if (action === 'configure') { input.phones = String(f.get('phones')).split(/[,\n]/); input.autoBilling = f.get('autoBilling') === 'on'; input.firstBilling = f.get('firstBilling') === 'on'; input.active = f.get('active') === 'on'; }
+    void act(input).then(() => setPanel(null)).catch(() => {});
+  };
+  const projectedBilling=useMemo(()=>data?billingProjection(data):undefined,[data]);
+  if (!authReady) return <main className="whee-ops gate"><h1>출석·수납 관리</h1><p>계정을 확인하고 있습니다.</p></main>;
+  if (!demo && !user) return <main className="whee-ops gate"><p className="brand">WHEE MUSIC</p><h1>원장님 관리실</h1><p>출석과 수납을 확인하려면 원장 계정으로 로그인해주세요.</p><a className="primary" href="/login">기존 계정으로 로그인</a><a href="/operations/demo">가상 학생으로 먼저 체험하기 →</a></main>;
+  if (!data) return <main className="whee-ops gate"><h1>출석·수납 관리</h1><p role="alert">{error || '자료를 불러오고 있습니다.'}</p><button onClick={() => void refresh()}>다시 불러오기</button><a href="/operations/demo">가상 학생으로 체험하기</a></main>;
+  const todayAttendance = orderDailyAttendance(dailyCheckins(data.attendance, day), dailyOrder);
+  const personByEnrollment = new Map([...data.accounts, ...data.students].map(s => [s.id, s.sourceStudentId || s.id]));
+  const presentCount = new Set(todayAttendance.map(a => personByEnrollment.get(a.studentId) || a.studentId)).size;
+  const activeStudents=data.students.filter(s=>enrollmentState(s.lifecycle,todayDate)==='active');
+  const activeStudentCount = new Set(activeStudents.map(s => s.sourceStudentId || s.id)).size;
+  const activeIds=new Set(activeStudents.map(s=>s.id));
+  const activeAccounts=data.accounts.filter(a=>activeIds.has(a.id));
+  const inactiveStudents=data.students.filter(s=>Boolean(s.lifecycle?.deletedAt)===showDeleted && enrollmentState(s.lifecycle,todayDate)!=='active' && (!inactiveSubject || groupName(s)===inactiveSubject)).sort((a,b)=>compareGroups(groupName(a),groupName(b))||compareStudents(a,b));
+  const unconfigured = activeStudents.length - activeAccounts.length;
+  const open = finalLessonInvoices(data, [...data.invoices,...(projectedBilling?.upcoming||[])], todayDate).sort((a,b)=>invoiceDay(a).localeCompare(invoiceDay(b)) || compareNames(a.name,b.name) || a.id.localeCompare(b.id));
+  const subjects = [...new Set([...GROUPS, ...data.students.map(groupName)])].sort(compareGroups);
+  const students = activeStudents.filter(s => (s.name.includes(search.trim()) || s.phone.includes(search.trim())) && (!subject || groupName(s) === subject)).sort((a, b) => compareGroups(groupName(a), groupName(b)) || compareStudents(a, b));
+  const account = panel?.type === 'account' ? panel.initial : undefined;
+  const student = panel?.type === 'account' ? data.students.find(s => s.id === panel.id) : undefined;
+  const tabs = [['students', '총 등록 현황'], ['monthly', '월별 출석표'], ['billing', '청구·수납'], ['today', '당일 출석 현황'], ['timetable', '총 시간표'], ['announcements', '카카오 공지'], ['notices', '알림 내역'], ['devices', '출석 기기'], ['inactive', '퇴원 및 휴원']];
+  return <div className="whee-ops operations">
+    {demo && <div className="demo-banner">가상 학생 체험 · 실제 학생 정보와 연결되지 않으며 메시지·결제가 발생하지 않습니다. <button onClick={() => { const next = sample(); dataRef.current = next; setData(next); setPanel(null); setMessage('체험을 초기화했습니다.'); }}>체험 초기화</button></div>}
+    <header className="ops-header"><div><p className="brand">WHEE MUSIC</p><h1>출석·수납 관리</h1></div><div className="header-actions"><span className="subtle">{demo ? '원장님 화면 체험' : user?.email}</span><a href={demo ? '/check-in/demo' : '/check-in'} target="_blank" rel="noreferrer">출석 화면 ↗</a></div></header>
+    <main className={`ops-main${tab==='billing'?' billing-view':tab==='monthly'?' monthly-view':''}`}><CollapsibleOverview><div className="section-head"><div><h2>조회 날짜 · {day}</h2><p>출석 기록을 보는 날짜입니다. 아이폰 출석은 한국 시간의 오늘 날짜로 자동 저장됩니다.{!demo && ' 출석 현황은 자동으로 업데이트됩니다.'}</p></div><div className="header-actions"><label>출석 조회일<input type="date" value={day} disabled={busy} onInput={e => { if (e.currentTarget.value) setDay(e.currentTarget.value); }} /></label><button disabled={busy} onClick={() => setDay(seoulDay())}>오늘</button></div></div><div className="summary-grid">
+      <div><span>{day === seoulDay() ? '오늘 출석' : `${day} 출석`}</span><strong>{presentCount}<small>명</small></strong></div>
+      <div><span>결제 요청 대상</span><strong>{open.length}<small>건</small></strong></div>
+      <div><span>미납 합계</span><strong>{won(data.invoices.reduce((s, i) => s + i.amount - i.paid, 0))}</strong></div>
+      <div><span>총 등록 현황</span><strong>{activeAccounts.length}<small>/ {activeStudents.length}건</small></strong>{unconfigured > 0 && <button className="text-button" onClick={() => setTab('students')}>{unconfigured}건 설정 필요 →</button>}</div>
+    </div></CollapsibleOverview>
+    <nav className="ops-tabs" aria-label="관리 메뉴">{tabs.map(([id, label]) => <button key={id} aria-current={tab === id ? 'page' : undefined} onClick={() => { setTab(id); if(id==='billing' && day.slice(0,7)!==seoulDay().slice(0,7))setDay(seoulDay()); setMessage(''); }}>{label}{id === 'billing' && open.length > 0 && <b>{open.length}</b>}{id === 'today' && <b>{presentCount}</b>}</button>)}</nav>
+    {error && <p className="error" role="alert">{error} {!demo && loadedDay !== day && <button onClick={() => void refresh()}>다시 불러오기</button>}</p>}{message && <p className="success" role="status">{message}</p>}
+    <div className={demo && tab === 'today' ? 'workspace-with-kiosk' : ''}><section className="surface">
+    {tab === 'timetable' && <Timetable data={data} busy={busy} edit={setScheduleAccount} save={act}/> }
+    {tab === 'announcements' && <Announcements user={user} data={data} demo={demo}/> }
+    {tab === 'monthly' && <MonthlyAttendance data={data} day={day} busy={busy} loading={!demo && loadedDay !== day} onDayChange={setDay} save={act} />}
+    {tab === 'today' && <><div className="section-head"><div><h2>당일 출석 현황</h2><p>출석 체크 화면에서 번호로 출석한 학생만 표시합니다. 여행·결석·수동 기록은 월별 출석표에서 확인하세요.</p></div></div>
+      {todayAttendance.length ? <div className="table-wrap"><table><thead><tr><th aria-sort={dailyOrder === 'name' ? 'ascending' : 'none'}><span className="attendance-sort-heading">학생<button type="button" className="attendance-sort-button" aria-label="학생 이름 가나다순 정렬" aria-pressed={dailyOrder === 'name'} title="이름 가나다순" onClick={() => setDailyOrder('name')}>ㄱㄴㄷ</button></span></th><th>상태</th><th aria-sort={dailyOrder === 'name' ? 'none' : dailyOrder === 'earliest' ? 'ascending' : 'descending'}><span className="attendance-sort-heading">기록 시간<button type="button" className="attendance-sort-button" aria-label={dailyOrder === 'earliest' ? '나중에 온 순으로 정렬' : '빨리 온 순으로 정렬'} aria-pressed={dailyOrder !== 'name'} title={dailyOrder === 'latest' ? '현재 나중에 온 순 · 누르면 빨리 온 순' : dailyOrder === 'earliest' ? '현재 빨리 온 순 · 누르면 나중에 온 순' : '빨리 온 순으로 정렬'} onClick={() => setDailyOrder(v => v === 'earliest' ? 'latest' : 'earliest')}>{dailyOrder === 'latest' ? '↓' : '↑'}</button></span></th><th>차감</th><th>남은 횟수</th><th>비고</th><th>관리</th></tr></thead><tbody>{todayAttendance.map(a => <tr key={a.id}><td><strong>{displayCourseName(a.name)}</strong><small>{data.accounts.find(s => s.id === a.studentId)?.checkinSuffixes.filter(n => /^[0-9]{4}$/.test(n)).join(' · ') || '—'}</small></td><td>{ATTENDANCE_LABELS[a.status || "present"]}</td><td><button type="button" className="attendance-time-button" disabled={busy} aria-label={`${a.name} 출석 시간 수정`} onClick={() => setTimeAttendance({...a})}><span>{attendanceClock(a) || '시간 미기록'}</span><span aria-hidden="true">⋮</span></button></td><td>{a.units}회</td><td>{data.accounts.find(s => s.id === a.studentId)?.remaining}회</td><td>{a.note || '—'}</td><td><button disabled={busy} onClick={() => setPanel({ type: 'adjust', row: a })}>수정</button></td></tr>)}</tbody></table></div> : <div className="empty"><h3>아직 출석 기록이 없습니다.</h3><p>{demo ? '옆 출석 화면에 1234를 입력하고 김하늘 학생을 선택해보세요. 마지막 수업이 차감되면 청구가 생성됩니다.' : '수강 설정을 저장한 학생이 등록된 아이폰에서 출석하면 여기에 표시됩니다.'}</p></div>}</>}
+    {tab === 'students' && <><div className="section-head"><div><h2>총 등록 현황 <span className="student-total" aria-label={`현재 재원생 ${activeStudentCount}명`}>{activeStudentCount}</span></h2><p>이름·과목을 누르면 이름·보호자 번호·과목을 수정하고, 남은 횟수를 누르면 횟수를 수정할 수 있어요.</p></div><button className="primary" disabled={busy} onClick={()=>setRegistering(true)}>＋ 신규 등록</button>{!demo && <button disabled={busy} onClick={()=>setReviewingBalances(true)}>잔여 점검</button>}<label>과목<select value={subject} onChange={e => setSubject(e.target.value)}><option value="">전체 과목</option>{subjects.map(s => <option key={s} value={s}>{s}</option>)}</select></label><label>학생 찾기<input placeholder="이름 또는 전화번호" value={search} onChange={e => setSearch(e.target.value)} /></label></div><div className="table-wrap"><table><thead><tr><th>학생</th><th>수강권</th><th>수강료</th><th>남은 횟수</th><th>상태</th><th>관리</th></tr></thead><tbody>{students.map(s => { const a = data.accounts.find(a => a.id === s.id); return <tr key={s.id}><td><button className="remaining-value" disabled={busy} title="이름·보호자 번호 수정 · 과목·반 변경 또는 추가" aria-label={`${displayEnrollmentName(s)} 과목 관리`} onClick={()=>setCourseStudent(s)}>{displayEnrollmentName(s)}</button><small>{s.phone}</small></td><td>{a ? <><button className="remaining-value" disabled={busy} aria-label={`${displayEnrollmentName(s)} 수강권 관리`} title="다음 수강권 예약 · 이전 이력 수정" onClick={()=>setPassAccount(a)}>{a.planUnits}회</button>{a.nextPass&&<small className="next-pass-label">다음 {a.nextPass.units}회 · {won(a.nextPass.amount)}<br/>{a.nextPass.mode==='date'?`${a.nextPass.start.slice(5).replace('-','/')}부터`:'잔여 소진 후'}</small>}<small><ScheduleSummary schedule={a.schedule} today={todayDate} busy={busy} onClick={()=>setScheduleAccount(a)}/></small></> : '설정 전'}</td><td>{a ? won(a.planAmount) : '—'}</td><td>{a ? <button type="button" className={`remaining-value${a.remaining <= 0 ? ' depleted' : ''}`} disabled={busy} title="잔여 횟수 수정" aria-label={`${displayEnrollmentName(s)} 남은 ${a.remaining}회 수정`} onClick={()=>setPanel({type:'balance',row:{...a},requestId:crypto.randomUUID()})}>{a.remaining}회</button> : '—'}</td><td>{!a ? '설정 필요' : a.active ? '수강 중' : '중지'}</td><td><button disabled={busy} onClick={() => setPanel({ type: 'account', id: s.id, initial: a ? {...a} : undefined, invoice: data.invoices.find(i => i.id === a?.openInvoiceId) })}>{a ? '설정 수정' : '수강 등록'}</button><button disabled={busy} onClick={()=>setLifecycleTarget({student:s,status:'paused'})}>휴원</button><button disabled={busy} onClick={()=>setLifecycleTarget({student:s,status:'withdrawn'})}>퇴원</button>{a && !a.openInvoiceId && !a.nextPass && <button disabled={busy} className="quiet" onClick={() => setInvoiceAccount({...a})}>청구 만들기</button>}</td></tr>; })}</tbody></table></div>{!students.length && <div className="empty">선택한 과목과 검색어에 해당하는 학생이 없습니다.</div>}</>}
+    {tab === 'billing' && <BillingList data={data} invoices={open} busy={busy} demo={demo} save={act} pay={i=>setPanel({type:'payment',row:i,requestId:crypto.randomUUID()})} edit={setEditingInvoice} action={(action,i)=>click({action,invoiceId:i.id})}/>}
+    {tab === 'inactive' && <><div className="section-head"><div><h2>{showDeleted?'삭제된 항목':'퇴원 및 휴원'}</h2>
+      {showDeleted?<p>복원하면 삭제 전 상태로 돌아갑니다. 휴원 종료일이 지났다면 총 등록 현황으로 돌아갑니다.</p>:<><p>휴원 종료일을 누르면 수정할 수 있습니다. 종료일 다음 날 자동 복귀하며 이전 기록과 잔여 횟수는 보관됩니다.</p><p>여러 과목은 과목별로 표시됩니다. 휴원·퇴원·복귀·재등록 및 삭제는 선택한 과목에만 적용됩니다.</p></>}
+      </div><button type="button" aria-pressed={showDeleted} onClick={()=>setShowDeleted(v=>!v)}>{showDeleted?'퇴원 및 휴원으로 돌아가기':`삭제된 항목 (${data.students.filter(s=>s.lifecycle?.deletedAt).length})`}</button>
+      <label>과목<select value={inactiveSubject} onChange={e=>setInactiveSubject(e.target.value)}><option value="">전체 과목</option>{subjects.map(v=><option key={v} value={v}>{v}</option>)}</select></label></div>
+      <div className="table-wrap"><table><thead><tr><th>학생</th><th>상태</th><th>{showDeleted?'삭제일':'휴원 종료일 / 퇴원일'}</th><th>비고</th><th>관리</th></tr></thead><tbody>{inactiveStudents.map(s=><tr key={s.id}>
+        <td><strong>{s.name.split(' · ')[0]} · {groupName(s)}</strong><small>{s.phone}</small></td><td>{showDeleted?'삭제됨':enrollmentState(s.lifecycle,todayDate)==='paused'?'휴원':'퇴원'}</td>
+        <td>{showDeleted?seoulDay(new Date(s.lifecycle!.deletedAt!)):enrollmentState(s.lifecycle,todayDate)==='paused'?<button className="remaining-value" title="휴원 종료일 수정" aria-label={`${s.name.split(' · ')[0]} ${groupName(s)} 휴원 종료일 수정`} disabled={busy} onClick={()=>setLifecycleTarget({student:s,status:'paused'})}>{s.lifecycle?.until||'날짜 설정'}</button>:s.lifecycle?.withdrawnOn||'미기록'}</td>
+        <td>{s.lifecycle?.note||'—'}</td><td><div className="inactive-actions">{showDeleted?<button disabled={busy} onClick={()=>click({action:'restoreEnrollment',studentId:s.id,sourceStudentId:s.sourceStudentId||s.id,expectedUpdatedAt:s.lifecycle?.updatedAt||''})}>복원</button>:<>
+          <button disabled={busy} onClick={()=>click({action:'changeLifecycle',studentId:s.id,sourceStudentId:s.sourceStudentId||s.id,status:'active',expectedUpdatedAt:s.lifecycle?.updatedAt||''})}>{enrollmentState(s.lifecycle,todayDate)==='paused'?'지금 복귀':'재등록'}</button>
+          <button type="button" className="inactive-delete" title="목록에서 삭제" aria-label={`${displayEnrollmentName(s)} 삭제`} disabled={busy} onClick={()=>setDeletingStudent(s)}><Trash2 size={18} aria-hidden="true"/></button>
+        </>}</div></td></tr>)}</tbody></table></div>{!inactiveStudents.length&&<p className="empty">{showDeleted?'선택한 과목에 삭제된 항목이 없습니다.':'선택한 과목에 퇴원·휴원한 학생이 없습니다.'}</p>}</>}
+    {deletingStudent && <DeleteEnrollmentDialog student={deletingStudent} save={act} close={()=>setDeletingStudent(null)}/>}
+    {tab === 'notices' && <><div className="section-head"><div><h2>알림 발송 내역</h2><p>최근 50건 · ‘NHN 접수’는 전달 완료와 다릅니다. 최종 결과는 NHN 내역에서 확인하세요.</p></div><button disabled={busy} onClick={() => click({ action: 'process' })}>{busy ? '처리 중…' : '발송 대기 처리'}</button>{data.notices.some(n => n.status === 'blocked') && <button disabled={busy} onClick={() => click({ action: 'releaseBlocked' })}>설정 완료 후 다시 처리</button>}</div>{!data.configured && <p className="notice">{demo ? '체험에서는 발송하지 않습니다.' : '출석 알림톡 설정이 필요합니다. 결제 안내는 결제선생 API 연결 전까지 발송되지 않습니다.'}</p>}<div className="table-wrap"><table><thead><tr><th>시간</th><th>학생</th><th>종류</th><th>상태</th><th>확인 사항</th></tr></thead><tbody>{data.notices.map(n => <tr key={n.id}><td>{time(n.createdAt)}</td><td>{n.name}</td><td>{n.kind === 'attendance' ? '출석 알림' : '결제 안내'}</td><td><span className="pill">{STATUS[n.status] || n.status}</span></td><td>{n.error || n.requestId || '—'}</td></tr>)}</tbody></table>{!data.notices.length && <div className="empty">아직 알림 기록이 없습니다.</div>}</div></>}
+    {tab === 'devices' && <><div className="section-head"><div><h2>아이폰 출석 기기</h2><p>등록된 기기만 출석할 수 있습니다. 등록 코드는 10분 동안 한 번 사용할 수 있어요.</p></div><button className="primary" disabled={busy} onClick={() => { void act({ action: 'pair' }).then(r => setPairCode(String(r.code))).catch(() => {}); }}>등록 코드 만들기</button></div>
+      {pairCode && <div className="notice"><p>아이폰에서 <strong>{typeof window === 'undefined' ? '/check-in' : `${window.location.origin}/check-in`}</strong>을 열고 아래 코드를 입력해주세요.</p><code className="pair-code">{pairCode}</code><button onClick={() => { void navigator.clipboard.writeText(pairCode).then(() => setMessage('등록 코드를 복사했습니다.')).catch(() => setError('코드를 직접 복사해주세요.')); }}>코드 복사</button></div>}
+      {data.devices.map(d => <div className="invoice-row" key={d.id}><div><strong>{d.name}</strong><p>{time(d.createdAt)} 등록 · {d.active ? '사용 중' : '중지됨'}</p></div>{d.active && <button disabled={busy} onClick={() => { if (window.confirm('이 기기의 출석 권한을 중지할까요?')) click({ action: 'revoke', deviceId: d.id }); }}>사용 중지</button>}</div>)}{!data.devices.length && <div className="empty">등록된 출석 기기가 없습니다.</div>}</>}
+    </section>{demo && tab === 'today' && <aside><CheckIn demo={{ lookup: digits => data.accounts.filter(a => a.active && activeIds.has(a.id) && a.checkinSuffixes.includes(digits)).map(a => ({ id: a.id, name: checkInName(a, {}) })), checkIn: id => act({ action: 'demoCheckIn', studentId: id }) }} /></aside>}</div>
+    </main>
+    {reviewingBalances && user && <BalanceReview user={user} save={act} close={()=>setReviewingBalances(false)}/>}
+    {passAccount && <NextPassDialog account={passAccount} invoices={[...data.invoices,...(data.settledInvoices||[])]} save={act} close={()=>setPassAccount(null)}/>}
+    {scheduleAccount && <ScheduleDialog account={scheduleAccount} save={act} close={()=>setScheduleAccount(null)}/>}
+    {timeAttendance && <AttendanceTimeDialog attendance={timeAttendance} busy={busy} save={act} close={() => setTimeAttendance(null)} />}
+    {lifecycleTarget && <LifecycleDialog {...lifecycleTarget} save={act} close={()=>setLifecycleTarget(null)}/>}
+    {courseStudent && <CourseDialog student={courseStudent} save={act} close={()=>setCourseStudent(null)}/>}
+    {editingInvoice && <InvoiceEditDialog invoice={editingInvoice} account={data.accounts.find(a => a.id === editingInvoice.studentId)} save={act} close={() => setEditingInvoice(null)} />}
+    {invoiceAccount && <InvoiceDialog account={invoiceAccount} save={act} close={()=>setInvoiceAccount(null)}/>}
+    {registering && <RegisterStudent save={async input=>{const result=await act(input);setSearch('');setSubject('');return result;}} close={()=>setRegistering(false)} />}
+    {panel && <div className="panel-backdrop"><section className="edit-panel" role="dialog" aria-modal="true" aria-labelledby="edit-title"><div className="section-head"><h2 id="edit-title">{panel.type === 'account' ? `${student?.name} · 수강 설정` : panel.type === 'balance' ? `${displayCourseName(panel.row.name)} · 잔여 횟수 수정` : panel.type === 'adjust' ? `${panel.row.name} · 출석 수정` : `${panel.row.name} · 수납 완료`}</h2><CloseButton disabled={busy} onClick={() => setPanel(null)} /></div>
+      {panel.type === 'account' && <form onSubmit={e => submit(e, 'configure', { studentId: panel.id, syncOpenInvoice: true, expectedUpdatedAt: panel.initial?.updatedAt || '', expectedOpenInvoiceId: panel.initial?.openInvoiceId || '', expectedInvoiceUpdatedAt: panel.invoice?.updatedAt || '', ...(student?.sourceStudentId ? { sourceStudentId: student.sourceStudentId, subject: student.subject } : {}) })} key={panel.id}><label>수강권 횟수<input name="planUnits" type="number" min="1" max="200" defaultValue={account?.planUnits || 8} onChange={e=>{if(!account){const remaining=e.currentTarget.form?.elements.namedItem("remaining") as HTMLInputElement|null;if(remaining)remaining.value=e.currentTarget.value;}}} required /></label><label>수강료 (원)<input name="planAmount" type="number" min="1" max="100000000" defaultValue={account?.planAmount || ''} required />{panel.invoice?.status === 'open' && !panel.invoice.reservedPass && <small>저장하면 현재 미납 청구의 금액과 횟수도 함께 변경됩니다. 이미 수납한 금액과 남은 횟수는 유지됩니다.</small>}</label>{!account && <label>현재 남은 횟수<input name="remaining" type="number" min="-1000" max="1000" defaultValue={8} required /><small>신규 학생은 처음 사용할 수강권 횟수를, 기존 학생은 장부에 남은 횟수를 입력하세요.</small></label>}{!account && <><label className="check"><input name="firstBilling" type="checkbox" defaultChecked />첫 수강료 청구 함께 등록</label><label>첫 수업일 (1회차)<input name="firstLessonDate" type="date" defaultValue={seoulDay()} required /><small>이미 수납한 기존 학생을 옮길 때는 위 체크를 해제하세요. 수납 시 횟수를 중복 추가하지 않습니다.</small></label></>}<label>알림 받을 보호자 전화번호<input name="phone" type="tel" defaultValue={account?.phone || student?.phone} required /></label><label>출석에 사용할 전화번호 또는 뒷번호<input name="phones" defaultValue={account?.checkinSuffixes.join(', ') || student?.phone} required /><small>본인·보호자 번호를 쉼표로 구분하세요. 예: 1234, 5678</small></label><label className="check"><input name="active" type="checkbox" defaultChecked={account?.active ?? true} />출석 허용</label><label className="check"><input name="autoBilling" type="checkbox" defaultChecked={account?.autoBilling ?? false} />수강 횟수 소진 시 결제 안내도 자동 요청</label><p className="subtle">자동 안내를 켜지 않아도 청구 대상은 자동으로 만들어집니다.</p><button className="primary" disabled={busy}>수강 설정 저장</button></form>}
+      {panel.type === 'balance' && <form onSubmit={e=>submit(e,'correctRemaining',{studentId:panel.row.id,requestId:panel.requestId,expectedUpdatedAt:panel.row.updatedAt,expectedRemaining:panel.row.remaining})}>
+        <p>현재 남은 횟수 <strong>{panel.row.remaining}회</strong></p>
+        <label>수정 후 남은 횟수<input name="remaining" type="number" min="-1000" max="1000" step="1" defaultValue={panel.row.remaining} required autoFocus/><small>추가할 횟수가 아니라, 최종적으로 남아 있어야 할 횟수를 입력하세요. 초과 수업은 음수로 입력할 수 있습니다.</small></label>
+        <label>변경 사유·비고 (선택)<textarea name="note" maxLength={500}/></label>
+        <p className="subtle">해당 과목의 잔여 횟수를 정정합니다. 출결·수납 기록은 유지되며 변경 이력이 남습니다. 결제 안내는 발송하지 않습니다.</p>
+        <button className="primary" disabled={busy}>{busy?'저장 중…':'잔여 횟수 저장'}</button>
+      </form>}
+      {panel.type === 'adjust' && <AttendanceEdit attendance={panel.row} busy={busy} save={act} close={() => setPanel(null)} />}
+      {panel.type === 'payment' && <form onSubmit={e => submit(e, 'payment', { invoiceId: panel.row.id, requestId: panel.requestId, expectedInvoiceUpdatedAt: panel.row.updatedAt || '' })}><p>현재 미납 금액 <strong>{won(panel.row.amount - panel.row.paid)}</strong></p><label>이번 수납 금액 (원)<PaymentAmountInput amount={panel.row.amount - panel.row.paid} /></label><label>결제받은 날짜<input name="paymentDate" type="date" defaultValue={seoulDay()} max={seoulDay()} required /></label><label>결제 수단<select name="method">{METHODS.map(m => <option key={m}>{m}</option>)}</select></label><label>비고<textarea name="note" maxLength={500} placeholder="입금자명, 확인 사항 등" /></label><p className="subtle">실제 결제를 확인한 금액만 기록하세요. {panel.row.reservedPass?'예약 수강권입니다. 횟수는 예약한 첫 출석 때 추가됩니다.':panel.row.creditUnits===0?'이미 반영된 수강권이므로 수납해도 횟수가 추가되지 않습니다.':`전액 수납 시 ${panel.row.creditUnits ?? panel.row.units}회가 추가됩니다.`}</p><button className="primary" disabled={busy}>{busy ? '저장 중…' : '수납 확인·저장'}</button></form>}
+      {error && <p className="error" role="alert">{error}</p>}
+    </section></div>}
+  </div>;
+}

@@ -138,6 +138,7 @@ export default function AdminPage() {
             <header className="flex h-16 items-center justify-between border-b px-6">
                 <h1 className="text-xl font-bold">Admin Dashboard</h1>
                 <div className="flex items-center gap-4">
+                    {['admin', 'wonjang'].includes(userData?.role || '') && <a href="/operations" className="text-sm font-semibold text-blue-700">출석·수납 관리</a>}
                     <span className="text-sm text-muted-foreground">
                         {userData?.name || user.email} ({isTeacher ? '강사' : '관리자'})
                     </span>
