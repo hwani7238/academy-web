@@ -179,9 +179,15 @@
 
 .whee-ops .payment-month-navigation{display:flex;align-items:end;gap:6px;flex-wrap:wrap}
 .whee-ops .payment-month-navigation>button{min-height:34px;padding:4px 10px}
-.whee-ops .payment-summary{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px;padding:0 16px 8px}
-.whee-ops .payment-summary button{display:flex;flex-direction:column;align-items:flex-start;gap:2px;padding:10px 12px;background:#f8fafc;text-align:left}
-.whee-ops .payment-summary button.is-selected{border-color:var(--blue);background:#edf3ff}
-.whee-ops .payment-summary span,.whee-ops .payment-summary small{font-size:12px;color:#63718a}
-.whee-ops .payment-summary strong{font-size:19px}
-.whee-ops .payment-filter-total{padding:4px 16px 10px;font-size:13px;color:#63718a}
+/* Receipt cards act as tabs, with the compact ledger directly underneath. */
+.whee-ops .payment-summary{display:flex;gap:3px;overflow-x:auto;padding:0 10px;border-bottom:1px solid var(--line)}
+.whee-ops .payment-summary button{display:flex;flex:0 0 auto;min-width:126px;flex-direction:column;align-items:flex-start;gap:2px;padding:8px 10px;background:#f8fafc;text-align:left;border-radius:7px 7px 0 0;border-bottom:3px solid transparent}
+.whee-ops .payment-summary button.is-selected{border-color:var(--blue);border-bottom-color:var(--blue);background:#edf3ff;color:var(--blue)}
+.whee-ops .payment-summary span{font-size:13px}.whee-ops .payment-summary small{display:inline;margin-left:4px;font-size:11px;color:#63718a}
+.whee-ops .payment-summary strong{font-size:17px;font-variant-numeric:tabular-nums}
+.whee-ops .payment-filter-total{padding:7px 0;font-size:12px;color:#63718a}
+.whee-ops .payment-tab-panel{padding:0 10px 12px}.whee-ops .payment-tab-panel:focus-visible{outline:2px solid var(--blue);outline-offset:-2px}
+.whee-ops .monthly-payments .payment-table{width:max-content;min-width:0;max-width:none;table-layout:auto;font-size:13px;border:1px solid var(--line)}
+.whee-ops .monthly-payments .payment-table th,.whee-ops .monthly-payments .payment-table td{padding:5px 9px;line-height:18px;border-right:1px solid #edf0f5}
+.whee-ops .monthly-payments .payment-table th:nth-child(1){min-width:56px}.whee-ops .monthly-payments .payment-table th:nth-child(2){min-width:52px}.whee-ops .monthly-payments .payment-table th:nth-child(3){min-width:76px}.whee-ops .monthly-payments .payment-table th:nth-child(4){min-width:96px}.whee-ops .monthly-payments .payment-table th:nth-child(5){min-width:76px}.whee-ops .monthly-payments .payment-table th:nth-child(6){min-width:96px}
+.whee-ops .monthly-payments .billing-note{max-width:240px;white-space:normal;overflow-wrap:anywhere}
