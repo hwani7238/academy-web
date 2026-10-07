@@ -31,3 +31,10 @@ export function billingProjection(data:Snapshot,today=seoulDay()){
  }
  return {upcoming,cycleFirstDays:cycles,firstLessonTimes:times};
 }
+
+/** Billing is due at the final remaining lesson, including overdue balances. */
+export function finalLessonInvoices(data: Snapshot, invoices: Invoice[], today = seoulDay()) {
+ const eligible = new Set(data.accounts.filter(a => a.active && a.remaining <= 1 &&
+  data.students.some(s => s.id === a.id && enrollmentState(s.lifecycle, today) === 'active')).map(a => a.id));
+ return invoices.filter(i => i.status === 'open' && eligible.has(i.studentId));
+}
