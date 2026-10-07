@@ -139,6 +139,26 @@
 
 .whee-ops .student-total{margin-left:8px;color:#3868e8;font-variant-numeric:tabular-nums}
 
+/* Keep the monthly register close to the top of the workspace. */
+.whee-ops:has(.monthly-view) .ops-header{padding-block:10px}
+.whee-ops .monthly-view{padding-top:8px}
+.whee-ops .monthly-view .ops-overview{margin-bottom:8px}
+.whee-ops .monthly-view .ops-overview .section-head{padding:8px 40px 8px 12px;gap:10px}
+.whee-ops .monthly-view .ops-overview .section-head p{display:none}
+.whee-ops .monthly-view .summary-grid>div{padding:6px 12px}
+.whee-ops .monthly-view .summary-grid strong{font-size:20px;margin-top:0}
+.whee-ops .monthly-view .ops-tabs{margin-bottom:8px}
+.whee-ops .monthly-view .ops-tabs button{padding:6px 12px;min-height:36px}
+.whee-ops .monthly-view .surface>.section-head{padding:8px 12px;gap:10px;flex-wrap:wrap}
+.whee-ops .monthly-view .section-head label{gap:2px;min-width:130px}
+.whee-ops .monthly-view .section-head input,.whee-ops .monthly-view .section-head select{min-height:36px;padding:5px 8px}
+.whee-ops .monthly-view .month-navigation{margin-bottom:0;gap:6px}
+.whee-ops .monthly-view .month-help{padding:3px 12px;font-size:12px}
+.whee-ops .monthly-view .month-color-legend{padding:3px 12px;gap:6px}
+.whee-ops .monthly-view .month-color-legend span{padding:1px 6px}
+.whee-ops .monthly-view .monthly-scroll{max-height:75dvh}
+@media(max-width:640px){.whee-ops .monthly-view .monthly-scroll{max-height:70dvh}}
+
 /* Weekly timetable: compact start-time cells, with simultaneous classes stacked. */
 .whee-ops .timetable-toolbar{display:flex;align-items:center;flex-wrap:wrap;gap:8px;padding:0 20px 14px}.whee-ops .timetable-toolbar h3{font-size:16px;margin:0}.whee-ops .timetable-toolbar>button{padding:4px 12px;min-height:34px}.whee-ops .timetable-toolbar label{display:flex;align-items:center;gap:8px;margin-left:auto}.whee-ops .timetable-toolbar input{padding:6px;font-size:13px}.whee-ops .timetable-scroll{overflow:auto;max-height:75vh;border-block:1px solid var(--line)}.whee-ops .timetable-table{width:100%;min-width:900px;table-layout:fixed;border-collapse:separate;border-spacing:0}.whee-ops .timetable-table th,.whee-ops .timetable-table td{padding:4px;border-right:1px solid var(--line);border-bottom:1px solid var(--line);vertical-align:top;white-space:normal}.whee-ops .timetable-table th:first-child{width:65px;position:sticky;left:0;background:#f5f7fb;z-index:2;font-variant-numeric:tabular-nums;text-align:center}.whee-ops .timetable-table thead th{position:sticky;top:0;background:#f5f7fb;z-index:3;padding:10px 4px;text-align:center}.whee-ops .timetable-table thead th:first-child{z-index:4}.whee-ops .timetable-table tbody td{height:34px}.whee-ops .timetable-table .half-hour th{font-size:11px;color:#8190a6}.whee-ops .timetable-table .is-today{background:#f0f5ff}.whee-ops .timetable-table .closed{background:#f1f2f5}.whee-ops .timetable-table .saturday{color:#2563eb}.whee-ops .timetable-table .sunday{color:#dc2626}.whee-ops .timetable-table th small{display:block;font-size:10px;margin-top:3px}.whee-ops .timetable-table .timetable-end td{height:24px}.whee-ops .timetable-untimed td{background:#fffbeb}.whee-ops button.timetable-lesson{display:flex;flex-direction:column;align-items:flex-start;width:100%;padding:5px 7px;margin:0 0 3px;min-height:0;border-radius:5px;border:1px solid #cbdcfa;border-left:3px solid #6293e8;background:#eaf2ff;text-align:left;line-height:1.3;overflow-wrap:anywhere}.whee-ops .timetable-lesson strong{font-size:13px}.whee-ops .timetable-lesson span,.whee-ops .timetable-lesson time,.whee-ops .timetable-lesson small{font-size:11px;color:#4a6285}.whee-ops .timetable-lesson.moved{border-left-color:#a66be5}.whee-ops .timetable-pending{padding:16px 20px}.whee-ops .timetable-pending summary{cursor:pointer;font-weight:650}.whee-ops .timetable-pending summary b{color:#315ee0}.whee-ops .timetable-student-list{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:6px;margin-top:12px}.whee-ops .timetable-student-list button{display:flex;flex-direction:column;align-items:flex-start;text-align:left;padding:7px 10px}.whee-ops .timetable-student-list strong{font-size:12px}.whee-ops .timetable-student-list small{display:block;font-size:11px;color:#63718a;margin-top:3px}.whee-ops .schedule-times{border-top:1px solid var(--line);padding-top:10px}.whee-ops .schedule-time-row{display:grid;grid-template-columns:24px 1fr 12px 1fr;align-items:end;gap:8px;margin-top:8px}.whee-ops .schedule-time-row>strong,.whee-ops .schedule-time-row>span{padding-bottom:10px}.whee-ops .schedule-time-row input{padding:8px;min-width:0;font-variant-numeric:tabular-nums}.whee-ops .schedule-history small{display:block;margin-top:4px}.whee-ops .timetable .sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
 
