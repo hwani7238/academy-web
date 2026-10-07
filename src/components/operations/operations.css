@@ -176,3 +176,12 @@
 .next-pass-fields{display:grid;grid-template-columns:1fr 1.6fr;gap:12px}.pass-current{background:#f4f6fc;padding:12px;border-radius:8px}.pass-current strong{display:block;margin-top:4px}.next-pass-label{color:#4860ad!important;font-size:11px!important}.next-pass-actions{display:flex;gap:8px}.next-pass-actions .primary{flex:1}.pass-history-link{margin-top:16px}.quick-attendance h3{font-size:15px;margin:12px 0}
 
 .whee-ops .monthly-table .monthly-payment-trigger{display:block;width:100%;min-height:20px;padding:1px 0;border:0;border-radius:2px;background:#f7ecff;color:#7e22ce;font-size:9px;line-height:11px;white-space:normal;word-break:keep-all;text-decoration:underline;text-underline-offset:2px}.whee-ops .monthly-table .has-monthly-payment .attendance-cell{min-height:20px}.whee-ops .monthly-payment-dialog .check{flex-wrap:wrap}.whee-ops .monthly-payment-dialog .check small{width:100%;margin-left:24px}
+
+.whee-ops .payment-month-navigation{display:flex;align-items:end;gap:6px;flex-wrap:wrap}
+.whee-ops .payment-month-navigation>button{min-height:34px;padding:4px 10px}
+.whee-ops .payment-summary{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px;padding:0 16px 8px}
+.whee-ops .payment-summary button{display:flex;flex-direction:column;align-items:flex-start;gap:2px;padding:10px 12px;background:#f8fafc;text-align:left}
+.whee-ops .payment-summary button.is-selected{border-color:var(--blue);background:#edf3ff}
+.whee-ops .payment-summary span,.whee-ops .payment-summary small{font-size:12px;color:#63718a}
+.whee-ops .payment-summary strong{font-size:19px}
+.whee-ops .payment-filter-total{padding:4px 16px 10px;font-size:13px;color:#63718a}

@@ -3,7 +3,8 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { type Invoice, type Snapshot, seoulDay } from '@/lib/operations/model';
 import { compareGroups, compareNames, groupName } from '@/lib/operations/student-order';
 import {billingProjection} from '@/lib/operations/upcoming-billing';
-import { courseInitial, invoiceCycleStart, paymentDay, shortBillingDay } from '@/lib/operations/billing-display';
+import { courseInitial, invoiceCycleStart, shortBillingDay } from '@/lib/operations/billing-display';
+import { MonthlyPayments } from './MonthlyPayments';
 import { CloseButton } from './CloseButton';
 import { InvoiceDateDialog } from './InvoiceDateDialog';
 
@@ -50,8 +51,7 @@ export function BillingList({ data, invoices, busy, demo, pay, edit, action, sav
       <td className="billing-pay">{i.needsReview?<button disabled={busy} onClick={()=>action('confirmInvoice',i)} aria-label={`${who.name} 청구 확인`}>확인</button>:<button className="primary" disabled={busy} onClick={()=>void resolveInvoice(i,pay)} aria-label={`${who.name} ${who.subject} 수납 완료`}>수납</button>}</td><td className="billing-menu"><button className="billing-more" disabled={busy} aria-label={`${who.name} ${who.subject} ${date||'날짜 미확인'} 청구 관리`} title="청구 상세·수정·안내·취소" onClick={()=>setSelected(i.id)}>⋮</button></td>
     </tr>;})}</tbody></table></div>)}</div>:<div className="empty billing-empty">{invoices.length?'선택한 과목과 이름에 해당하는 청구가 없습니다.':'진행 중인 청구가 없습니다.'}{(subject||search)&&<button onClick={()=>{setSubject('');setSearch('');}}>전체 보기</button>}</div>}
     <p className="billing-initials">PF(1) 피아노 1관 · PF(2) 피아노 2관 · PF(A) 성인 피아노 · D 드럼 · UK 우쿨렐레 · V 보컬 · G 기타 · ENS 앙상블 · MIDI 미디 · ◐ 부분 수납</p>
-    <div className="section-head billing-heading divided"><div><h2>최근 수납 기록</h2><p>최근 등록 100건 · 실제 결제받은 날짜순입니다.</p></div></div>
-    {data.payments.length?<div className="table-wrap"><table className="billing-table payment-table"><caption className="sr-only">최근 수납 기록</caption><thead><tr><th>결제일</th><th>과목</th><th>학생</th><th className="money">수납 금액</th><th>수단</th><th>비고</th></tr></thead><tbody>{[...data.payments].sort((a,b)=>paymentDay(b).localeCompare(paymentDay(a))||b.at.localeCompare(a.at)).map(p=>{const who=identity(data,p.studentId);const invoice=[...data.invoices,...(data.settledInvoices||[])].find(i=>i.id===p.invoiceId);const receiptInfo=invoice?`1회차: ${firstDay(invoice)||'날짜 미확인'} · 청구일: ${seoulDay(new Date(invoice.createdAt))} · ${invoice.units}회권 · ${invoice.status==='paid'?'수납 완료':'부분 수납'}${invoice.needsReview?' · 청구 확인 필요':''}`:'연결된 청구 확인 필요';return <tr key={p.id}><td><time dateTime={paymentDay(p)} title={`기록 시각: ${new Date(p.at).toLocaleString('ko-KR',{timeZone:'Asia/Seoul'})}`}>{paymentDay(p)}</time></td><td><abbr title={who.subject}>{courseInitial(who.subject)}</abbr></td><td title={receiptInfo}><strong>{who.name}</strong></td><td className="money">{won(p.amount)}</td><td>{p.method}</td><td className="billing-note">{p.note||'—'}</td></tr>;})}</tbody></table></div>:<p className="empty billing-empty">아직 수납 기록이 없습니다.</p>}
+    <MonthlyPayments data={data} demo={demo}/>
     {selectedInvoice && <BillingActions key={selectedInvoice.id} invoice={selectedInvoice} name={identity(data,selectedInvoice.studentId,selectedInvoice.name).name} busy={busy} demo={demo} sent={data.notices.some(n=>n.id===`billing_${selectedInvoice.id}`)} close={()=>setSelected(null)} edit={()=>{setSelected(null);void resolveInvoice(selectedInvoice,edit);}} action={name=>{setSelected(null);void resolveInvoice(selectedInvoice,i=>{if(name!=='prepareUpcoming')action(name,i);});}}/>}
     {dateInvoice && <InvoiceDateDialog invoice={dateInvoice} initialDate={firstDay(dateInvoice)} save={save} close={()=>setDateInvoice(null)}/>}
   </div>;
