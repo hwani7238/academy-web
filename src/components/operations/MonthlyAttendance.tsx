@@ -6,8 +6,7 @@ import { ScheduleDialog, MoveLessonDialog } from './ScheduleDialog';
 import { plannedLesson, scheduleLabel } from '@/lib/operations/schedule';
 import { AttendanceRangeDialog, type RangeSelection } from './AttendanceRangeDialog';
 import { monthlyPaymentDue, unpaidForecastFirstLessons, legacyAttendanceAppearance, isUnpaidAttendance, unpaidAttendanceCycles, lessonCycleStart, confirmedFirstLessons, isFirstLesson, importedAttendanceAppearance, paidFirstLesson } from '@/lib/operations/attendance-appearance';
-import { attendanceForecast } from '@/lib/operations/attendance-forecast';
-import { attendanceSequence } from '@/lib/operations/attendance-sequence';
+import { attendanceForecastSequence } from '@/lib/operations/attendance-forecast';
 import { CloseButton } from './CloseButton';
 import { enrollmentState } from '@/lib/operations/lifecycle';
 import { ACADEMY_DAYS } from '@/lib/operations/academy-calendar';
@@ -62,14 +61,15 @@ export function MonthlyAttendance({ data, day, busy, loading, onDayChange, save 
   const dates = useMemo(() => Array.from({ length: count }, (_, i) => `${month}-${String(i + 1).padStart(2, '0')}`), [month, count]);
   const lookup = useMemo(() => new Map(data.attendance.map(a => [`${a.studentId}_${a.day}`, a])), [data.attendance]);
   const legacy = useMemo(() => new Map((data.legacyAttendance || []).map(a => [`${a.studentId}_${a.day}`, a])), [data.legacyAttendance]);
-  const sequenceState = useMemo(() => attendanceSequence(data.accounts, data.attendance, data.legacyAttendance || [], data.sequenceContext), [data.accounts, data.attendance, data.legacyAttendance, data.sequenceContext]);
+  const calendarSequence = useMemo(() => attendanceForecastSequence(data.accounts, data.attendance, data.legacyAttendance || [], data.sequenceContext, dates, today), [data.accounts, data.attendance, data.legacyAttendance, data.sequenceContext, dates, today]);
+  const sequenceState = calendarSequence.sequence;
   const sequence = sequenceState.labels;
   const confirmedFirst = useMemo(() => confirmedFirstLessons([...data.invoices, ...(data.settledInvoices || [])], sequenceState.cycleFirstDays, sequenceState.firstLessonTimes), [data.invoices, data.settledInvoices, sequenceState.cycleFirstDays, sequenceState.firstLessonTimes]);
   const unpaidCycles = useMemo(() => unpaidAttendanceCycles(data.attendance, confirmedFirst, data.unpaidCycleKeys), [data.attendance, confirmedFirst, data.unpaidCycleKeys]);
   const missedDates = selected ? Object.entries(sequenceState.missedLessons)
     .filter(([key]) => key.startsWith(`${selected.studentId}_`) && key.slice(-10) < selected.day && !data.attendance.some(r=>r.studentId===selected.studentId && r.day!==selected.day && r.relatedDay===key.slice(-10) && ['makeup','makeup_reserved'].includes(r.status||'')))
     .map(([key, ordinal]) => ({ day: key.slice(-10), ordinal })).sort((a,b) => b.day.localeCompare(a.day)) : [];
-  const forecast = useMemo(() => attendanceForecast(data.accounts, data.attendance, data.legacyAttendance || [], data.sequenceContext, dates, today), [data.accounts, data.attendance, data.legacyAttendance, data.sequenceContext, dates, today]);
+  const forecast = calendarSequence.forecast;
   const unpaidForecastFirst = useMemo(() => unpaidForecastFirstLessons(forecast, [...data.invoices, ...(data.settledInvoices || [])], sequenceState.cycleFirstDays, sequenceState.firstLessonTimes), [forecast, data.invoices, data.settledInvoices, sequenceState.cycleFirstDays, sequenceState.firstLessonTimes]);
   const paymentDueStudents = useMemo(() => new Set(data.students.filter(s => monthlyPaymentDue({
     key: `${s.id}_${day}`, row: lookup.get(`${s.id}_${day}`), original: legacy.get(`${s.id}_${day}`),

@@ -3,7 +3,7 @@ import type { Account, Attendance, Snapshot } from './model';
 import { plannedLesson } from './schedule';
 
 // Preview only: projected lessons never enter the attendance ledger or balance.
-export function attendanceForecast(
+export function attendanceForecastSequence(
   accounts: Account[], records: Attendance[], legacy: NonNullable<Snapshot['legacyAttendance']>,
   context: Snapshot['sequenceContext'], dates: string[], today: string,
 ) {
@@ -16,9 +16,16 @@ export function attendanceForecast(
       projected.push({ studentId: account.id, day, units: 1, status: 'present' });
     }
   }
-  const labels = attendanceSequence(accounts, [...records, ...projected], legacy, context).labels;
-  return new Map(projected.map(row => {
+  const sequence = attendanceSequence(accounts, [...records, ...projected], legacy, context);
+  const forecast = new Map(projected.map(row => {
     const key = `${row.studentId}_${row.day}`;
-    return [key, labels.get(key)!];
+    return [key, sequence.labels.get(key)!];
   }));
+  return { sequence, forecast };
+}
+
+export function attendanceForecast(
+  ...args: Parameters<typeof attendanceForecastSequence>
+) {
+  return attendanceForecastSequence(...args).forecast;
 }
