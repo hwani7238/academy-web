@@ -23,6 +23,7 @@ export function attendanceSequence(accounts: Pick<Account, 'id' | 'planUnits' | 
   const cycleFirstDays = Object.fromEntries(Object.entries(context?.cycleFirstDays || {}).map(([id, days]) => [id, [...days]]));
   const firstLessonTimes = { ...context?.firstLessonTimes };
   const labels = new Map<string, string>();
+  const makeupLinks: {key:string;studentId:string;day:string;relatedDay?:string}[] = [];
   const days = new Map<string, { studentId: string; day: string; record?: RecordRow; legacy?: Legacy; start?: boolean }>();
   function event(studentId: string, day: string) {
     const key = `${studentId}_${day}`;
@@ -58,9 +59,8 @@ export function attendanceSequence(accounts: Pick<Account, 'id' | 'planUnits' | 
       if (status === 'makeup' || status === 'makeup_reserved') {
         // Makeup fills the original slot, even in a later month or pass.
         // Unlinked makeup has no guessed ordinal and never shifts regular lessons.
-        const original = e.record.relatedDay && e.record.relatedDay < e.day
-          ? missedLessons[`${id}_${e.record.relatedDay}`] : undefined;
-        if (original) labels.set(key, original);
+        // Resolve after regular lessons: the original absence may be later.
+        makeupLinks.push({ key, studentId: id, day: e.day, relatedDay: e.record.relatedDay });
         continue;
       }
       // A dragged vacation range includes non-class days: reserve only scheduled
@@ -85,6 +85,11 @@ export function attendanceSequence(accounts: Pick<Account, 'id' | 'planUnits' | 
       else if (missed) advance(1);
       if (missed) missedLessons[key] = String(positions[id]);
     }
+  }
+  for (const row of makeupLinks) {
+    const original = row.relatedDay && row.relatedDay !== row.day
+      ? missedLessons[`${row.studentId}_${row.relatedDay}`] : undefined;
+    if (original) labels.set(row.key, original);
   }
   return { positions, labels, missedLessons, cycleFirstDays, firstLessonTimes };
 }

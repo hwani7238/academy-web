@@ -55,8 +55,8 @@ export function attendanceInput(input: Record<string, unknown>) {
   if (status === 'cancelled' && units !== 0) throw new Error('취소 기록은 0회 차감으로 저장해주세요.');
   const note = typeof input.note === 'string' ? input.note.trim().slice(0, 500) : '';
   const relatedDay = ['makeup','makeup_reserved'].includes(status) && input.relatedDay ? validDay(input.relatedDay) : '';
-  if (status === 'makeup_reserved' && (!relatedDay || relatedDay >= day)) throw new Error('보강할 원래 수업일을 보강일 이전 날짜로 선택해주세요.');
-  if (relatedDay && relatedDay > day) throw new Error('원래 수업일은 보강일보다 늦을 수 없습니다.');
+  if (status === 'makeup_reserved' && !relatedDay) throw new Error('보강할 원래 수업일을 선택해주세요.');
+  if (relatedDay === day) throw new Error('원래 수업일과 보강일은 다른 날짜로 선택해주세요.');
   const unpaidCycleStart = status === 'present' && input.unpaidCycleStart ? validDay(input.unpaidCycleStart) : '';
   if (unpaidCycleStart && (unpaidCycleStart > day || units < 1)) throw new Error('미결제 출석은 수강권 시작일 이후에 1회 이상 차감으로 기록해주세요.');
   return { day, status, units, note, relatedDay, unpaidCycleStart };

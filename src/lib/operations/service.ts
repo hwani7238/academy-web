@@ -201,7 +201,7 @@ export async function configure(input: Record<string, unknown>, actor: string) {
 // Read the missed lesson and all bookings inside the transaction so two screens
 // cannot reserve the same course/absence twice. Modern corrections override imports.
 async function makeupSource(tx: Transaction, db: Firestore, account: Account, day: string, relatedDay: string, attendanceId: string) {
-  if (!relatedDay || relatedDay >= day) throw Error('보강할 원래 수업일을 확인해주세요.');
+  if (!relatedDay || relatedDay === day) throw Error('보강할 원래 수업일을 확인해주세요.');
   const records = await tx.get(db.collection('opsAttendance').where('studentId', '==', account.id));
   if (records.docs.some(d => d.id !== attendanceId && d.data().relatedDay === relatedDay && ['makeup','makeup_reserved'].includes(d.data().status))) throw Error('이 수업의 보강이 이미 예약되었거나 완료되었습니다. 기존 보강을 먼저 취소해주세요.');
   const original = records.docs.find(d => d.data().day === relatedDay)?.data() as Attendance | undefined;
@@ -470,7 +470,7 @@ export async function recordAttendance(input: Record<string, unknown>, actor: st
     if (old && Object.entries(values).every(([k,v]) => (old as unknown as Record<string, unknown>)[k] === v)) return { attendance:[old], accounts:[account], invoices: currentInvoice?.exists ? [{...currentInvoice.data(),id:currentInvoice.id} as Invoice] : [] };
     if ((old?.updatedAt || '') !== (input.expectedUpdatedAt || '')) throw new Error('다른 화면에서 기록이 변경됐습니다. 새로고침 후 다시 확인해주세요.');
 
-    if (values.status === 'makeup_reserved' || (old?.status === 'makeup_reserved' && values.status === 'makeup')) {
+    if (values.status === 'makeup_reserved' || (values.status === 'makeup' && Boolean(values.relatedDay))) {
       if (values.status === 'makeup_reserved' && old && (old.units > 0 || ['present','makeup'].includes(old.status || 'present'))) throw Error('이미 출석한 날짜입니다. 출석 기록을 먼저 취소해주세요.');
       const original = await makeupSource(tx, db, account, values.day, values.relatedDay, id);
       if (values.status === 'makeup' && original.charged) values.units = 0;
