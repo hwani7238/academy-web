@@ -21,6 +21,14 @@ export function attendanceForecastSequence(
     const key = `${row.studentId}_${row.day}`;
     return [key, sequence.labels.get(key)!];
   }));
+  // Explicit future ledger dates are also previews, including dates which differ
+  // from the regular weekly timetable. Keep billing previews on the same dates.
+  const recorded = new Set([...records, ...legacy].map(row => `${row.studentId}_${row.day}`));
+  const visibleDates = new Set(dates);
+  for (const row of context?.references || []) {
+    const key = `${row.studentId}_${row.day}`, label = sequence.labels.get(key);
+    if (row.day >= today && visibleDates.has(row.day) && !recorded.has(key) && row.color !== '#FF9900' && label) forecast.set(key, label);
+  }
   return { sequence, forecast };
 }
 
