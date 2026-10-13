@@ -7,7 +7,7 @@ export function attendanceForecastSequence(
   accounts: Account[], records: Attendance[], legacy: NonNullable<Snapshot['legacyAttendance']>,
   context: Snapshot['sequenceContext'], dates: string[], today: string,
 ) {
-  const occupied = new Set([...records, ...legacy].map(row => `${row.studentId}_${row.day}`));
+  const occupied = new Set([...records, ...legacy, ...(context?.references || [])].map(row => `${row.studentId}_${row.day}`));
   const projected: Pick<Attendance, 'studentId' | 'day' | 'units' | 'status'>[] = [];
   for (const account of accounts) {
     if (!account.active || !account.schedule) continue;

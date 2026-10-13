@@ -1,3 +1,5 @@
+import { reconcileLessonReferences } from '@/lib/operations/lesson-reference-service';
+import type { LessonReference } from '@/lib/operations/lesson-reference';
 import {billingHorizon} from '@/lib/operations/upcoming-billing';
 import {passCycleStarts} from '@/lib/operations/pass-history';
 import { courseGroup, type Imported } from '@/lib/operations/course-label';
@@ -30,7 +32,7 @@ export async function GET(request: Request) {
     }
     const month = day.slice(0, 7); const end = new Date(`${month}-01T00:00:00Z`); end.setUTCMonth(end.getUTCMonth() + 1);
     const forecastEnd=billingHorizon()>end.toISOString().slice(0,10)?billingHorizon():end.toISOString().slice(0,10);
-    const [students, accounts, attendance, invoices, payments, notices, devices, imports, priorAttendance, cycleInvoices, legacyCorrections] = await Promise.all([
+    const [students, accounts, attendance, invoices, payments, notices, devices, imports, priorAttendance, cycleInvoices, lessonReferences, legacyCorrections] = await Promise.all([
       timing.measure('students', () => db.collection('students').select('name', 'phone', 'instruments', 'instrument', 'lifecycle', 'courseLifecycles', 'operationsCourseGroups', 'courseUpdatedAt', 'phoneUpdatedAt').get()),
       timing.measure('accounts', () => db.collection('opsAccounts').get()),
       timing.measure('attendance', () => db.collection('opsAttendance').where('day', '>=', `${month}-01`).where('day', '<', forecastEnd).get()),
@@ -41,6 +43,7 @@ export async function GET(request: Request) {
       timing.measure('imports', importSources),
       timing.measure('history', () => db.collection('opsAttendance').where('day', '<', `${month}-01`).select('studentId', 'day', 'units', 'status', 'relatedDay', 'range', 'unpaidCycleStart', 'at').get()),
       timing.measure('cycles', () => db.collection('opsInvoices').where('creditUnits', '==', 0).select('studentId', 'cycleStart', 'status').get()),
+      timing.measure('lessonReferences', () => db.collection('opsLessonReferences').get()),
       timing.measure('legacyCorrections', () => db.collection('opsLegacyCorrections').get()),
     ]);
     const studentById = new Map(students.docs.map(d => [d.id, d]));
@@ -78,8 +81,10 @@ export async function GET(request: Request) {
     const allLegacy = [...legacyCells.values()].filter((v): v is NonNullable<typeof v> => Boolean(v)).map(row => correctedLegacy(row, correctionsById.get(`${row.studentId}_${row.day}`)));
     const cycleStarts = [...passCycleStarts(accounts.docs.map(d=>({...d.data(),id:d.id}) as Account)), ...cycleInvoices.docs.map(d=>d.data()).filter(v=>v.status!=='cancelled' && typeof v.cycleStart==='string').map(v=>({studentId:String(v.studentId),day:String(v.cycleStart)}))];
     const beforeMonth = `${month}-01`;
-    const priorSequence = attendanceSequence(accounts.docs.map(d=>({...d.data(),id:d.id}) as Account), priorAttendance.docs.map(d=>d.data() as Attendance), allLegacy.filter(r=>r.day<beforeMonth), {positions:{},cycleStarts:cycleStarts.filter(r=>r.day<beforeMonth)});
-    const sequenceContext = { positions: priorSequence.positions, missedLessons: priorSequence.missedLessons, cycleFirstDays: priorSequence.cycleFirstDays, firstLessonTimes: priorSequence.firstLessonTimes, cycleStarts:cycleStarts.filter(r=>r.day>=beforeMonth && r.day<end.toISOString().slice(0,10)) };
+    const references = lessonReferences.docs.flatMap(d => (d.data().references || []) as LessonReference[]);
+    const referenceRevision = lessonReferences.docs.find(d => d.id === month)?.data().revision || '';
+    const priorSequence = attendanceSequence(accounts.docs.map(d=>({...d.data(),id:d.id}) as Account), priorAttendance.docs.map(d=>d.data() as Attendance), allLegacy.filter(r=>r.day<beforeMonth), {positions:{},references:references.filter(r=>r.day<beforeMonth),cycleStarts:cycleStarts.filter(r=>r.day<beforeMonth)});
+    const sequenceContext = { references:references.filter(r=>r.day>=beforeMonth && r.day<forecastEnd), referenceRevision, positions: priorSequence.positions, missedLessons: priorSequence.missedLessons, cycleFirstDays: priorSequence.cycleFirstDays, firstLessonTimes: priorSequence.firstLessonTimes, cycleStarts:cycleStarts.filter(r=>r.day>=beforeMonth && r.day<end.toISOString().slice(0,10)) };
     const unpaidCycleKeys = [...new Set(priorAttendance.docs.map(d=>d.data()).filter(r=>r.status==='present' && r.unpaidCycleStart).map(r=>`${r.studentId}_${r.unpaidCycleStart}`))];
     return Response.json({ cancelledInvoiceKeys:invoiceRows.filter(i=>i.status==='cancelled'&&(i.lessonDate||i.cycleStart)).map(i=>`${i.studentId}_${i.lessonDate||i.cycleStart}`), unpaidCycleKeys, ...(revision ? { revision } : {}), day, sequenceContext, legacyAttendance: allLegacy.filter(r=>r.day.startsWith(`${month}-`)), configured: noticeConfigured(), students: students.docs.flatMap<Snapshot['students'][number]>(d => {
       const raw = d.data(); const base = { phoneUpdatedAt:raw.phoneUpdatedAt || '', courseUpdatedAt:raw.courseUpdatedAt || '', name: raw.name || '학생', phone: raw.phone || '', ...(raw.lifecycle ? { lifecycle: raw.lifecycle } : {}) };
@@ -96,6 +101,14 @@ export async function POST(request: Request) {
   try {
     sameOrigin(request); const actor = await manager(request); const input = await request.json();
     switch (input.action) {
+      case 'reconcileLessonReferences': {
+        const url = new URL(request.url); url.search = '';
+        url.searchParams.set('day', String(input.month) + '-01');
+        const snapshot = await GET(new Request(url, { headers: request.headers }));
+        if (!snapshot.ok) return snapshot;
+        const data = await snapshot.json() as Snapshot;
+        return Response.json(await reconcileLessonReferences(input, actor, data.students));
+      }
       case 'correctLegacyAttendance': return Response.json(await service.correctLegacyAttendance(input,actor));
       case 'deleteEnrollment': case 'restoreEnrollment': return Response.json({ok:true,changes:await service.deleteEnrollment(input,actor)});
       case 'prepareUpcomingInvoice': return Response.json({ok:true,invoice:await service.prepareUpcomingInvoice(input,actor)});
