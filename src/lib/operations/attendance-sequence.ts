@@ -37,6 +37,7 @@ export function attendanceSequence(accounts: Pick<Account, 'id' | 'planUnits' | 
   for (const e of [...days.values()].sort((a, b) => a.day.localeCompare(b.day))) {
     const id = e.studentId, account = plans.get(id), plan = account ? passUnitsOn(account,e.day) : undefined, key = `${id}_${e.day}`;
     const status = e.record ? (e.record.status || 'present') : (e.legacy ? legacyAttendanceAppearance(e.legacy).tone : 'present');
+    if (status === 'paused') continue;
     const missed = ['absent', 'travel', 'sick', 'late_cancel'].includes(status);
     function firstDay() {
       const dates = cycleFirstDays[id] ||= [];

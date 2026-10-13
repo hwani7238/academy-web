@@ -191,3 +191,6 @@
 .whee-ops .monthly-payments .payment-table th,.whee-ops .monthly-payments .payment-table td{padding:5px 9px;line-height:18px;border-right:1px solid #edf0f5}
 .whee-ops .monthly-payments .payment-table th:nth-child(1){min-width:56px}.whee-ops .monthly-payments .payment-table th:nth-child(2){min-width:52px}.whee-ops .monthly-payments .payment-table th:nth-child(3){min-width:76px}.whee-ops .monthly-payments .payment-table th:nth-child(4){min-width:96px}.whee-ops .monthly-payments .payment-table th:nth-child(5){min-width:76px}.whee-ops .monthly-payments .payment-table th:nth-child(6){min-width:96px}
 .whee-ops .monthly-payments .billing-note{max-width:240px;white-space:normal;overflow-wrap:anywhere}
+
+.whee-ops .attendance-cell.paused,.whee-ops .quick-option.paused{background:#e5eefb;color:#365887}
+.whee-ops .attendance-cell.paused{font-size:10px;line-height:13px}

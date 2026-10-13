@@ -1,6 +1,6 @@
 import { validDay, type Attendance } from './model';
 
-export const RANGE_STATUSES = ['travel', 'absent', 'sick'] as const;
+export const RANGE_STATUSES = ['travel', 'absent', 'sick', 'paused'] as const;
 export function attendanceDays(start: unknown, end: unknown) {
   const from = validDay(start), to = validDay(end);
   const count = (Date.parse(to) - Date.parse(from)) / 86400000 + 1;
@@ -9,7 +9,7 @@ export function attendanceDays(start: unknown, end: unknown) {
 }
 export function rangeAttendance(input: Record<string, unknown>, student: {id:string;name:string}, previous: Attendance[], legacyDays: Set<string>, stamp: string) {
   const days = attendanceDays(input.start, input.end), cancel = input.status === 'cancelled';
-  if (!cancel && !RANGE_STATUSES.includes(input.status as typeof RANGE_STATUSES[number])) throw Error('여행·결석·병가 중 선택해주세요.');
+  if (!cancel && !RANGE_STATUSES.includes(input.status as typeof RANGE_STATUSES[number])) throw Error('여행·결석·병가·수강 일시 정지 중 선택해주세요.');
   if (typeof input.rangeId !== 'string' || !/^[A-Za-z0-9_-]{1,160}$/.test(input.rangeId)) throw Error('기간 정보를 다시 열어주세요.');
   const note = typeof input.note === 'string' ? input.note.trim().slice(0, 500) : '';
   const revisions = (input.revisions && typeof input.revisions === 'object' ? input.revisions : {}) as Record<string,string>;

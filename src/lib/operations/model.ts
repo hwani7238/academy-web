@@ -10,7 +10,7 @@ export type Account = {
   planUnits: number; planAmount: number; remaining: number; openInvoiceId: string | null;
   autoBilling: boolean; active: boolean; updatedAt: string;
 };
-export const ATTENDANCE_LABELS = { present: "출석", absent: "결석", makeup: "보강", makeup_reserved: "보강 예약", late_cancel: "당일 취소", travel: "여행", sick: "병가", cancelled: "취소" } as const;
+export const ATTENDANCE_LABELS = { present: "출석", absent: "결석", makeup: "보강", makeup_reserved: "보강 예약", late_cancel: "당일 취소", travel: "여행", sick: "병가", paused: "수강 일시 정지", cancelled: "취소" } as const;
 export type AttendanceStatus = keyof typeof ATTENDANCE_LABELS;
 export type LegacyAttendance = { studentId: string; day: string; value: string; color: string; status?: AttendanceStatus; note?: string; revision?: string };
 export type Attendance = { unpaidCycleStart?: string; range?: {id:string;start:string;end:string}; arrivalAt?: string; status?: AttendanceStatus; source?: "kiosk" | "manual"; relatedDay?: string; id: string; studentId: string; name: string; day: string; at: string; units: number; note: string; updatedAt: string };
@@ -50,7 +50,8 @@ export function attendanceInput(input: Record<string, unknown>) {
   const status = input.status as AttendanceStatus;
   if (!Object.hasOwn(ATTENDANCE_LABELS, status)) throw new Error('출결 상태를 선택해주세요.');
   const units = integer(input.units, 0, 10, '차감 횟수');
-  if (day > seoulDay() && !(units === 0 && ['travel','absent','sick','cancelled','makeup_reserved'].includes(status))) throw new Error('미래 날짜에는 차감 없는 여행·결석·병가·보강 예약만 미리 표시할 수 있습니다.');
+  if (day > seoulDay() && !(units === 0 && ['travel','absent','sick','paused','cancelled','makeup_reserved'].includes(status))) throw new Error('미래 날짜에는 차감 없는 여행·결석·병가·수강 일시 정지·보강 예약만 미리 표시할 수 있습니다.');
+  if (status === 'paused' && units !== 0) throw new Error('수강 일시 정지는 차감 없이 저장해주세요.');
   if (status === 'makeup_reserved' && units !== 0) throw new Error('보강 예약은 차감 없이 저장해주세요.');
   if (status === 'cancelled' && units !== 0) throw new Error('취소 기록은 0회 차감으로 저장해주세요.');
   const note = typeof input.note === 'string' ? input.note.trim().slice(0, 500) : '';
