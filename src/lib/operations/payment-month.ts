@@ -14,10 +14,11 @@ export function paymentMonthBounds(month: string) {
 }
 export function monthlyPayments(payments: Payment[], month: string) {
  paymentMonthBounds(month);
- const rows = payments.filter(p=>paymentDay(p).slice(0,7)===month)
+ const monthRows = payments.filter(p=>paymentDay(p).slice(0,7)===month)
   .sort((a,b)=>paymentDay(b).localeCompare(paymentDay(a))||b.at.localeCompare(a.at)||a.id.localeCompare(b.id));
+ const rows=monthRows.filter(p=>!p.cancelledAt),cancelledRows=monthRows.filter(p=>p.cancelledAt);
  const methods = [...new Set<string>(['현금','지역화폐','카드',...rows.map(p=>receiptMethodGroup(p.method))])];
- return {rows,total:rows.reduce((sum,p)=>sum+p.amount,0),
+ return {rows,cancelledRows,total:rows.reduce((sum,p)=>sum+p.amount,0),
   methods:methods.map(method=>({method,count:rows.filter(p=>receiptMethodGroup(p.method)===method).length,
    amount:rows.filter(p=>receiptMethodGroup(p.method)===method).reduce((sum,p)=>sum+p.amount,0)}))};
 }

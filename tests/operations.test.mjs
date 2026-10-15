@@ -1193,7 +1193,7 @@ test('weekday edits from either list update only that course in the shared snaps
 
 test('snapshot revision detects schedule-only edits and removal without attendance changes', async () => {
  const {operationsRevision}=setup().load('revision');
- const state={opsAttendance:[],opsAccounts:[],opsLegacyCorrections:[]},queries=[];
+ const state={opsLessonReferences:[],opsAttendance:[],opsAccounts:[],opsLegacyCorrections:[]},queries=[];
  const db={collection(name){const query={orderBy(field,dir){queries.push([name,field,dir]);return query},limit(n){assert.equal(n,1);return query},select(){return query},async get(){return {docs:state[name]}}};return query}};
  const doc=(id,value,updateTime)=>({id,data:()=>value,updateTime});
  const empty=await operationsRevision(db);
@@ -2073,4 +2073,65 @@ test('monthly receipts group transfers with cash without losing records or doubl
  assert.equal(result.methods.reduce((sum,m)=>sum+m.amount,0),result.total);
  assert.equal(result.rows.filter(p=>receiptMethodGroup(p.method)==='현금').length,2);
  assert.equal(rows[1].method,'계좌이체');
+});
+
+function receiptCancellationInput(s,paymentId){
+ const p=s.records.get(`opsPayments/${paymentId}`),i=s.records.get(`opsInvoices/${p.invoiceId}`),a=s.records.get(`opsAccounts/${p.studentId}`);
+ return {paymentId,expectedPaid:i.paid,expectedInvoiceUpdatedAt:i.updatedAt||'',expectedAccountUpdatedAt:a.updatedAt,reason:'미입금 오입력'};
+}
+async function receiptFixture(creditUnits){
+ const s=setup();await s.seed('piano',0);await s.seed('drum',4);
+ const i={id:'receipt-invoice',studentId:'piano',name:'가상 학생',units:8,amount:160000,paid:0,status:'open',needsReview:false,createdAt:'2026-09-01T00:00:00.000Z',lessonDate:'2026-09-02',...(creditUnits===undefined?{}:{creditUnits})};
+ s.records.set('opsInvoices/receipt-invoice',i);s.records.get('opsAccounts/piano').openInvoiceId=i.id;
+ s.pay=async(id,amount)=>s.service.payment({invoiceId:i.id,requestId:id,amount,method:'현금',paymentDate:'2026-09-02',expectedInvoiceUpdatedAt:s.records.get('opsInvoices/receipt-invoice').updatedAt||''},'owner');
+ return s;
+}
+test('receipt cancellation reopens the bill and reverses credited units exactly once while preserving attendance and other courses',async()=>{
+ const s=await receiptFixture();await s.pay('paid-receipt',160000);
+ const account=s.records.get('opsAccounts/piano');account.remaining=6;account.updatedAt='after-attendance';
+ s.records.set('opsAttendance/piano_old',{studentId:'piano',day:'2026-09-03',units:2});
+ const beforeAttendance=structuredClone(s.records.get('opsAttendance/piano_old')),drum=structuredClone(s.records.get('opsAccounts/drum'));
+ const input=receiptCancellationInput(s,'paid-receipt');await Promise.all([s.service.cancelPayment(input,'owner'),s.service.cancelPayment(input,'owner')]);
+ const invoice=s.records.get('opsInvoices/receipt-invoice'),receipt=s.records.get('opsPayments/paid-receipt');
+ assert.equal(invoice.status,'open');assert.equal(invoice.paid,0);assert.equal(s.records.get('opsAccounts/piano').remaining,-2);
+ assert.equal(s.records.get('opsAccounts/piano').openInvoiceId,invoice.id);assert.equal(receipt.revertedUnits,8);assert.ok(receipt.cancelledAt);assert.equal(receipt.amount,160000);
+ assert.deepEqual(s.records.get('opsAttendance/piano_old'),beforeAttendance);assert.deepEqual(s.records.get('opsAccounts/drum'),drum);
+ assert.equal([...s.records.values()].filter(v=>v.action==='cancel-payment').length,1);assert.equal([...s.records.keys()].filter(k=>k.startsWith('opsNotices/')).length,0);
+ assert.equal(s.load('attendance-appearance').confirmedFirstLessons([invoice],{}).size,0);
+ await assert.rejects(s.pay('paid-receipt',160000),/취소된 수납/);
+ await s.pay('new-receipt',160000);assert.equal(s.records.get('opsAccounts/piano').remaining,6);assert.equal(s.records.get('opsInvoices/receipt-invoice').status,'paid');
+});
+test('cancelling either partial receipt rolls full-settlement credit back once, then allows repayment',async()=>{
+ const s=await receiptFixture();await s.pay('part-a',60000);await s.pay('part-b',100000);
+ await s.service.cancelPayment(receiptCancellationInput(s,'part-a'),'owner');
+ assert.equal(s.records.get('opsInvoices/receipt-invoice').paid,100000);assert.equal(s.records.get('opsAccounts/piano').remaining,0);
+ await s.service.cancelPayment(receiptCancellationInput(s,'part-b'),'owner');
+ assert.equal(s.records.get('opsInvoices/receipt-invoice').paid,0);assert.equal(s.records.get('opsPayments/part-b').revertedUnits,0);
+ await s.pay('repayment',160000);assert.equal(s.records.get('opsAccounts/piano').remaining,8);
+ const payments=[...s.records.entries()].filter(([k])=>k.startsWith('opsPayments/')).map(([,p])=>p);
+ const summary=s.load('payment-month').monthlyPayments(payments,'2026-09');
+ assert.equal(summary.total,160000);assert.equal(summary.rows.length,1);assert.equal(summary.cancelledRows.length,2);assert.equal(summary.methods[0].amount,160000);
+});
+test('zero-credit and reserved passes retain lessons on cancellation and reappear in billing despite a positive balance',async()=>{
+ for(const reservedPass of [false,true]){
+  const s=await receiptFixture(0);const account=s.records.get('opsAccounts/piano');account.remaining=7;
+  s.records.get('opsInvoices/receipt-invoice').reservedPass=reservedPass;
+  await s.pay('zero-credit',160000);await s.service.cancelPayment(receiptCancellationInput(s,'zero-credit'),'owner');
+  const invoice=s.records.get('opsInvoices/receipt-invoice'),updated=s.records.get('opsAccounts/piano');
+  assert.equal(updated.remaining,7);assert.equal(s.records.get('opsPayments/zero-credit').revertedUnits,0);
+  const visible=s.load('upcoming-billing').finalLessonInvoices({accounts:[updated],students:[{id:'piano'}]},[invoice]);assert.equal(visible.length,1);
+ }
+});
+test('cancellation refuses stale confirmations and corrupt links without mutating financial records',async()=>{
+ const s=await receiptFixture();await s.pay('receipt',160000);const input=receiptCancellationInput(s,'receipt');
+ for(const patch of [{expectedPaid:0},{expectedAccountUpdatedAt:'old'},{expectedInvoiceUpdatedAt:'old'}]){
+  const before=structuredClone([...s.records]);await assert.rejects(s.service.cancelPayment({...input,...patch},'owner'),/변경/);assert.deepEqual([...s.records],before);
+ }
+ s.records.get('opsPayments/receipt').studentId='drum';const before=structuredClone([...s.records]);
+ await assert.rejects(s.service.cancelPayment({...input,expectedAccountUpdatedAt:s.records.get('opsAccounts/drum').updatedAt},'owner'),/일치/);assert.deepEqual([...s.records],before);
+});
+test('balance review follows payment, cancellation and repayment without counting credit twice',()=>{
+ const s=setup(),account={id:'piano',planUnits:8,remaining:8,updatedAt:'now'},invoice={id:'i',studentId:'piano',units:8,status:'paid'};
+ const events=[['configure',{remaining:0}],['payment',{invoiceId:'i',complete:true}],['cancel-payment',{invoiceId:'i',wasComplete:true,revertedUnits:8,remaining:0}],['payment',{invoiceId:'i',complete:true}]].map(([action,detail],n)=>({id:String(n),studentId:'piano',action,detail,at:`2026-09-0${n+1}T00:00:00.000Z`}));
+ const result=s.load('balance-review').reviewBalance(account,undefined,events,[],[invoice]);assert.equal(result.status,'verified');assert.equal(result.ledger,8);
 });

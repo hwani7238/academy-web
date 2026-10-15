@@ -1,4 +1,5 @@
 import {monthlyInvoice} from './monthly-payment';
+import {paymentCancellation} from './payment-cancellation';
 import {nextPassInput,nextPassDue,activateNextPass} from './next-pass';
 import {passHistoryInput} from './pass-history';
 import {placeTimetableLesson,placeRegularTimetableLesson} from './timetable';
@@ -19,7 +20,7 @@ import { randomUUID, randomBytes } from 'node:crypto';
 import { REGISTRATION_SUBJECTS, registrationInput, firstEnrollmentInvoice } from './registration';
 import type { Transaction, Firestore } from 'firebase-admin/firestore';
 import { database, hash, HttpError } from './auth';
-import { Account, Invoice, Attendance, integer, adjustBalance, settle, suffixes, seoulDay, METHODS, validDay, attendanceInput } from './model';
+import { Account, Invoice, Attendance, type Payment, integer, adjustBalance, settle, suffixes, seoulDay, METHODS, validDay, attendanceInput } from './model';
 
 const now = () => new Date().toISOString();
 const key = (id: unknown) => { if (typeof id !== 'string' || !/^[A-Za-z0-9_-]{1,160}$/.test(id)) throw new Error('잘못된 항목입니다.'); return id; };
@@ -315,6 +316,7 @@ export async function payment(input: Record<string, unknown>, actor: string) {
     const invoiceRef = db.doc(`opsInvoices/${id}`);
     const [existing, snap] = await Promise.all([tx.get(paymentRef), tx.get(invoiceRef)]);
     if (existing.exists) {
+      if(existing.data()?.cancelledAt)throw Error('취소된 수납 요청입니다. 창을 닫고 새로 수납해주세요.');
       if (existing.data()?.invoiceId !== id || existing.data()?.amount !== input.amount || existing.data()?.method !== method || (input.paymentDate !== undefined && (existing.data()?.paymentDate || seoulDay(new Date(existing.data()?.at))) !== paymentDate)) throw new Error('중복 요청 내용이 다릅니다.');
       return;
     }
@@ -328,6 +330,25 @@ export async function payment(input: Record<string, unknown>, actor: string) {
     audit(tx, db, actor, 'payment', invoice.studentId, { invoiceId: id, amount: input.amount, method, paymentDate, complete });
   });
 }
+export async function cancelPayment(input:Record<string,unknown>,actor:string){
+ const db=database(),paymentId=key(input.paymentId),paymentRef=db.doc(`opsPayments/${paymentId}`);
+ return db.runTransaction(async tx=>{
+  const payment=(await tx.get(paymentRef)).data() as Payment|undefined;
+  if(!payment)throw Error('수납 기록을 찾을 수 없습니다.');
+  if(payment.cancelledAt)return; // Repeated confirmation must never reverse twice.
+  const invoiceRef=db.doc(`opsInvoices/${payment.invoiceId}`),accountRef=db.doc(`opsAccounts/${payment.studentId}`);
+  const [invoiceSnap,accountSnap]=await Promise.all([tx.get(invoiceRef),tx.get(accountRef)]);
+  const invoice=invoiceSnap.data() as Invoice|undefined,account=accountSnap.data() as Account|undefined;
+  if(!invoice||!account)throw Error('연결된 청구 또는 수강 정보를 찾을 수 없습니다.');
+  if(invoice.paid!==input.expectedPaid||(invoice.updatedAt||'')!==input.expectedInvoiceUpdatedAt||account.updatedAt!==input.expectedAccountUpdatedAt)throw Error('수납 또는 출결 정보가 변경됐습니다. 창을 닫고 새로고침한 뒤 확인해주세요.');
+  const change=paymentCancellation(payment,invoice,account),stamp=now(),reason=text(input.reason);
+  tx.update(paymentRef,{cancelledAt:stamp,cancelledBy:actor,cancelReason:reason,revertedUnits:change.revertedUnits});
+  tx.update(invoiceRef,{paid:change.paid,status:'open',receiptCancelledAt:stamp,updatedAt:stamp});
+  tx.update(accountRef,{remaining:change.remaining,openInvoiceId:account.openInvoiceId||invoice.id,updatedAt:stamp});
+  audit(tx,db,actor,'cancel-payment',account.id,{paymentId,invoiceId:invoice.id,amount:payment.amount,wasComplete:invoice.status==='paid',revertedUnits:change.revertedUnits,remaining:change.remaining,reason});
+ });
+}
+
 export async function editInvoice(input: Record<string, unknown>, actor: string) {
   const id = key(input.invoiceId), db = database();
   const units = integer(input.units, 1, 200, '수강 횟수');
@@ -802,7 +823,7 @@ export async function monthlyPayment(input:Record<string,unknown>,actor:string){
  if(!linkOnly&&!(METHODS as readonly string[]).includes(method))throw Error('결제 수단을 선택해주세요.');
  return db.runTransaction(async tx=>{
   const [accountSnap,invoiceSnap,receipt,all]=await Promise.all([tx.get(accountRef),tx.get(ref),tx.get(paymentRef),tx.get(db.collection('opsInvoices').where('studentId','==',studentId))]);
-  if(receipt.exists){const previous=receipt.data()!;if(previous.invoiceId!==invoiceId||previous.studentId!==studentId||previous.amount!==input.amount||previous.method!==method||previous.paymentDate!==paymentDate||previous.lessonDate!==day)throw Error('중복 요청 내용이 다릅니다.');return;}
+  if(receipt.exists){const previous=receipt.data()!;if(previous.cancelledAt)throw Error('취소된 수납 요청입니다. 창을 닫고 새로 수납해주세요.');if(previous.invoiceId!==invoiceId||previous.studentId!==studentId||previous.amount!==input.amount||previous.method!==method||previous.paymentDate!==paymentDate||previous.lessonDate!==day)throw Error('중복 요청 내용이 다릅니다.');return;}
   const account=accountSnap.data() as Account|undefined,old=invoiceSnap.data() as Invoice|undefined;
   if(!account)throw Error('수강 정보를 찾을 수 없습니다.');
   if(old&&old.studentId!==studentId)throw Error('다른 과목의 청구입니다.');

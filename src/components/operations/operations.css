@@ -194,3 +194,8 @@
 
 .whee-ops .attendance-cell.paused,.whee-ops .quick-option.paused{background:#e5eefb;color:#365887}
 .whee-ops .attendance-cell.paused{font-size:10px;line-height:13px}
+
+.whee-ops .monthly-payments .receipt-cancel-button{min-height:24px;padding:2px 6px;font-size:12px;line-height:18px;color:#a22e3f;border-color:#edc6cc;border-radius:4px}
+.whee-ops .receipt-cancelled-toggle{font-size:12px;margin:0 0 8px;gap:6px}.whee-ops .receipt-cancelled-toggle input{width:15px;min-height:15px}
+.whee-ops .receipt-cancelled{color:#788397;background:#f7f8fa}.whee-ops .receipt-cancelled .money{text-decoration:line-through}.whee-ops .receipt-cancelled-label{font-size:12px}
+.whee-ops .cancel-payment-summary{padding:10px 12px;margin:12px 0;background:#f5f7fb;border-radius:8px;font-size:14px}.whee-ops .cancel-payment-summary small{font-size:12px;margin-top:6px}.whee-ops .cancel-payment-dialog form{margin-top:14px}

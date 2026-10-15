@@ -137,6 +137,7 @@ export async function POST(request: Request) {
       case 'editInvoice': await service.editInvoice(input, actor); return Response.json({ok:true});
       case 'monthlyPayment': await service.monthlyPayment(input,actor); return Response.json({ok:true});
       case 'payment': await service.payment(input, actor); break;
+      case 'cancelPayment': await service.cancelPayment(input,actor); return Response.json({ok:true});
       case 'sendInvoice': case 'cancelInvoice': case 'confirmInvoice': await service.invoiceAction(input, actor); break;
       case 'pair': return Response.json(await service.issuePair(actor));
       case 'revoke': await service.revoke(input.deviceId); break;

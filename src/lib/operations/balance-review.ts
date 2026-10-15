@@ -31,6 +31,10 @@ export function reviewBalance(account:Account,source:BalanceSource|undefined,aud
    const invoice=invoices.find(i=>i.id===d.invoiceId&&i.studentId===account.id);
    if(!invoice||credited.has(invoice.id))return stop('수납의 수강 횟수 반영 근거를 확인해주세요.');
    credited.add(invoice.id);ledger+=invoice.creditUnits??invoice.units;
+  }else if(event.action==='cancel-payment'){
+   if(!Number.isSafeInteger(d.revertedUnits)||Number(d.revertedUnits)<0)return stop('수납 취소의 횟수 반영 근거를 확인해주세요.');
+   ledger-=Number(d.revertedUnits);
+   if(d.wasComplete)credited.delete(String(d.invoiceId));
   }else if(event.action==='correct-legacy-attendance')return stop('이전 출결을 정정했습니다. 현재 잔여 횟수도 맞는지 확인해주세요.');
   else if(event.action==='configure' || event.action==='payment' || ignored.has(event.action)){
    // Configuration and billing requests do not reset a balance.

@@ -19,6 +19,7 @@ export async function GET(request:Request){
   const payments=new Map<string,Payment>();
   for(const doc of dated.docs)payments.set(doc.id,{...doc.data(),id:doc.id} as Payment);
   for(const doc of recorded.docs)if(!doc.data().paymentDate)payments.set(doc.id,{...doc.data(),id:doc.id} as Payment);
-  return Response.json({month,payments:monthlyPayments([...payments.values()],month).rows},{headers:{'Cache-Control':'no-store'}});
+  const summary=monthlyPayments([...payments.values()],month);
+  return Response.json({month,payments:[...summary.rows,...summary.cancelledRows]},{headers:{'Cache-Control':'no-store'}});
  }catch(e){return failure(e);}
 }

@@ -1,3 +1,4 @@
+import {paymentCancellation} from '@/lib/operations/payment-cancellation';
 import {monthlyInvoice} from '@/lib/operations/monthly-payment';
 import {nextPassInput,nextPassDue,activateNextPass} from '@/lib/operations/next-pass';
 import {passHistoryInput,passCycleStarts} from '@/lib/operations/pass-history';
@@ -223,7 +224,7 @@ export function demoAction(current: Snapshot, input: Record<string, unknown>): {
   } else if(input.action==='monthlyPayment'){
     if(!account)throw Error('수강 정보를 확인해주세요.');const day=validDay(input.lessonDate);
     const id=String(input.invoiceId||`monthly_${account.id}_${day}`),existing=data.payments.find(p=>p.id===input.requestId);
-    if(existing)return {data,result};
+    if(existing){if(existing.cancelledAt)throw Error('취소된 수납 요청입니다. 새로 수납해주세요.');return {data,result};}
     const rows=[...data.invoices,...(data.settledInvoices||[])];let i=rows.find(i=>i.id===id);
     if(i&&i.studentId!==account.id)throw Error('다른 과목의 청구입니다.');
     if(rows.some(i=>i.id!==id&&i.status!=='cancelled'&&(i.lessonDate||i.cycleStart)===day))throw Error('이 날짜의 다른 청구가 있습니다.');
@@ -236,10 +237,22 @@ export function demoAction(current: Snapshot, input: Record<string, unknown>): {
       if(paid.complete){account.remaining+=i.creditUnits??i.units;if(account.openInvoiceId===id)account.openInvoiceId=null;}else account.openInvoiceId||=id;
       account.updatedAt=at;data.payments.unshift({id:String(input.requestId),invoiceId:id,studentId:account.id,amount:Number(input.amount),method:String(input.method),paymentDate,at,note:String(input.note||'')});
     }
+  } else if(input.action==='cancelPayment'){
+    const p=data.payments.find(p=>p.id===input.paymentId);if(!p)throw Error('수납 기록을 찾을 수 없습니다.');
+    if(p.cancelledAt)return {data,result};
+    const i=[...data.invoices,...(data.settledInvoices||[])].find(i=>i.id===p.invoiceId),a=data.accounts.find(a=>a.id===p.studentId);
+    if(!i||!a)throw Error('연결된 청구 또는 수강 정보를 찾을 수 없습니다.');
+    if(i.paid!==input.expectedPaid||(i.updatedAt||'')!==input.expectedInvoiceUpdatedAt||a.updatedAt!==input.expectedAccountUpdatedAt)throw Error('수납 또는 출결 정보가 변경됐습니다. 다시 확인해주세요.');
+    const effect=paymentCancellation(p,i,a);
+    Object.assign(p,{cancelledAt:at,cancelledBy:'demo',cancelReason:String(input.reason||''),revertedUnits:effect.revertedUnits});
+    Object.assign(i,{paid:effect.paid,status:'open',receiptCancelledAt:at,updatedAt:at});
+    Object.assign(a,{remaining:effect.remaining,openInvoiceId:a.openInvoiceId||i.id,updatedAt:at});
+    data.settledInvoices=(data.settledInvoices||[]).filter(v=>v.id!==i.id);
+    if(!data.invoices.some(v=>v.id===i.id))data.invoices.push(i);
   } else if (input.action === 'payment') {
     const paymentDate = paymentDateInput(input.paymentDate);
     const existing = data.payments.find(p => p.id === input.requestId);
-    if (existing) { if(existing.invoiceId!==input.invoiceId || existing.amount!==Number(input.amount) || existing.method!==input.method || (input.paymentDate!==undefined && existing.paymentDate!==paymentDate))throw Error('중복 요청 내용이 다릅니다.');return { data, result }; }
+    if (existing) { if(existing.cancelledAt)throw Error('취소된 수납 요청입니다. 새로 수납해주세요.'); if(existing.invoiceId!==input.invoiceId || existing.amount!==Number(input.amount) || existing.method!==input.method || (input.paymentDate!==undefined && existing.paymentDate!==paymentDate))throw Error('중복 요청 내용이 다릅니다.');return { data, result }; }
     const i = data.invoices.find(i => i.id === input.invoiceId)!; const s = settle(i, Number(input.amount));
     i.paid = s.paid;
     if (s.complete) { i.status = 'paid'; const a = data.accounts.find(a => a.id === i.studentId)!; a.remaining += i.creditUnits ?? i.units; a.openInvoiceId = a.openInvoiceId===i.id?null:a.openInvoiceId; a.updatedAt=at; }

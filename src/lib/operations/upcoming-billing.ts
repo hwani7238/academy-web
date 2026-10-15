@@ -34,7 +34,7 @@ export function billingProjection(data:Snapshot,today=seoulDay()){
 
 /** Billing is due at the final remaining lesson, including overdue balances. */
 export function finalLessonInvoices(data: Snapshot, invoices: Invoice[], today = seoulDay()) {
- const eligible = new Set(data.accounts.filter(a => a.active && a.remaining <= 1 &&
+ const eligible = new Set(data.accounts.filter(a => a.active &&
   data.students.some(s => s.id === a.id && enrollmentState(s.lifecycle, today) === 'active')).map(a => a.id));
- return invoices.filter(i => i.status === 'open' && eligible.has(i.studentId));
+ return invoices.filter(i => i.status === 'open' && eligible.has(i.studentId) && (Boolean(i.receiptCancelledAt) || data.accounts.some(a=>a.id===i.studentId&&a.remaining<=1)));
 }
