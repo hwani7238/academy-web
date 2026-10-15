@@ -31,9 +31,9 @@ export function paidFirstLesson(sequence: string | undefined, status: Attendance
   return confirmed && !paymentDue && isFirstLesson(sequence, status);
 }
 
-// A previous payment must never paint every later pass as paid. Explicit cycle
-// dates win; an advance renewal belongs to the next first lesson, including
-// the same day when the invoice precedes that lesson. Ambiguous dates stay unlinked.
+// Only a receipt explicitly linked to this pass can confirm its first lesson.
+// Collection/creation dates cannot distinguish late payment from prepayment.
+// Unlinked paid invoices remain available for the owner to associate manually.
 export function confirmedFirstLessons(invoices: Invoice[], cycleFirstDays: Record<string, string[]>, firstLessonTimes: Record<string, string> = {}) {
   const byLesson = new Map<string, Invoice[]>();
   for (const invoice of invoices) {

@@ -9,7 +9,9 @@ export const paymentDay = (payment: Payment) => payment.paymentDate || seoulDay(
 export function invoiceCycleStart(invoice: Invoice, cycleFirstDays: Record<string, string[]>, firstLessonTimes: Record<string, string> = {}) {
   if (invoice.lessonDate) return invoice.lessonDate;
   if (invoice.cycleStart) return invoice.cycleStart;
-  if (invoice.reservedPass) return undefined;
+  // A collection date cannot identify which pass was paid: late collections
+  // and prepayments both exist. Only an explicitly linked pass may appear paid.
+  if (invoice.status === 'paid' || invoice.reservedPass) return undefined;
   const created = new Date(invoice.createdAt);
   // A renewal can be paid before its first lesson on the same day. Never attach
   // an invoice issued after the final paid lesson to that already completed pass.

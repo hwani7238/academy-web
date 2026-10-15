@@ -1357,14 +1357,14 @@ test('first-lesson colors require full payment for that course and that cycle, n
  const invoice={id:'i',studentId:'drums',amount:160000,paid:0,status:'open',createdAt:'2026-09-21T02:00:00Z',needsReview:false};
  assert.equal(confirmed([invoice],cycles).size,0);
  assert.equal(confirmed([{...invoice,paid:80000}],cycles).size,0);
- const paid={...invoice,status:'paid',paid:160000};
+ const paid={...invoice,status:'paid',paid:160000,lessonDate:'2026-09-28'};
  assert.deepEqual([...confirmed([paid],cycles)],['drums_2026-09-28']);
  assert.equal(confirmed([paid],cycles).has('drums_2026-10-26'),false);
  assert.equal(confirmed([paid],cycles).has('piano_2026-09-28'),false);
  for(const patch of [{status:'cancelled'},{paid:80000},{needsReview:true}])assert.equal(confirmed([{...paid,...patch}],cycles).size,0);
  assert.equal(confirmed([paid,{...invoice,id:'other',cycleStart:'2026-09-28'}],cycles).size,0);
  // Explicit late collection marks the intended earlier cycle, not the next one.
- assert.deepEqual([...confirmed([{...paid,createdAt:'2026-10-02T00:00:00Z',cycleStart:'2026-09-28'}],cycles)],['drums_2026-09-28']);
+ assert.deepEqual([...confirmed([{...paid,createdAt:'2026-10-02T00:00:00Z',lessonDate:undefined,cycleStart:'2026-09-28'}],cycles)],['drums_2026-09-28']);
  for(const color of ['', 'FFFF00FF']){
   const row={studentId:'drums',day:'2026-09-28',value:'1.0',color};
   assert.equal(appearance(row).tone,'payment-due');
@@ -1379,7 +1379,7 @@ test('cycle dates survive month changes so old payments cannot confirm a later f
  const prior=sequence(a,[],[{studentId:'drums',day:'2026-09-01',value:'1',color:''},{studentId:'drums',day:'2026-09-28',value:'4',color:''}]);
  const next=sequence(a,[{studentId:'drums',day:'2026-10-01',units:1,status:'present'}],[],{...prior,cycleStarts:[]});
  assert.deepEqual(next.cycleFirstDays.drums,['2026-09-01','2026-10-01']);
- const invoice={id:'i',studentId:'drums',createdAt:'2026-08-28T00:00:00Z',status:'paid',amount:160000,paid:160000,needsReview:false};
+ const invoice={id:'i',studentId:'drums',lessonDate:'2026-09-01',createdAt:'2026-08-28T00:00:00Z',status:'paid',amount:160000,paid:160000,needsReview:false};
  assert.deepEqual([...confirmed([invoice],next.cycleFirstDays)],['drums_2026-09-01']);
  assert.deepEqual(prior.cycleFirstDays.drums,['2026-09-01']);
 });
@@ -1667,11 +1667,11 @@ test('forecast first lessons show payment due before attendance and clear only f
  assert.deepEqual([...due(forecast,[],cycles)],all); // A billing record need not exist yet.
  assert.deepEqual([...due(forecast,[invoice],cycles)],all);
  assert.deepEqual([...due(forecast,[{...invoice,paid:80000}],cycles)],all);
- const paid={...invoice,paid:160000,status:'paid'};
+ const paid={...invoice,paid:160000,status:'paid',lessonDate:'2026-10-02'};
  assert.deepEqual([...due(forecast,[paid],cycles)],all.slice(1));
  for(const patch of [{status:'cancelled'},{paid:80000},{needsReview:true}])assert.deepEqual([...due(forecast,[{...paid,...patch}],cycles)],all);
  // The previous pass's receipt cannot be assigned to October simply because it is being viewed.
- assert.deepEqual([...due(forecast,[{...paid,createdAt:'2026-08-31T02:00:00Z'}],cycles)],all);
+ assert.deepEqual([...due(forecast,[{...paid,lessonDate:'2026-09-01',createdAt:'2026-08-31T02:00:00Z'}],cycles)],all);
  assert.deepEqual([...due(forecast,[{...paid,lessonDate:'2026-10-30'}],cycles)],[all[0],all[2]]);
  assert.deepEqual([...due(forecast,[paid,{...invoice,id:'extra',lessonDate:'2026-10-02'}],cycles)],all);
  assert.deepEqual(cycles,before);assert.equal(forecast.get('person_piano_2026-10-02'),'1');
@@ -1686,7 +1686,7 @@ test('October 2 scheduled first lesson remains only a forecast, then attendance 
  let expected=forecast([account],records,[],context,dates,'2026-10-02');
  assert.equal(expected.get('p_2026-10-02'),'1');assert.equal(expected.has('p_2026-10-09'),false);
  assert.deepEqual([...due(expected,[],context.cycleFirstDays)],['p_2026-10-02','p_2026-10-23']);
- const paid={id:'renewal',studentId:'p',amount:160000,paid:160000,status:'paid',createdAt:'2026-09-30T02:00:00Z',needsReview:false};
+ const paid={id:'renewal',studentId:'p',lessonDate:'2026-10-02',amount:160000,paid:160000,status:'paid',createdAt:'2026-09-30T02:00:00Z',needsReview:false};
  assert.deepEqual([...due(expected,[paid],context.cycleFirstDays)],['p_2026-10-23']);
  assert.deepEqual(account,before);assert.equal(records.length,0);
  records.push({studentId:'p',day:'2026-10-02',units:1,status:'present'});
@@ -1729,7 +1729,7 @@ test('same-day prepayment stays paid before check-in, after arrival, and across 
  const account={id:'p',active:true,planUnits:8,remaining:8,schedule:{rules:[{start:'2026-10-02',weekdays:[1,5]}],moves:[]}};
  const context={positions:{p:8},cycleFirstDays:{p:['2026-08-31']},cycleStarts:[]};
  const dates=Array.from({length:31},(_,i)=>`2026-10-${String(i+1).padStart(2,'0')}`);
- const invoice={id:'renewal',studentId:'p',units:8,amount:150000,paid:150000,status:'paid',createdAt:'2026-10-02T01:00:00Z',needsReview:false};
+ const invoice={id:'renewal',studentId:'p',lessonDate:'2026-10-02',units:8,amount:150000,paid:150000,status:'paid',createdAt:'2026-10-02T01:00:00Z',needsReview:false};
  const preview=forecast([account],[],[],context,dates,'2026-10-02');
  assert.equal(preview.get('p_2026-10-02'),'1');
  assert.equal(due(preview,[invoice],context.cycleFirstDays).has('p_2026-10-02'),false);
@@ -1744,9 +1744,10 @@ test('same-day prepayment stays paid before check-in, after arrival, and across 
  const future=new Map([['p_2026-11-02','1']]);
  assert.equal(due(future,[invoice],next.cycleFirstDays,next.firstLessonTimes).has('p_2026-11-02'),true); // One receipt pays only one pass.
  // An invoice generated after a one-lesson pass (or two-unit final attendance)
- // still belongs to the next pass, even though today's ordinal includes 1.
- const after={...invoice,createdAt:'2026-10-02T06:00:00Z'};
- assert.equal(invoiceCycleStart(after,{p:['2026-10-02','2026-11-02']},actual.firstLessonTimes),'2026-11-02');
+ // must stay unlinked after collection; only its open-bill date may be projected.
+ const after={...invoice,lessonDate:undefined,createdAt:'2026-10-02T06:00:00Z'};
+ assert.equal(invoiceCycleStart(after,{p:['2026-10-02','2026-11-02']},actual.firstLessonTimes),undefined);
+ assert.equal(invoiceCycleStart({...after,status:'open',paid:0},{p:['2026-10-02','2026-11-02']},actual.firstLessonTimes),'2026-11-02');
  assert.equal(confirmed([after],actual.cycleFirstDays,actual.firstLessonTimes).size,0);
  assert.deepEqual(context,{positions:{p:8},cycleFirstDays:{p:['2026-08-31']},cycleStarts:[]});
 });
@@ -1899,7 +1900,7 @@ test('a 12-lesson September pass resets to a 16-lesson pass on October 2 without
  const current=sequence(accounts,records.filter(r=>r.day>='2026-10-01'),[],{...prior,cycleStarts:starts.filter(r=>r.day>='2026-10-01')});
  assert.deepEqual([...current.labels],[...result.labels].filter(([key])=>key>='p_2026-10-01'));
  const {invoiceCycleStart}=s.load('billing-display');
- assert.equal(invoiceCycleStart({id:'paid',studentId:'p',status:'paid',createdAt:'2026-10-01T08:58:36Z'},current.cycleFirstDays,current.firstLessonTimes),'2026-10-02');
+ assert.equal(invoiceCycleStart({id:'paid',studentId:'p',status:'paid',lessonDate:'2026-10-02',createdAt:'2026-10-01T08:58:36Z'},current.cycleFirstDays,current.firstLessonTimes),'2026-10-02');
  assert.equal(sequence(accounts,[row('2026-09-30')],legacy).positions.p,11);
 });
 test('pass history correction preserves remaining, payments and configuration while auditing the change',async()=>{
@@ -2134,4 +2135,54 @@ test('balance review follows payment, cancellation and repayment without countin
  const s=setup(),account={id:'piano',planUnits:8,remaining:8,updatedAt:'now'},invoice={id:'i',studentId:'piano',units:8,status:'paid'};
  const events=[['configure',{remaining:0}],['payment',{invoiceId:'i',complete:true}],['cancel-payment',{invoiceId:'i',wasComplete:true,revertedUnits:8,remaining:0}],['payment',{invoiceId:'i',complete:true}]].map(([action,detail],n)=>({id:String(n),studentId:'piano',action,detail,at:`2026-09-0${n+1}T00:00:00.000Z`}));
  const result=s.load('balance-review').reviewBalance(account,undefined,events,[],[invoice]);assert.equal(result.status,'verified');assert.equal(result.ledger,8);
+});
+
+
+test('unlinked late receipts never confirm actual, imported or forecast first lessons in any viewed month',()=>{
+ const s=setup(),{confirmedFirstLessons:confirmed,unpaidForecastFirstLessons:due,importedAttendanceAppearance:appearance}=s.load('attendance-appearance');
+ const {invoiceCycleStart}=s.load('billing-display');
+ const paid={id:'old-paid',studentId:'drums',units:4,amount:180000,paid:180000,status:'paid',createdAt:'2026-09-23T01:00:00Z',needsReview:false};
+ const dates=['2026-09-19','2026-10-24','2026-11-21'];
+ for(const visibleDays of [dates,dates.slice(1),dates.slice(2)]){
+  const cycles={drums:visibleDays,piano:visibleDays};
+  const times=Object.fromEntries(visibleDays.map(day=>[`drums_${day}`,day+'T06:00:00Z']));
+  const preview=new Map(visibleDays.flatMap(day=>[[`drums_${day}`,'1'],[`piano_${day}`,'1']]));
+  assert.equal(invoiceCycleStart(paid,cycles,times),undefined);
+  assert.equal(confirmed([paid],cycles,times).size,0);
+  assert.deepEqual([...due(preview,[paid],cycles,times)],[...preview.keys()]);
+ }
+ // Creation on the first-lesson date is still not proof of the paid pass.
+ assert.equal(confirmed([{...paid,createdAt:'2026-10-24T00:00:00Z'}],{drums:dates},{'drums_2026-10-24':'forecast'}).size,0);
+ const linked={...paid,lessonDate:'2026-09-19'};
+ assert.deepEqual([...confirmed([linked],{drums:dates})],['drums_2026-09-19']);
+ assert.equal(appearance({studentId:'drums',day:'2026-09-19',value:'1',color:''},undefined,undefined,confirmed([linked],{drums:dates}).has('drums_2026-09-19')).tone,'paid-first');
+ assert.deepEqual([...due(new Map([['drums_2026-10-24','1'],['piano_2026-10-24','1']]),[linked],{drums:dates})],['drums_2026-10-24','piano_2026-10-24']);
+ // Billing must not hide the next pass because of an unrelated past receipt.
+ const data={day:'2026-10-15',students:[{id:'drums'}],accounts:[{id:'drums',active:true,name:'Test',planUnits:4,planAmount:180000,remaining:1,schedule:{rules:[{start:'2026-09-01',weekdays:[6]}],moves:[]}}],attendance:[],legacyAttendance:[{studentId:'drums',day:'2026-10-10',value:'3',color:''}],invoices:[],settledInvoices:[paid]};
+ const before=structuredClone(data);
+ const upcoming=s.load('upcoming-billing').billingProjection(data,'2026-10-15').upcoming;
+ assert.equal(upcoming[0].lessonDate,'2026-10-24');assert.deepEqual(data,before);
+ assert.equal(s.load('upcoming-billing').billingProjection({...data,settledInvoices:[{...paid,lessonDate:'2026-10-24'}]},'2026-10-15').upcoming.length,0);
+ // Explicit prepayment remains paid even when its actual collection date is earlier.
+ assert.deepEqual([...due(new Map([['drums_2026-10-24','1'],['drums_2026-11-21','1']]),[{...paid,lessonDate:'2026-10-24'}],{drums:dates})],['drums_2026-11-21']);
+});
+
+test('linking a late receipt changes only its pass association and is idempotent',async()=>{
+ const s=setup();await s.seed('drums',2);
+ const invoice={id:'late-receipt',studentId:'drums',name:'Test',units:4,amount:180000,paid:180000,status:'paid',createdAt:'2026-09-23T01:00:00Z',needsReview:false};
+ const receipt={id:'cash-receipt',invoiceId:invoice.id,studentId:'drums',amount:180000,method:'현금',paymentDate:'2026-09-23',at:'2026-09-23T01:00:00Z'};
+ s.records.set('opsInvoices/'+invoice.id,invoice);s.records.set('opsPayments/'+receipt.id,receipt);
+ const account=structuredClone(s.records.get('opsAccounts/drums'));
+ const input={studentId:'drums',lessonDate:'2026-09-19',invoiceId:invoice.id,linkOnly:true,requestId:'link-late-receipt',expectedInvoiceUpdatedAt:''};
+ const snapshot={accounts:[account],invoices:[],settledInvoices:[invoice],attendance:[],legacyAttendance:[],sequenceContext:{cycleFirstDays:{drums:['2026-09-19','2026-10-24']}}};
+ const candidates=s.load('monthly-payment').monthlyPaymentOptions(snapshot,'drums','2026-09-19');
+ assert.equal(candidates.match.length,0);assert.deepEqual(candidates.unresolved.map(i=>i.id),[invoice.id]);
+ await s.service.monthlyPayment(input,'owner');await s.service.monthlyPayment(input,'owner');
+ const linked=s.records.get('opsInvoices/'+invoice.id);
+ assert.equal(linked.lessonDate,'2026-09-19');assert.equal(linked.paid,180000);assert.equal(linked.status,'paid');
+ assert.deepEqual(s.records.get('opsAccounts/drums'),account);assert.deepEqual(s.records.get('opsPayments/'+receipt.id),receipt);
+ assert.equal([...s.records.keys()].filter(k=>k.startsWith('opsPayments/')).length,1);
+ assert.equal([...s.records.values()].filter(r=>r.action==='invoice-lesson-date').length,1);
+ assert.equal([...s.records.keys()].filter(k=>k.startsWith('opsNotices/')).length,0);
+ assert.deepEqual([...s.load('attendance-appearance').confirmedFirstLessons([linked],{drums:['2026-09-19','2026-10-24']})],['drums_2026-09-19']);
 });
