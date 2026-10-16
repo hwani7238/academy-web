@@ -28,12 +28,14 @@ export async function POST(request: Request) {
     try {
         const { digits } = await request.json();
 
-        if (!digits || typeof digits !== "string" || digits.length !== 4) {
+        if (typeof digits !== "string" || !/^[0-9]{4}$/.test(digits)) {
             return NextResponse.json({ error: "Invalid digits. Must be exactly 4 digits." }, { status: 400 });
         }
 
-        // Query all students from Firestore via adminDb
-        const studentsSnap = await adminDb.collection("students").get();
+        // Existing records must be backfilled before deploying this query.
+        const studentsSnap = await adminDb.collection("students")
+            .where("phoneLast4", "==", digits)
+            .get();
         const matches: any[] = [];
 
         // Filter students by phone number ending in the last 4 digits
