@@ -1,6 +1,6 @@
 import {attendanceForecast} from './attendance-forecast';
 import {attendanceSequence} from './attendance-sequence';
-import {isFirstLesson} from './attendance-appearance';
+import {isFirstLesson,legacyAttendanceAppearance} from './attendance-appearance';
 import {invoiceCycleStart} from './billing-display';
 import {enrollmentState} from './lifecycle';
 import {seoulDay,type Invoice,type Snapshot} from './model';
@@ -17,6 +17,17 @@ export function billingProjection(data:Snapshot,today=seoulDay()){
  const candidateKeys=new Set<string>();
  for(const [key,label] of forecast){if(!isFirstLesson(label,'present'))continue;const id=key.slice(0,-11),day=key.slice(-10);const days=cycles[id]||=[];if(!days.includes(day))days.push(day);times[key]='forecast';candidateKeys.add(key);}
  for(const row of data.attendance)if(isFirstLesson(sequence.labels.get(`${row.studentId}_${row.day}`),row.status))candidateKeys.add(`${row.studentId}_${row.day}`);
+ // A ledger-only first lesson remains collectible after its date passes. It
+ // never becomes a real attendance/charge merely because it is in this list.
+ const recorded = new Set(records.map(r=>`${r.studentId}_${r.day}`));
+ const legacyByKey = new Map((data.legacyAttendance||[]).map(r=>[`${r.studentId}_${r.day}`,r]));
+ const ledger = new Map([...(data.legacyAttendance||[]),...(context?.references||[])].map(r=>[`${r.studentId}_${r.day}`,r]));
+ for(const [key,row] of ledger){
+  if(recorded.has(key)||row.day<`${today.slice(0,7)}-01`||row.day>today)continue;
+  const tone=legacyAttendanceAppearance(legacyByKey.get(key)||row).tone;
+  if(!['present','payment-due'].includes(tone))continue;
+  if(isFirstLesson(sequence.labels.get(key)||row.value,'present'))candidateKeys.add(key);
+ }
  const invoiceRows=[...data.invoices,...(data.settledInvoices||[])];
  const covered=new Set(invoiceRows.filter(i=>i.status!=='cancelled').flatMap(i=>{const day=invoiceCycleStart(i,cycles,times);return day?[`${i.studentId}_${day}`]:[];}));
  const upcoming:Invoice[]=[],seen=new Set<string>();
@@ -32,9 +43,17 @@ export function billingProjection(data:Snapshot,today=seoulDay()){
  return {upcoming,cycleFirstDays:cycles,firstLessonTimes:times};
 }
 
-/** Billing is due at the final remaining lesson, including overdue balances. */
+/** Also collect a pass whose first lesson has arrived, even if the balance
+ * retained during ledger reconciliation still exceeds one. */
 export function finalLessonInvoices(data: Snapshot, invoices: Invoice[], today = seoulDay()) {
- const eligible = new Set(data.accounts.filter(a => a.active &&
-  data.students.some(s => s.id === a.id && enrollmentState(s.lifecycle, today) === 'active')).map(a => a.id));
- return invoices.filter(i => i.status === 'open' && eligible.has(i.studentId) && (Boolean(i.receiptCancelledAt) || data.accounts.some(a=>a.id===i.studentId&&a.remaining<=1)));
+ const eligible = new Map(data.accounts.filter(a => a.active &&
+  data.students.some(s => s.id === a.id && enrollmentState(s.lifecycle, today) === 'active')).map(a => [a.id,a]));
+ const sequence = attendanceSequence(data.accounts,[...data.attendance,...(data.forecastAttendance||[])],data.legacyAttendance||[],data.sequenceContext);
+ return invoices.filter(i => {
+  const account=eligible.get(i.studentId);
+  if(i.status!=='open'||!account)return false;
+  const first=invoiceCycleStart(i,sequence.cycleFirstDays,sequence.firstLessonTimes);
+  return Boolean(i.receiptCancelledAt)||account.remaining<=1||Boolean(first&&first<=today);
+ });
 }
+

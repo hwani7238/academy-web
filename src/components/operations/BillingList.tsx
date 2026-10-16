@@ -40,7 +40,7 @@ export function BillingList({ data, invoices, busy, demo, pay, edit, action, sav
   const chunks=Array.from({length:columnCount},(_,index)=>visible.slice(index*perColumn,(index+1)*perColumn));
   const selectedInvoice = invoices.find(i => i.id === selected);
   return <div className="billing-compact" ref={layout}>
-    <div className="section-head billing-heading"><div><h2>청구·수납</h2><p>잔여 1회 이하인 학생의 청구만 표시합니다. 마지막 수업을 마친 미수납 학생과 수납 취소한 청구도 포함합니다.</p></div>
+    <div className="section-head billing-heading"><div><h2>청구·수납</h2><p>잔여 1회 이하이거나, 오늘까지 1회차가 시작된 미수납 청구를 표시합니다. 수납 취소한 청구도 포함합니다.</p></div>
       <label>과목<select value={subject} onChange={e=>setSubject(e.target.value)}><option value="">전체 과목</option>{subject && !subjects.includes(subject) && <option value={subject}>{subject}</option>}{subjects.map(s=><option key={s}>{s}</option>)}</select></label>
       <label>학생 찾기<input placeholder="이름" value={search} onChange={e=>setSearch(e.target.value)}/></label>
     </div>
@@ -65,3 +65,4 @@ function BillingActions({invoice:i,name,busy,demo,sent,close,edit,action}:{invoi
     <div className="billing-detail-actions">{i.projected&&<button className="primary" disabled={busy} onClick={()=>action('prepareUpcoming')}>청구 확정</button>}{!demo&&<button disabled={busy||i.paid>0||i.reservedPass||i.projected} onClick={edit}>청구 수정</button>}<button disabled={busy||i.needsReview||sent} onClick={()=>action('sendInvoice')}>{sent?'결제 안내 요청됨':'결제 안내 요청'}</button><button className="danger-text" disabled={busy||i.paid>0||i.reservedPass||i.projected} onClick={()=>{if(window.confirm('이 청구를 취소할까요? 이미 발송한 안내는 회수되지 않습니다.'))action('cancelInvoice');}}>청구 취소</button></div><p className="billing-api-note">결제선생 API 연결 대기 중으로, 안내 요청은 기록만 저장하며 실제 청구서를 보내지 않습니다.</p>
   </dialog>;
 }
+
