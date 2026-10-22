@@ -16,7 +16,9 @@ export function legacyAttendanceAppearance(row: Legacy) {
 
 export function attendancePaymentDue(row: Pick<Attendance, 'day' | 'status' | 'units'>, account?: Account, invoice?: Invoice) {
   if (!invoice || invoice.status !== 'open' || invoice.paid >= invoice.amount || row.units <= 0 || !['present', 'makeup'].includes(row.status || 'present')) return false;
-  if (invoice.cycleStart) return row.day >= invoice.cycleStart;
+  // A linked first-lesson date is authoritative, including an ordinary renewal.
+  const firstLesson = invoice.lessonDate || invoice.cycleStart;
+  if (firstLesson) return row.day >= firstLesson;
   // An ordinary renewal invoice is created on the final paid lesson. Only
   // subsequent lessons while the balance is negative belong to the unpaid pass.
   const created = new Date(invoice.createdAt);
