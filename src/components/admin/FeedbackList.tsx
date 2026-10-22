@@ -1,6 +1,7 @@
 "use client";
 
 import Image from "next/image";
+import { CloseIcon } from "@/components/ui/CloseIcon";
 import { useEffect, useState } from "react";
 import {
     Timestamp,
@@ -424,8 +425,8 @@ export function FeedbackList({ filterSubjects }: FeedbackListProps) {
                                     </p>
                                 </div>
                                 <div className="flex items-center gap-2">
-                                    <Button variant="ghost" size="sm" onClick={() => setSelectedLogPath(null)}>
-                                        &times; 닫기
+                                    <Button variant="ghost" size="icon" aria-label="닫기" title="닫기" onClick={() => setSelectedLogPath(null)}>
+                                        <CloseIcon />
                                     </Button>
                                 </div>
                             </div>
@@ -549,7 +550,7 @@ export function FeedbackList({ filterSubjects }: FeedbackListProps) {
                             )}
 
                             <div className="flex justify-end pt-4">
-                                <Button onClick={() => setSelectedLogPath(null)}>닫기</Button>
+                                <Button size="icon" aria-label="닫기" title="닫기" onClick={() => setSelectedLogPath(null)}><CloseIcon /></Button>
                             </div>
                         </div>
                     </div>

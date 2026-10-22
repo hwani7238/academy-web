@@ -225,6 +225,8 @@ export function StudentDetail({ student, onBack, currentUser }: StudentDetailPro
                         'Authorization': `Bearer ${idToken}`
                     },
                     body: JSON.stringify({
+                        studentId: student.id,
+                        logId: docRef.id,
                         phone: student.phone.replace(/-/g, ''), // Remove dashes
                         templateId: 'FEEDBACK_LOG_V2',
                         templateParameter: {
