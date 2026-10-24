@@ -2120,7 +2120,7 @@ test('zero-credit and reserved passes retain lessons on cancellation and reappea
   await s.pay('zero-credit',160000);await s.service.cancelPayment(receiptCancellationInput(s,'zero-credit'),'owner');
   const invoice=s.records.get('opsInvoices/receipt-invoice'),updated=s.records.get('opsAccounts/piano');
   assert.equal(updated.remaining,7);assert.equal(s.records.get('opsPayments/zero-credit').revertedUnits,0);
-  const visible=s.load('upcoming-billing').finalLessonInvoices({accounts:[updated],students:[{id:'piano'}]},[invoice]);assert.equal(visible.length,1);
+  const visible=s.load('upcoming-billing').finalLessonInvoices({accounts:[updated],students:[{id:'piano'}],attendance:[],legacyAttendance:[]},[invoice]);assert.equal(visible.length,1);
  }
 });
 test('cancellation refuses stale confirmations and corrupt links without mutating financial records',async()=>{
