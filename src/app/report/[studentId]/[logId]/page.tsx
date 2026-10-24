@@ -63,8 +63,12 @@ export default function ReportPage() {
       }
 
       try {
+        // Staff previews must be authenticated; a query flag cannot bypass reading.
+        await auth.authStateReady();
+        const staffToken = await auth.currentUser?.getIdToken();
         const response = await fetch(`/api/report/${studentId}/${logId}?t=${encodeURIComponent(token)}`, {
           cache: "no-store",
+          headers: staffToken ? { Authorization: `Bearer ${staffToken}` } : {},
         });
 
         if (!response.ok) {
@@ -84,56 +88,6 @@ export default function ReportPage() {
     void fetchData();
   }, [studentId, logId, token]);
 
-  useEffect(() => {
-    if (!studentId || !logId || !token || !report) return;
-    if (typeof window === "undefined") return;
-
-    const sessionKey = `report-view:${studentId}:${logId}`;
-
-    const trackView = async () => {
-      if (document.visibilityState !== "visible") return;
-      if (window.sessionStorage.getItem(sessionKey)) return;
-
-      const adminView = searchParams?.get("admin") === "true";
-      if (adminView || auth.currentUser) {
-        return;
-      }
-
-      window.sessionStorage.setItem(sessionKey, "pending");
-
-      try {
-        const response = await fetch(`/api/report/${studentId}/${logId}?t=${encodeURIComponent(token)}`, {
-          method: "POST",
-        });
-
-        if (!response.ok) {
-          throw new Error(`Failed to track view: ${response.status}`);
-        }
-
-        window.sessionStorage.setItem(sessionKey, "done");
-      } catch (error) {
-        window.sessionStorage.removeItem(sessionKey);
-        console.error("Error tracking report view:", error);
-      }
-    };
-
-    const timeoutId = window.setTimeout(() => {
-      void trackView();
-    }, 800);
-
-    const handleVisibilityChange = () => {
-      if (document.visibilityState === "visible") {
-        void trackView();
-      }
-    };
-
-    document.addEventListener("visibilitychange", handleVisibilityChange);
-
-    return () => {
-      window.clearTimeout(timeoutId);
-      document.removeEventListener("visibilitychange", handleVisibilityChange);
-    };
-  }, [studentId, logId, token, report, searchParams]);
 
   if (loading) return <div className="flex h-screen items-center justify-center">Loading...</div>;
   if (error || !report) return <div className="flex h-screen items-center justify-center">리포트를 찾을 수 없습니다.</div>;

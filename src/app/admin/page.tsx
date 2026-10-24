@@ -159,6 +159,7 @@ export default function AdminPage() {
                         <section>
                             {!isDetailView && <h2 className="mb-4 text-2xl font-bold">피드백 목록 ({isTeacher ? '내 과목' : '전체'})</h2>}
                             <FeedbackList 
+                                actor={{uid: user.uid, role: userData?.role, status: userData?.status}}
                                 filterSubjects={isAdmin ? null : (userData?.subjects || (userData?.subject ? [userData.subject] : []))} 
                             />
                         </section>

@@ -4,6 +4,8 @@ import { useState, useEffect } from "react";
 import { doc, collection, addDoc, onSnapshot, query, orderBy, deleteDoc } from "firebase/firestore";
 import { ref, uploadBytesResumable, getDownloadURL, deleteObject } from "firebase/storage";
 import { db, storage } from "@/lib/firebase";
+import { FeedbackEdit } from "./FeedbackEdit";
+import { feedbackViewed } from "@/lib/feedback/policy";
 import { Button } from "@/components/ui/button";
 
 interface TimestampLike {
@@ -35,6 +37,7 @@ interface LearningLog {
     createdAt: FirestoreDate;
     authorName?: string;
     authorId?: string;
+    editRevision?: number;
     studentName?: string;
     mediaUrl?: string; // legacy
     mediaType?: string; // legacy
@@ -60,6 +63,8 @@ interface StudentDetailProps {
     onBack: () => void;
     currentUser: {
         uid: string;
+        role?: string;
+        status?: string;
         name?: string;
         email?: string;
     };
@@ -73,8 +78,7 @@ const getDateValue = (date: FirestoreDate) => {
     return null;
 };
 
-const isViewed = (log: Pick<LearningLog, "viewed" | "viewCount" | "firstViewedAt" | "lastViewedAt">) =>
-    Boolean(log.viewed) || (log.viewCount ?? 0) > 0 || Boolean(log.firstViewedAt) || Boolean(log.lastViewedAt);
+const isViewed = feedbackViewed;
 
 export function StudentDetail({ student, onBack, currentUser }: StudentDetailProps) {
     const studentInstruments = student.instruments && student.instruments.length > 0
@@ -564,6 +568,7 @@ export function StudentDetail({ student, onBack, currentUser }: StudentDetailPro
                                             </div>
                                         </div>
                                         <div className="flex w-full flex-wrap justify-end gap-2 sm:w-auto">
+                                            <FeedbackEdit studentId={student.id} logId={log.id} log={log} actor={currentUser}/>
                                             <Button variant="outline" size="sm" onClick={() => handleCopyLink(log.id, (log as LearningLog & { reportToken?: string }).reportToken)} className="h-7 text-xs">
                                                 링크 복사
                                             </Button>
