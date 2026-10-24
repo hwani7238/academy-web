@@ -70,29 +70,14 @@ service cloud.firestore {
         request.resource.data.requestedAt is timestamp;
     }
 
-    function isAllowedReportViewUpdate() {
-      return request.auth == null &&
-        request.resource.data.diff(resource.data).affectedKeys().hasOnly([
-          'viewed',
-          'firstViewedAt',
-          'lastViewedAt',
-          'lastViewedUserAgent',
-          'viewCount'
-        ]) &&
-        request.resource.data.viewed == true &&
-        request.resource.data.lastViewedAt is timestamp &&
-        request.resource.data.lastViewedUserAgent is string &&
-        request.resource.data.lastViewedUserAgent.size() <= 300 &&
-        request.resource.data.viewCount is int &&
-        (
-          !('firstViewedAt' in request.resource.data) ||
-          request.resource.data.firstViewedAt is timestamp
-        );
-    }
-
     match /students/{studentId}/logs/{logId} {
-      // Public reports use the server endpoint that checks reportToken.
       allow read: if isStaff();
+      allow create: if isStaff() && request.resource.data.authorId == request.auth.uid;
+      // Content edits and read markers use server transactions. Clients cannot
+      // reset a view marker or bypass the unread-only rule.
+      allow update: if false;
+      allow delete: if isStaff();
+      match /edits/{editId} { allow read, write: if false; }
     }
 
     match /{path=**}/logs/{logId} {
@@ -102,8 +87,8 @@ service cloud.firestore {
     match /students/{studentId} {
       allow read, write: if isStaff();
 
-      match /{allChildren=**} {
-        allow read, write: if isStaff();
+      match /{childCollection}/{childId}/{rest=**} {
+        allow read, write: if childCollection != 'logs' && isStaff();
       }
     }
 

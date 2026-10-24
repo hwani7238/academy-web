@@ -2,6 +2,8 @@
 
 import Image from "next/image";
 import { CloseIcon } from "@/components/ui/CloseIcon";
+import { FeedbackEdit } from "./FeedbackEdit";
+import { feedbackViewed, type FeedbackActor } from "@/lib/feedback/policy";
 import { useEffect, useState } from "react";
 import {
     Timestamp,
@@ -32,6 +34,8 @@ interface FeedbackLog {
     studentId?: string;
     studentName?: string;
     authorName?: string;
+    authorId?: string;
+    editRevision?: number;
     feedback: string;
     createdAt: FirestoreDate;
     progress?: string;
@@ -72,14 +76,14 @@ const formatTime = (timestamp: FirestoreDate) => {
     return date ? format(date, "HH:mm") : "-";
 };
 
-const isViewed = (log: Pick<FeedbackLog, "viewCount" | "lastViewedAt" | "viewed">) =>
-    Boolean(log.viewed) || (log.viewCount ?? 0) > 0 || Boolean(log.lastViewedAt);
+const isViewed = feedbackViewed;
 
 export interface FeedbackListProps {
+    actor: FeedbackActor;
     filterSubjects?: string[] | null;
 }
 
-export function FeedbackList({ filterSubjects }: FeedbackListProps) {
+export function FeedbackList({ filterSubjects, actor }: FeedbackListProps) {
     const [selectedDate, setSelectedDate] = useState<Date>(new Date());
     const [currentMonth, setCurrentMonth] = useState<Date>(new Date());
     const [dailyLogs, setDailyLogs] = useState<FeedbackLog[]>([]);
@@ -425,6 +429,7 @@ export function FeedbackList({ filterSubjects }: FeedbackListProps) {
                                     </p>
                                 </div>
                                 <div className="flex items-center gap-2">
+                                    {selectedLog.studentId && <FeedbackEdit studentId={selectedLog.studentId} logId={selectedLog.id} log={selectedLog} actor={actor}/>}
                                     <Button variant="ghost" size="icon" aria-label="닫기" title="닫기" onClick={() => setSelectedLogPath(null)}>
                                         <CloseIcon />
                                     </Button>
