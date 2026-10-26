@@ -31,7 +31,7 @@ export async function POST(request: Request) {
     }
     if (input.action === 'checkIn') {
       const result = await checkIn(input.studentId, input.digits, `device:${actor}`);
-      after(async () => { try { await processNotices(); } catch { console.error('Notification worker failed; pending records retained.'); } });
+      if (result.noticeId) after(async () => { try { await processNotices(result.noticeId); } catch { console.error('Notification worker failed; pending records retained.'); } });
       return Response.json(result);
     }
     throw new Error('지원하지 않는 작업입니다.');

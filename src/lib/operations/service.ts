@@ -258,9 +258,9 @@ export async function checkIn(studentId: string, digits: string, actor: string) 
     const openInvoiceId = remaining <= 0 && units > 0 && !account.openInvoiceId ? newInvoice(tx, db, account, invoiceId, '수업 횟수 소진') : account.openInvoiceId;
     tx.set(attendanceRef, { id: attendanceId, studentId: id, name: account.name, day, at: now(), units, status: reservation ? 'makeup' : 'present', source: 'kiosk', note: reservation?.note || '', ...(reservation ? {relatedDay:reservation.relatedDay} : {}), updatedAt: now() });
     tx.update(ref, { ...account, remaining, openInvoiceId, updatedAt: now() });
-    if (!previousNotice?.exists) enqueue(tx, db, `attendance_${attendanceId}`, account, 'attendance', { student_name: account.name, attendance_time: new Date().toLocaleTimeString('ko-KR', { timeZone: 'Asia/Seoul', hour: '2-digit', minute: '2-digit', hour12: false }) });
+    if (!previousNotice?.exists) enqueue(tx, db, `attendance_${attendanceId}`, account, 'attendance', { student_name: String(owner.name || account.name), attendance_time: new Date().toLocaleTimeString('ko-KR', { timeZone: 'Asia/Seoul', hour: '2-digit', minute: '2-digit', hour12: false }) });
     audit(tx, db, actor, 'check-in', id, { attendanceId, units, remaining, ...(activation?{passCreditUnits:account.planUnits}:{}), ...(reservation ? {relatedDay:reservation.relatedDay, completedReservation:true} : {}) });
-    return { duplicate: false, name };
+    return { duplicate: false, name, noticeId: `attendance_${attendanceId}` };
   });
 }
 export async function adjust(input: Record<string, unknown>, actor: string) {

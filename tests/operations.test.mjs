@@ -368,7 +368,7 @@ test('pending attendance notices use the new guardian phone while sent notices s
  await s.service.updateStudentPhone({studentId:'student-a',sourceStudentId:'student-a',phone:'01011110012',expectedPhone:'01000001234'},'owner');
  const keys=['NHN_APP_KEY','NHN_SECRET_KEY','NHN_SENDER_KEY','NHN_ATTENDANCE_TEMPLATE'],env={...process.env},original=global.fetch,bodies=[];
  for(const k of keys)process.env[k]='test';
- global.fetch=async(_,options)=>{bodies.push(JSON.parse(options.body));return {ok:true,json:async()=>({header:{isSuccessful:true},recipientList:[{resultCode:0}]})};};
+ global.fetch=async(_,options)=>{bodies.push(JSON.parse(options.body));return {ok:true,json:async()=>({header:{isSuccessful:true},message:{requestId:"test-request",sendResults:[{resultCode:0,recipientSeq:1}]}})};};
  try{
   await s.load('notices').processNotices();assert.equal(bodies.length,1);assert.equal(bodies[0].recipientList[0].recipientNo,'01011110012');
   assert.deepEqual(s.records.get('opsNotices/sent'),sent);
@@ -2257,4 +2257,88 @@ test('backdated changes do not silently replace an already applied later pass or
   await assert.rejects(s.service.saveNextPass({studentId:'piano',expectedUpdatedAt:s.records.get('opsAccounts/piano').updatedAt,units:12,amount:210000,mode:'date',start:'2026-09-01'},'owner'),/이미 적용|다른 수강권/);
   assert.deepEqual([...s.records],before);
  }
+});
+
+async function withAttendanceProvider(run) {
+ const keys=['NHN_APP_KEY','NHN_SECRET_KEY','NHN_SENDER_KEY','NHN_ATTENDANCE_TEMPLATE'];
+ const env={...process.env},original=global.fetch,calls=[];
+ for(const key of keys)process.env[key]='attendance-test';
+ global.fetch=async(url,options)=>{calls.push({url,...options,body:JSON.parse(options.body)});return {ok:true,status:200,json:async()=>({header:{isSuccessful:true},message:{requestId:'attendance-request',sendResults:[{resultCode:0,recipientSeq:1}]}})};};
+ try{await run(calls);}finally{global.fetch=original;for(const key of keys){if(env[key]===undefined)delete process.env[key];else process.env[key]=env[key];}}
+}
+test('new kiosk arrival sends immediately past backlog, exactly once under concurrent workers',async()=>{
+ const s=setup();await s.seed('fresh',8);
+ for(let n=0;n<8;n++)s.records.set(`opsNotices/old-${n}`,{status:'queued',kind:'attendance',createdAt:'2020-01-01T00:00:00Z'});
+ const arrival=await s.service.checkIn('fresh','1234','device');assert.ok(arrival.noticeId);
+ await withAttendanceProvider(async calls=>{
+  const worker=s.load('notices');await Promise.all([worker.processNotices(arrival.noticeId),worker.processNotices(arrival.noticeId)]);
+  assert.equal(calls.length,1);assert.equal(calls[0].body.recipientList[0].resendParameter.isResend,false);
+  assert.equal(calls[0].body.recipientList[0].templateParameter.student_name,'가상 학생');
+  assert.match(calls[0].body.recipientList[0].templateParameter.attendance_time,/^\d{2}:\d{2}$/);
+  assert.equal(calls[0].headers['X-NC-API-IDEMPOTENCY-KEY'].length,64);
+  const stored=s.records.get(`opsNotices/${arrival.noticeId}`);assert.equal(stored.status,'submitted');assert.equal(stored.requestId,'attendance-request');assert.equal(stored.recipientSeq,1);
+  assert.equal(s.records.get('opsNotices/old-0').status,'queued');
+  assert.equal((await s.service.checkIn('fresh','1234','device')).duplicate,true);
+  await worker.processNotices(arrival.noticeId);assert.equal(calls.length,1);
+ });
+});
+test('expired, cancelled, missing and manually recorded attendance never sends',async()=>{
+ await withAttendanceProvider(async calls=>{
+  for(const condition of ['expired','invalid-time','cancelled','missing','manual','wrong-day','wrong-student']){
+   const s=setup();await s.seed();const {noticeId}=await s.service.checkIn('student-a','1234','device');
+   const key=`opsNotices/${noticeId}`,attendanceKey=`opsAttendance/${noticeId.slice('attendance_'.length)}`;
+   if(condition==='expired')s.records.get(key).createdAt=new Date(Date.now()-11*60*1000).toISOString();
+   if(condition==='invalid-time')s.records.get(key).createdAt='bad';
+   if(condition==='cancelled')s.records.get(attendanceKey).status='cancelled';
+   if(condition==='missing')s.records.delete(attendanceKey);
+   if(condition==='manual')s.records.get(attendanceKey).source='manual';
+   if(condition==='wrong-day')s.records.get(attendanceKey).day='2020-01-01';
+   if(condition==='wrong-student')s.records.get(attendanceKey).studentId='someone-else';
+   await s.load('notices').processNotices(noticeId);
+   assert.equal(calls.length,0,condition);assert.ok(['expired','cancelled'].includes(s.records.get(key).status),condition);
+  }
+ });
+});
+test('NHN recipient rejection is failed; incomplete successful response is unknown and never resent',async()=>{
+ await withAttendanceProvider(async()=>{
+  for(const [body,expected] of [
+   [{header:{isSuccessful:true},message:{requestId:'request',sendResults:[{resultCode:-3000,recipientSeq:1}]}},'failed'],
+   [{header:{isSuccessful:false,resultCode:-1000}},'failed'],
+   [{header:{isSuccessful:true}},'unknown'],
+   [{header:{isSuccessful:true},message:{sendResults:[{resultCode:0,recipientSeq:1}]}},'unknown'],
+  ]){
+   const s=setup();await s.seed();const {noticeId}=await s.service.checkIn('student-a','1234','device');let calls=0;
+   global.fetch=async()=>{calls++;return {ok:true,status:200,json:async()=>body};};
+   const worker=s.load('notices');await worker.processNotices(noticeId);await worker.processNotices(noticeId);
+   assert.equal(s.records.get(`opsNotices/${noticeId}`).status,expected);assert.equal(calls,1);
+  }
+ });
+});
+test('missing guardian blocks attendance without preventing check-in or sending',async()=>{
+ const s=setup();await s.seed();s.records.get('opsAccounts/student-a').phone='';
+ const {noticeId}=await s.service.checkIn('student-a','1234','device');
+ await withAttendanceProvider(async calls=>{await s.load('notices').processNotices(noticeId);assert.equal(calls.length,0);assert.equal(s.records.get(`opsNotices/${noticeId}`).status,'blocked');});
+});
+test('approved Korean attendance template uses student name, time, academy and contact',async()=>{
+ const s=setup();await s.seed();s.records.get('opsAccounts/student-a').name='가상 학생 · 피아노';
+ const {noticeId}=await s.service.checkIn('student-a','1234','device');
+ const contact=process.env.NHN_ATTENDANCE_CONTACT;
+ try{await withAttendanceProvider(async calls=>{
+  process.env.NHN_ATTENDANCE_TEMPLATE='ATTENDANCE_LOG_V1';process.env.NHN_ATTENDANCE_CONTACT='02-000-0000';
+  const worker=s.load('notices');assert.equal(worker.noticeConfigured(),true);await worker.processNotices(noticeId);
+  assert.equal(calls[0].body.templateCode,'ATTENDANCE_LOG_V1');
+  assert.deepEqual(calls[0].body.recipientList[0].templateParameter,{'학원명':'위뮤직아카데미','학생명':'가상 학생','출석시간':s.records.get(`opsNotices/${noticeId}`).parameters.attendance_time,'연락처':'02-000-0000'});
+ });}finally{if(contact===undefined)delete process.env.NHN_ATTENDANCE_CONTACT;else process.env.NHN_ATTENDANCE_CONTACT=contact;}
+});
+test('approved template without academy contact is blocked and old blocked attendance is never released into a send',async()=>{
+ const s=setup();await s.seed();const {noticeId}=await s.service.checkIn('student-a','1234','device');
+ const contact=process.env.NHN_ATTENDANCE_CONTACT;
+ try{await withAttendanceProvider(async calls=>{
+  process.env.NHN_ATTENDANCE_TEMPLATE='ATTENDANCE_LOG_V1';delete process.env.NHN_ATTENDANCE_CONTACT;
+  const worker=s.load('notices');assert.equal(worker.noticeConfigured(),false);await worker.processNotices(noticeId);
+  const notice=s.records.get(`opsNotices/${noticeId}`);assert.equal(notice.status,'blocked');assert.equal(calls.length,0);
+  notice.createdAt='2020-01-01T00:00:00Z';process.env.NHN_ATTENDANCE_CONTACT='02-000-0000';
+  await s.service.releaseBlocked('owner');await worker.processNotices(noticeId);
+  assert.equal(s.records.get(`opsNotices/${noticeId}`).status,'expired');assert.equal(calls.length,0);
+ });}finally{if(contact===undefined)delete process.env.NHN_ATTENDANCE_CONTACT;else process.env.NHN_ATTENDANCE_CONTACT=contact;}
 });
