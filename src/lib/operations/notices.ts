@@ -55,7 +55,7 @@ export async function processNotices(noticeId?: string) {
       const phone = String(account?.phone || '').replace(/\D/g, '');
       if (!/^0\d{8,10}$/.test(phone)) reason = '알림 받을 보호자 전화번호를 확인해주세요.';
       if (!process.env.NHN_APP_KEY || !process.env.NHN_SECRET_KEY || !process.env.NHN_SENDER_KEY || !template) reason = '알림톡 발신 및 템플릿 설정이 필요합니다.';
-      if (template === 'ATTENDANCE_LOG_V1' && !process.env.NHN_ATTENDANCE_CONTACT?.trim()) reason = '출석 알림에 표시할 학원 문의 전화번호 설정이 필요합니다.';
+      if (template === 'ATTENDANCE_LOG_V1' && !process.env.NHN_ATTENDANCE_CONTACT?.trim()) reason = '출석 알림에 표시할 학원 문의처 설정이 필요합니다.';
       if (reason) { tx.update(item.ref, { status: 'blocked', error: reason }); return null; }
       tx.update(item.ref, { status: 'processing', phone, startedAt: new Date().toISOString(), error: '' });
       return { phone, parameters: attendanceParameters(fresh.parameters as Record<string, string>, template!), template };

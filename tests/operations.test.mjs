@@ -2324,10 +2324,10 @@ test('approved Korean attendance template uses student name, time, academy and c
  const {noticeId}=await s.service.checkIn('student-a','1234','device');
  const contact=process.env.NHN_ATTENDANCE_CONTACT;
  try{await withAttendanceProvider(async calls=>{
-  process.env.NHN_ATTENDANCE_TEMPLATE='ATTENDANCE_LOG_V1';process.env.NHN_ATTENDANCE_CONTACT='02-000-0000';
+  process.env.NHN_ATTENDANCE_TEMPLATE='ATTENDANCE_LOG_V1';process.env.NHN_ATTENDANCE_CONTACT='@위뮤직아카데미음악학원';
   const worker=s.load('notices');assert.equal(worker.noticeConfigured(),true);await worker.processNotices(noticeId);
   assert.equal(calls[0].body.templateCode,'ATTENDANCE_LOG_V1');
-  assert.deepEqual(calls[0].body.recipientList[0].templateParameter,{'학원명':'위뮤직아카데미','학생명':'가상 학생','출석시간':s.records.get(`opsNotices/${noticeId}`).parameters.attendance_time,'연락처':'02-000-0000'});
+  assert.deepEqual(calls[0].body.recipientList[0].templateParameter,{'학원명':'위뮤직아카데미','학생명':'가상 학생','출석시간':s.records.get(`opsNotices/${noticeId}`).parameters.attendance_time,'연락처':'@위뮤직아카데미음악학원'});
  });}finally{if(contact===undefined)delete process.env.NHN_ATTENDANCE_CONTACT;else process.env.NHN_ATTENDANCE_CONTACT=contact;}
 });
 test('approved template without academy contact is blocked and old blocked attendance is never released into a send',async()=>{
@@ -2337,7 +2337,7 @@ test('approved template without academy contact is blocked and old blocked atten
   process.env.NHN_ATTENDANCE_TEMPLATE='ATTENDANCE_LOG_V1';delete process.env.NHN_ATTENDANCE_CONTACT;
   const worker=s.load('notices');assert.equal(worker.noticeConfigured(),false);await worker.processNotices(noticeId);
   const notice=s.records.get(`opsNotices/${noticeId}`);assert.equal(notice.status,'blocked');assert.equal(calls.length,0);
-  notice.createdAt='2020-01-01T00:00:00Z';process.env.NHN_ATTENDANCE_CONTACT='02-000-0000';
+  notice.createdAt='2020-01-01T00:00:00Z';process.env.NHN_ATTENDANCE_CONTACT='@위뮤직아카데미음악학원';
   await s.service.releaseBlocked('owner');await worker.processNotices(noticeId);
   assert.equal(s.records.get(`opsNotices/${noticeId}`).status,'expired');assert.equal(calls.length,0);
  });}finally{if(contact===undefined)delete process.env.NHN_ATTENDANCE_CONTACT;else process.env.NHN_ATTENDANCE_CONTACT=contact;}
