@@ -1,6 +1,6 @@
 import {monthlyInvoice} from './monthly-payment';
 import {paymentCancellation} from './payment-cancellation';
-import {nextPassInput,nextPassDue,activateNextPass} from './next-pass';
+import {nextPassInput,nextPassDue,activateNextPass,recordedPassStart} from './next-pass';
 import {passHistoryInput} from './pass-history';
 import {placeTimetableLesson,placeRegularTimetableLesson} from './timetable';
 import { legacyAttendanceAppearance } from './attendance-appearance';
@@ -783,7 +783,19 @@ export async function saveNextPass(input:Record<string,unknown>,actor:string){
   }else{
    const nextPass=nextPassInput(input,invoiceRef.id);
    const invoice:Invoice={id:invoiceRef.id,studentId:id,name:account.name,units:nextPass.units,amount:nextPass.amount,paid:0,status:'open',needsReview:false,createdAt:old?.createdAt||stamp,updatedAt:stamp,creditUnits:0,reservedPass:true,lessonDate:nextPass.start};
-   tx.set(invoiceRef,invoice);tx.update(ref,{nextPass,updatedAt:stamp});
+   const records=nextPass.mode==='date'&&nextPass.start<=seoulDay()
+    ? (await tx.get(db.collection('opsAttendance').where('studentId','==',id))).docs.map(d=>({...d.data(),id:d.id}) as Attendance) : [];
+   const first=recordedPassStart(account,nextPass,records,cycles.docs.map(d=>({...d.data(),id:d.id}) as Invoice));
+   if(first){
+    const updated=activateNextPass({...account,nextPass},invoice,first,stamp);
+    // The operator's dated change supersedes spreadsheet ordinal anchors from this cycle onward.
+    updated.referenceResetFrom=account.referenceResetFrom&&account.referenceResetFrom<first?account.referenceResetFrom:first;
+    tx.set(invoiceRef,{...invoice,reservedPass:false,cycleStart:first,lessonDate:first});
+    tx.update(ref,{...updated});
+    audit(tx,db,actor,'apply-past-pass',id,{invoiceId:invoice.id,requestedStart:nextPass.start,day:first,passCreditUnits:nextPass.units,remaining:updated.remaining});
+   }else{
+    tx.set(invoiceRef,invoice);tx.update(ref,{nextPass,updatedAt:stamp});
+   }
   }
   if(notice?.exists)tx.update(noticeRef,{status:'cancelled'});
   audit(tx,db,actor,input.cancel?'cancel-next-pass':'reserve-next-pass',id,{before:previous||null,invoiceId:invoiceRef.id,...(input.cancel?{}:{after:nextPassInput(input,invoiceRef.id)})});

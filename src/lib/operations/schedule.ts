@@ -26,10 +26,9 @@ export function plannedLesson(schedule: LessonSchedule | undefined, day: string)
   return ruleOn(schedule, day)?.weekdays.includes(new Date(`${day}T00:00:00Z`).getUTCDay()) ? { origin: day, moved: false } : null;
 }
 // Effective-dated rules preserve earlier schedules. One-off moves take priority over recurring rules.
-export function changeSchedule(old: LessonSchedule | undefined, input: Record<string,unknown>, stamp: string, today=seoulDay()): LessonSchedule {
+export function changeSchedule(old: LessonSchedule | undefined, input: Record<string,unknown>, stamp: string, _today=seoulDay()): LessonSchedule {
   if ((old?.updatedAt || '') !== (input.expectedUpdatedAt || '')) throw Error('수업 일정이 변경됐습니다. 창을 닫고 다시 열어주세요.');
   const start=validDay(input.start);
-  if (start<today) throw Error('적용 시작일은 오늘 이후로 선택해주세요. 지난 일정은 유지됩니다.');
   let rules=(old?.rules || []).filter(r=>r.start!==start);
   if (input.remove !== true) {
     if (!Array.isArray(input.weekdays) || input.weekdays.length>7 || input.weekdays.some(n=>!Number.isInteger(n)||n<0||n>6)) throw Error('수업 요일을 확인해주세요.');

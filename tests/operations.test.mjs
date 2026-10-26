@@ -878,7 +878,7 @@ test('effective-dated weekday changes preserve history, scheduled changes and on
  assert.deepEqual(ruleOn(s,'2026-10-15').weekdays,[2,4]);assert.deepEqual(ruleOn(s,'2026-11-03').weekdays,[2,4]);
  s=moveLesson(s,{from:'2026-10-02',to:'2026-10-01',expectedUpdatedAt:'e'},[],'f',today);
  assert.equal(s.moves.length,0);assert.equal(plannedLesson(s,'2026-10-01').moved,false);
- assert.throws(()=>changeSchedule(s,{start:'2026-09-01',weekdays:[1],expectedUpdatedAt:'f'},'x',today),/지난 일정/);
+ assert.deepEqual(ruleOn(changeSchedule(s,{start:'2026-09-01',weekdays:[1],expectedUpdatedAt:'f'},'x',today),'2026-09-20').weekdays,[1]);
  assert.throws(()=>changeSchedule(s,{start:'2026-10-01',weekdays:[7],expectedUpdatedAt:'f'},'x',today),/요일/);
  assert.throws(()=>changeSchedule(s,{start:'2026-10-01',weekdays:[1],expectedUpdatedAt:'old'},'x',today),/변경/);
 });
@@ -1975,7 +1975,7 @@ test('a reservation can be edited/cancelled atomically, but receipts and reserve
  await save({});const nextId=s.records.get('opsAccounts/piano').nextPass.invoiceId,i=s.records.get(`opsInvoices/${nextId}`);
  await s.service.payment({invoiceId:nextId,requestId:'partial',amount:10000,method:'현금',expectedInvoiceUpdatedAt:i.updatedAt},'owner');
  await assert.rejects(save({cancel:true}),/수납/);
- const {nextPassInput}=s.load('next-pass');for(const v of [{units:0},{amount:0},{mode:'bad'},{mode:'date',start:'2000-01-01'}])assert.throws(()=>nextPassInput({...input,...v},'test'));
+ const {nextPassInput}=s.load('next-pass');for(const v of [{units:0},{amount:0},{mode:'bad'},{mode:'date',start:'2026-02-30'}])assert.throws(()=>nextPassInput({...input,...v},'test'));
 });
 test('depletion does not start early or duplicate reserved invoice and past lessons retain old pass units',async()=>{
  const s=setup();await s.seed('piano',1);const today=s.load('model').seoulDay(),yesterday=new Date(Date.parse(today)-86400000).toISOString().slice(0,10);
@@ -2185,4 +2185,76 @@ test('linking a late receipt changes only its pass association and is idempotent
  assert.equal([...s.records.values()].filter(r=>r.action==='invoice-lesson-date').length,1);
  assert.equal([...s.records.keys()].filter(k=>k.startsWith('opsNotices/')).length,0);
  assert.deepEqual([...s.load('attendance-appearance').confirmedFirstLessons([linked],{drums:['2026-09-19','2026-10-24']})],['drums_2026-09-19']);
+});
+
+test('backdated schedule insertion, editing and removal preserve actual attendance, balances and later rules',async()=>{
+ const s=setup();await s.seed('piano',5);const id='opsAccounts/piano';
+ const old={rules:[{start:'2026-09-01',weekdays:[1,3]},{start:'2026-11-01',weekdays:[2,4]}],moves:[{from:'2026-10-07',to:'2026-10-08'}],updatedAt:'old'};
+ s.records.get(id).schedule=old;
+ s.records.set('opsAttendance/travel',{studentId:'piano',day:'2026-10-13',status:'travel',units:0});
+ s.records.set('opsAttendance/makeup',{studentId:'piano',day:'2026-10-14',status:'makeup',units:1,relatedDay:'2026-10-13'});
+ const records=structuredClone([...s.records].filter(([k])=>k.startsWith('opsAttendance/')));
+ const save=extra=>s.service.saveSchedule({studentId:'piano',start:'2026-10-12',weekdays:[1,3,5],times:{1:{start:'14:00',end:'15:00'}},expectedUpdatedAt:s.records.get(id).schedule.updatedAt,...extra},'owner');
+ await save({});
+ let schedule=s.records.get(id).schedule;
+ assert.deepEqual(s.load('schedule').ruleOn(schedule,'2026-10-11').weekdays,[1,3]);
+ assert.deepEqual(s.load('schedule').ruleOn(schedule,'2026-10-12').weekdays,[1,3,5]);
+ assert.deepEqual(s.load('schedule').ruleOn(schedule,'2026-11-02').weekdays,[2,4]);
+ assert.deepEqual(schedule.moves,old.moves);
+ await save({weekdays:[4]});assert.deepEqual(s.load('schedule').ruleOn(s.records.get(id).schedule,'2026-10-15').weekdays,[4]);
+ await save({remove:true});assert.deepEqual(s.load('schedule').ruleOn(s.records.get(id).schedule,'2026-10-15').weekdays,[1,3]);
+ assert.equal(s.records.get(id).remaining,5);assert.deepEqual([...s.records].filter(([k])=>k.startsWith('opsAttendance/')),records);
+});
+test('backdated registration retains the first lesson date and creates no invented attendance or duplicate credit',async()=>{
+ const s=setup(),input={name:'Past Student',phone:'01000001234',group:'보컬',planUnits:12,planAmount:180000,remaining:12,firstLessonDate:'2026-09-21',requestId:'past-registration'};
+ const result=await s.service.registerStudent(input,'owner');await s.service.registerStudent(input,'owner');
+ const a=s.records.get('opsAccounts/'+result.studentId),invoice=s.records.get('opsInvoices/'+a.openInvoiceId);
+ assert.equal(invoice.cycleStart,input.firstLessonDate);assert.equal(invoice.creditUnits,0);assert.equal(a.remaining,12);
+ assert.equal([...s.records.keys()].some(k=>k.startsWith('opsAttendance/')||k.startsWith('opsNotices/')),false);
+});
+test('a backdated pass activates on the first recorded regular lesson without replaying deductions or changing other records',async()=>{
+ const s=setup();await s.seed('piano',5);await s.seed('drum',7);
+ const day=n=>new Date(Date.parse(s.load('model').seoulDay())-n*86400000).toISOString().slice(0,10);
+ for(const [n,status,units] of [[6,'travel',0],[5,'makeup',1],[4,'paused',0],[3,'present',1],[1,'present',1]])
+  await s.service.recordAttendance({studentId:'piano',day:day(n),status,units},'owner');
+ const before=s.records.get('opsAccounts/piano'),balance=before.remaining;
+ const records=structuredClone([...s.records].filter(([k])=>k.startsWith('opsAttendance/'))),drum=structuredClone(s.records.get('opsAccounts/drum'));
+ const input={studentId:'piano',expectedUpdatedAt:before.updatedAt,units:12,amount:210000,mode:'date',start:day(6)};
+ await s.service.saveNextPass(input,'owner');
+ const a=s.records.get('opsAccounts/piano'),invoice=s.records.get('opsInvoices/'+a.openInvoiceId);
+ assert.equal(a.remaining,balance+12);assert.equal(a.planUnits,12);assert.equal(a.nextPass,null);
+ assert.equal(invoice.cycleStart,day(3));assert.equal(invoice.lessonDate,day(3));assert.equal(invoice.creditUnits,0);assert.equal(invoice.reservedPass,false);
+ assert.equal(s.load('pass-history').passUnitsOn(a,day(4)),8);assert.equal(s.load('pass-history').passUnitsOn(a,day(3)),12);
+ const references=[{studentId:'piano',day:day(3),value:'7',color:''},{studentId:'piano',day:day(1),value:'8',color:''}];
+ const seq=s.load('attendance-sequence').attendanceSequence([a],records.map(([,r])=>r),[],{positions:{piano:4},cycleStarts:s.load('pass-history').passCycleStarts([a]),references});
+ assert.equal(seq.labels.get('piano_'+day(3)),'1');assert.equal(seq.labels.get('piano_'+day(1)),'2');
+ assert.deepEqual([...s.records].filter(([k])=>k.startsWith('opsAttendance/')),records);assert.deepEqual(s.records.get('opsAccounts/drum'),drum);
+ await assert.rejects(s.service.saveNextPass(input,'owner'),/변경/);
+ await assert.rejects(s.service.saveNextPass({...input,expectedUpdatedAt:a.updatedAt},'owner'),/이미 적용|다른 수강권/);
+ assert.equal(s.records.get('opsAccounts/piano').remaining,balance+12);
+ const audit=[...s.records.entries()].filter(([k])=>k.startsWith('opsAudit/')).map(([id,r])=>({id,...r}));
+ assert.equal(s.load('balance-review').reviewBalance(a,undefined,audit,records.map(([,r])=>r),[invoice]).ledger,balance+12);
+ await s.service.payment({invoiceId:invoice.id,requestId:'retro-paid',amount:210000,method:'현금',expectedInvoiceUpdatedAt:invoice.updatedAt},'owner');
+ assert.equal(s.records.get('opsAccounts/piano').remaining,balance+12);
+});
+test('a backdated reservation without attendance can activate on later entry of a past lesson exactly once',async()=>{
+ const s=setup();await s.seed('piano',2);
+ await s.service.saveNextPass({studentId:'piano',expectedUpdatedAt:s.records.get('opsAccounts/piano').updatedAt,units:12,amount:210000,mode:'date',start:'2026-09-01'},'owner');
+ assert.equal(s.records.get('opsAccounts/piano').remaining,2);assert.ok(s.records.get('opsAccounts/piano').nextPass);
+ const record={studentId:'piano',day:'2026-09-03',status:'present',units:1};
+ await s.service.recordAttendance(record,'owner');await s.service.recordAttendance(record,'owner');
+ const a=s.records.get('opsAccounts/piano');
+ assert.equal(a.remaining,13);assert.equal(a.nextPass,null);assert.equal(a.referenceResetFrom,'2026-09-03');
+ assert.equal(a.passHistory.at(-1).start,'2026-09-03');
+});
+test('backdated changes do not silently replace an already applied later pass or paid invoice',async()=>{
+ for(const conflict of ['history','invoice']){
+  const s=setup();await s.seed('piano',5);
+  s.records.set('opsAttendance/piano_2026-09-10',{id:'piano_2026-09-10',studentId:'piano',day:'2026-09-10',status:'present',units:1});
+  if(conflict==='history')s.records.get('opsAccounts/piano').passHistory=[{start:'2026-09-12',units:8}];
+  else s.records.set('opsInvoices/existing',{id:'existing',studentId:'piano',status:'paid',lessonDate:'2026-09-12',paid:160000});
+  const before=structuredClone([...s.records]);
+  await assert.rejects(s.service.saveNextPass({studentId:'piano',expectedUpdatedAt:s.records.get('opsAccounts/piano').updatedAt,units:12,amount:210000,mode:'date',start:'2026-09-01'},'owner'),/이미 적용|다른 수강권/);
+  assert.deepEqual([...s.records],before);
+ }
 });

@@ -26,6 +26,7 @@ export function reviewBalance(account:Account,source:BalanceSource|undefined,aud
   const d=event.detail;
   if(event.action==='check-in')ledger+=Number(d.passCreditUnits||0)-Number(d.units);
   else if(event.action==='record-attendance')ledger+=Number(d.passCreditUnits||0)-Number(d.units)+Number(d.before);
+  else if(event.action==='apply-past-pass')ledger+=Number(d.passCreditUnits);
   else if(event.action==='adjust')ledger-=Number(d.after)-Number(d.before);
   else if(event.action==='payment' && d.complete){
    const invoice=invoices.find(i=>i.id===d.invoiceId&&i.studentId===account.id);

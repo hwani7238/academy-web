@@ -24,8 +24,8 @@ export function RegisterStudent({ save, close }: { save: (input: Record<string, 
       <label>보호자 전화번호<input name="phone" type="tel" required placeholder="010-1234-5678" /><small>알림 수신 및 뒷번호 출석에 사용합니다.</small></label>
       <label>학생 전화번호 (선택)<input name="personalPhone" type="tel" /><small>입력하면 학생 번호 뒷자리로도 출석할 수 있습니다.</small></label>
       <div className="registration-grid"><label>수강권 횟수<input type="number" min="1" max="200" required value={units} onChange={e=>{const n=Number(e.target.value);setUnits(n);setRemaining(n);}} /><small>주 2회는 8회입니다.</small></label><label>수강료 (원)<input name="planAmount" type="number" min="1" max="100000000" required placeholder="170000" /></label></div>
-      <label>처음 사용할 횟수<input type="number" min="0" max={units} required value={remaining} onChange={e=>setRemaining(Number(e.target.value))} /><small>등록 후 이 횟수에서 출석할 때마다 차감됩니다.</small></label>
-      <label>첫 수업일 (1회차)<input name="firstLessonDate" type="date" defaultValue={seoulDay()} required /><small>청구·수납 목록의 1회차 날짜로 표시됩니다.</small></label>
+      <label>처음 사용할 횟수<input type="number" min="0" max={units} required value={remaining} onChange={e=>setRemaining(Number(e.target.value))} /><small>이 횟수에서 출석할 때마다 차감됩니다. 지난 수업을 출석표에 입력할 예정이라면 해당 수업을 차감하기 전 횟수를 입력하세요.</small></label>
+      <label>첫 수업일 (1회차)<input name="firstLessonDate" type="date" defaultValue={seoulDay()} required /><small>과거 날짜도 선택할 수 있습니다. 실제 첫 수업일을 입력하면 청구·수납 목록의 1회차 날짜로 표시됩니다.</small></label>
       <p className="subtle">등록하면 첫 수강료 청구가 청구·수납 목록에 함께 만들어집니다. 실제 결제 후 수납 완료로 기록하세요. 수납해도 횟수는 중복 추가되지 않으며, 결제 안내는 자동 발송하지 않습니다.</p>
       {error&&<p className="error" role="alert">{error}</p>}<button className="primary" disabled={busy}>{busy?'등록 중…':'학생·수강권 등록'}</button>
     </form>

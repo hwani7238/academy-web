@@ -2,6 +2,7 @@ import type { Lifecycle } from './lifecycle';
 export type Account = {
   nextPass?: import('./next-pass').NextPass | null;
   initialPlanUnits?: number;
+  referenceResetFrom?: string;
   passHistory?: import('./pass-history').PassHistoryEntry[];
   schedule?: import('./schedule').LessonSchedule;
   attendanceGroup?: string; displaySubject?: string;

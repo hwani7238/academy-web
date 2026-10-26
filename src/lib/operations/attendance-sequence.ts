@@ -18,7 +18,7 @@ type Legacy = NonNullable<Snapshot['legacyAttendance']>[number];
 
 // Display-only chronology: neither payments nor current balances rewrite old lessons.
 // Imported numbers anchor the sequence; modern records take precedence on the same day.
-export function attendanceSequence(accounts: Pick<Account, 'id' | 'planUnits' | 'schedule' | 'passHistory'>[], records: RecordRow[], legacy: Legacy[], context?: SequenceContext) {
+export function attendanceSequence(accounts: Pick<Account, 'id' | 'planUnits' | 'schedule' | 'passHistory' | 'referenceResetFrom'>[], records: RecordRow[], legacy: Legacy[], context?: SequenceContext) {
   const plans = new Map(accounts.map(a => [a.id, a]));
   const schedules = new Map(accounts.map(a => [a.id, a.schedule]));
   const positions = { ...context?.positions };
@@ -58,7 +58,8 @@ export function attendanceSequence(accounts: Pick<Account, 'id' | 'planUnits' | 
       }
       return numbers.join('·');
     }
-    const reference = e.reference && referenceOrdinal(e.reference.value);
+    const reset = account?.referenceResetFrom && e.day >= account.referenceResetFrom;
+    const reference = !reset && e.reference && referenceOrdinal(e.reference.value);
     if (status === 'makeup' || status === 'makeup_reserved') {
       makeupLinks.push({ key, studentId: id, day: e.day, relatedDay: e.record?.relatedDay, fallback: reference?.label });
       continue;
@@ -88,6 +89,14 @@ export function attendanceSequence(accounts: Pick<Account, 'id' | 'planUnits' | 
       positions[id] = 1;
       firstDay();
       if (missed) missedLessons[key] = '1';
+      if (reset) labels.set(key, '1');
+    } else if (reset && (e.legacy || e.reference)) {
+      const value = referenceOrdinal((e.legacy || e.reference)!.value);
+      if (value || missed) {
+        const label = advance(value?.label.split('·').length || 1);
+        labels.set(key, label);
+        if (missed) missedLessons[key] = label;
+      }
     } else if (e.legacy) {
       const value = Number(e.legacy.value);
       if (Number.isSafeInteger(value) && value > 0) { positions[id] = value; if (value === 1) firstDay(); }
