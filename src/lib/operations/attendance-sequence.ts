@@ -59,7 +59,7 @@ export function attendanceSequence(accounts: Pick<Account, 'id' | 'planUnits' | 
       return numbers.join('·');
     }
     const reset = account?.referenceResetFrom && e.day >= account.referenceResetFrom;
-    const reference = !reset && e.reference && referenceOrdinal(e.reference.value);
+    const reference = !reset && e.reference ? referenceOrdinal(e.reference.value) : null;
     if (status === 'makeup' || status === 'makeup_reserved') {
       makeupLinks.push({ key, studentId: id, day: e.day, relatedDay: e.record?.relatedDay, fallback: reference?.label });
       continue;
