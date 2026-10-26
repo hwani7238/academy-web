@@ -2342,3 +2342,48 @@ test('approved template without academy contact is blocked and old blocked atten
   assert.equal(s.records.get(`opsNotices/${noticeId}`).status,'expired');assert.equal(calls.length,0);
  });}finally{if(contact===undefined)delete process.env.NHN_ATTENDANCE_CONTACT;else process.env.NHN_ATTENDANCE_CONTACT=contact;}
 });
+test('chat-button attendance template omits contact text and uses Korean variables',async()=>{
+ const s=setup();await s.seed();const {noticeId}=await s.service.checkIn('student-a','1234','device');
+ const contact=process.env.NHN_ATTENDANCE_CONTACT;
+ try{await withAttendanceProvider(async calls=>{
+  process.env.NHN_ATTENDANCE_TEMPLATE='ATTENDANCE_LOG_V2';delete process.env.NHN_ATTENDANCE_CONTACT;
+  const worker=s.load('notices');assert.equal(worker.noticeConfigured(),true);await worker.processNotices(noticeId);
+  assert.equal(calls.length,1);assert.equal(calls[0].body.templateCode,'ATTENDANCE_LOG_V2');
+  assert.deepEqual(calls[0].body.recipientList[0].templateParameter,{'학원명':'위뮤직아카데미','학생명':'가상 학생','출석시간':s.records.get(`opsNotices/${noticeId}`).parameters.attendance_time});
+ });}finally{if(contact===undefined)delete process.env.NHN_ATTENDANCE_CONTACT;else process.env.NHN_ATTENDANCE_CONTACT=contact;}
+});
+
+const approvedAttendanceChatTemplate=()=>({templateCode:'ATTENDANCE_LOG_V2',status:'TSC03',block:false,dormant:false,templateContent:'[#{학원명}] 출석 알림\n\n#{학생명} 학생이 #{출석시간}에 출석했습니다.',templateMessageType:'BA',templateEmphasizeType:'NONE',buttons:[{ordering:1,type:'WL',name:'문의하기',linkMo:'https://pf.kakao.com/_xgfByn/chat',linkPc:'https://pf.kakao.com/_xgfByn/chat'}]});
+async function withAttendanceChatCandidate(run){
+ const saved={candidate:process.env.NHN_ATTENDANCE_CHAT_TEMPLATE,contact:process.env.NHN_ATTENDANCE_CONTACT};
+ try{await withAttendanceProvider(async()=>{
+  process.env.NHN_ATTENDANCE_TEMPLATE='ATTENDANCE_LOG_V1';process.env.NHN_ATTENDANCE_CHAT_TEMPLATE='ATTENDANCE_LOG_V2';process.env.NHN_ATTENDANCE_CONTACT='@위뮤직아카데미음악학원';await run();
+ });}finally{for(const[key,value]of[['NHN_ATTENDANCE_CHAT_TEMPLATE',saved.candidate],['NHN_ATTENDANCE_CONTACT',saved.contact]]){if(value===undefined)delete process.env[key];else process.env[key]=value;}}
+}
+test('pending chat-template approval keeps live attendance on the approved original',async()=>{
+ await withAttendanceChatCandidate(async()=>{
+  const s=setup();await s.seed();const {noticeId}=await s.service.checkIn('student-a','1234','device');let sent;
+  global.fetch=async(url,options)=>url.includes('/templates/')?{ok:true,json:async()=>({header:{isSuccessful:true},template:{...approvedAttendanceChatTemplate(),status:'TSC02'}})}:{ok:true,status:200,json:async()=>{sent=JSON.parse(options.body);return{header:{isSuccessful:true},message:{requestId:'old-template',sendResults:[{resultCode:0,recipientSeq:1}]}}}};
+  await s.load('notices').processNotices(noticeId);assert.equal(sent.templateCode,'ATTENDANCE_LOG_V1');assert.ok(sent.recipientList[0].templateParameter['연락처']);assert.equal(s.records.get(`opsNotices/${noticeId}`).status,'submitted');
+ });
+});
+test('approved exact chat template switches attendance automatically and shares concurrent approval lookup',async()=>{
+ await withAttendanceChatCandidate(async()=>{
+  const s=setup();await s.seed();const {noticeId}=await s.service.checkIn('student-a','1234','device');let lookups=0,sends=0;
+  global.fetch=async(url,options)=>{if(url.includes('/templates/')){lookups++;return{ok:true,json:async()=>({header:{isSuccessful:true},template:approvedAttendanceChatTemplate()})};}sends++;const body=JSON.parse(options.body);assert.equal(body.templateCode,'ATTENDANCE_LOG_V2');assert.equal('연락처' in body.recipientList[0].templateParameter,false);return{ok:true,json:async()=>({header:{isSuccessful:true},message:{requestId:'new-template',sendResults:[{resultCode:0,recipientSeq:1}]}})};};
+  const worker=s.load('notices');await Promise.all([worker.processNotices(noticeId),worker.processNotices(noticeId)]);assert.equal(lookups,1);assert.equal(sends,1);assert.equal(s.records.get(`opsNotices/${noticeId}`).templateCode,'ATTENDANCE_LOG_V2');
+ });
+});
+test('changed destination, blocked template and unavailable approval lookup never interrupt existing attendance template',async()=>{
+ await withAttendanceChatCandidate(async()=>{
+  for(const condition of ['wrong-url','blocked','wrong-content','network','missing-approval']){
+   const s=setup(),template=approvedAttendanceChatTemplate();
+   if(condition==='wrong-url')template.buttons[0].linkMo='https://example.com';
+   if(condition==='blocked')template.block=true;
+   if(condition==='wrong-content')template.templateContent='다른 안내';
+   if(condition==='missing-approval')delete template.status;
+   global.fetch=async()=>{if(condition==='network')throw Error('timeout');return{ok:true,json:async()=>({header:{isSuccessful:true},template})};};
+   assert.equal(await s.load('attendance-template').attendanceTemplate(),'ATTENDANCE_LOG_V1',condition);
+  }
+ });
+});

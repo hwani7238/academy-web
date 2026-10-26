@@ -1,6 +1,7 @@
 import { database } from './auth';
 import { createHash } from 'node:crypto';
 import { seoulDay } from './model';
+import { attendanceTemplate } from './attendance-template';
 // Attendance is a real-time notice, not a historical campaign. Never drain old
 // attendance into parents' phones after credentials/template settings change.
 const MAX_ATTENDANCE_AGE_MS = 10 * 60 * 1000;
@@ -9,13 +10,13 @@ export function noticeConfigured() {
     && (process.env.NHN_ATTENDANCE_TEMPLATE !== 'ATTENDANCE_LOG_V1' || process.env.NHN_ATTENDANCE_CONTACT?.trim()));
 }
 function attendanceParameters(parameters: Record<string, string>, template: string) {
-  if (template !== 'ATTENDANCE_LOG_V1') return parameters;
+  if (!['ATTENDANCE_LOG_V1', 'ATTENDANCE_LOG_V2'].includes(template)) return parameters;
   // Match the academy's existing approved template exactly (Korean variables).
   return {
     '학원명': '위뮤직아카데미',
     '학생명': parameters.student_name,
     '출석시간': parameters.attendance_time,
-    '연락처': process.env.NHN_ATTENDANCE_CONTACT!.trim(),
+    ...(template === 'ATTENDANCE_LOG_V1' ? { '연락처': process.env.NHN_ATTENDANCE_CONTACT!.trim() } : {}),
   };
 }
 export async function processNotices(noticeId?: string) {
@@ -26,6 +27,9 @@ export async function processNotices(noticeId?: string) {
     : await db.collection('opsNotices').where('status', '==', 'queued').limit(5).get();
   let submitted = 0;
   for (const item of pending.docs) {
+    const queued = item.data();
+    const template = queued?.kind === 'attendance' && queued.status === 'queued'
+      ? await attendanceTemplate() : process.env.NHN_ATTENDANCE_TEMPLATE;
     const notice = await db.runTransaction(async tx => {
       const fresh = (await tx.get(item.ref)).data();
       if (!fresh || fresh.status !== 'queued') return null;
@@ -49,7 +53,6 @@ export async function processNotices(noticeId?: string) {
       if (!Number.isFinite(age) || age < 0 || age > MAX_ATTENDANCE_AGE_MS || attendance.day !== seoulDay()) {
         tx.update(item.ref, { status: 'expired', error: '출석 후 10분이 지나 지난 출석 알림은 발송하지 않았습니다.' }); return null;
       }
-      const template = process.env.NHN_ATTENDANCE_TEMPLATE;
       // Resolve pending notices against the current contact, preserving already sent history.
       const account = (await tx.get(db.doc(`opsAccounts/${fresh.studentId}`))).data();
       const phone = String(account?.phone || '').replace(/\D/g, '');
@@ -72,7 +75,7 @@ export async function processNotices(noticeId?: string) {
       const body = await response.json();
       const recipient = body.message?.sendResults?.[0];
       if (response.ok && body.header?.isSuccessful === true && recipient?.resultCode === 0 && typeof body.message?.requestId === 'string' && body.message.requestId && Number.isInteger(recipient.recipientSeq)) {
-        await item.ref.update({ status: 'submitted', requestId: body.message.requestId, recipientSeq: recipient.recipientSeq, submittedAt: new Date().toISOString() }); submitted++;
+        await item.ref.update({ status: 'submitted', templateCode: notice.template, requestId: body.message.requestId, recipientSeq: recipient.recipientSeq, submittedAt: new Date().toISOString() }); submitted++;
       } else {
         const rejected = body.header?.isSuccessful === false || (typeof recipient?.resultCode === 'number' && recipient.resultCode !== 0);
         await item.ref.update({ status: response.status >= 500 || !rejected ? 'unknown' : 'failed', error: 'NHN 처리 결과를 확인해주세요.', resultCode: String(recipient?.resultCode ?? body.header?.resultCode ?? response.status) });
