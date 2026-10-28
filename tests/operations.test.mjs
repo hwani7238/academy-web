@@ -2026,6 +2026,51 @@ test('confirming a projected first lesson is idempotent, dated, course scoped an
  assert.equal((await s.service.prepareUpcomingInvoice(input,'owner')).status,'paid');
 });
 
+test('same-day cancelled first lessons remain collectible with or without a deduction',()=>{
+ const s=setup(),{isFirstLesson,monthlyPaymentDue,paidFirstLesson,importedAttendanceAppearance}=s.load('attendance-appearance');
+ const day='2026-10-12',key=`p_${day}`;
+ const base={key,sequence:new Map([[key,'1']]),confirmedFirst:new Set(),cycleFirstDays:{p:[day]},unpaidCycles:new Set(),unpaidForecastFirst:new Set()};
+ for(const units of [0,1]){
+  const row={studentId:'p',day,status:'late_cancel',units};
+  assert.equal(monthlyPaymentDue({...base,row}),true);
+  assert.equal(monthlyPaymentDue({...base,row,confirmedFirst:new Set([key])}),false);
+  assert.equal(monthlyPaymentDue({...base,row,sequence:new Map([[key,'2']])}),false);
+ }
+ assert.equal(isFirstLesson('12·1','late_cancel'),true);
+ assert.equal(paidFirstLesson('1','late_cancel',false,true),true);
+ assert.equal(paidFirstLesson('1','late_cancel',true,true),false);
+ for(const status of ['absent','travel','sick','makeup','makeup_reserved','paused','cancelled'])assert.equal(isFirstLesson('1',status),false);
+ const original={studentId:'p',day,value:'1',color:'',status:'late_cancel'};
+ assert.deepEqual(importedAttendanceAppearance(original),{tone:'payment-due',label:'당일 취소 · 결제 확인 필요'});
+ assert.deepEqual(importedAttendanceAppearance(original,undefined,undefined,true),{tone:'paid-first',label:'당일 취소 · 결제 완료'});
+ assert.equal(monthlyPaymentDue({...base,original}),true);
+ assert.equal(monthlyPaymentDue({...base,original,confirmedFirst:new Set([key])}),false);
+});
+
+test('cancelled first-lesson collection settles once without altering cancellation, deduction, balance or notices',async()=>{
+ const s=setup();await s.seed('p',5);await s.seed('drum',2);const day='2026-10-12',key=`p_${day}`;
+ await s.service.recordAttendance({studentId:'p',day,status:'late_cancel',units:1},'owner');
+ const attendance=structuredClone(s.records.get(`opsAttendance/${key}`)),account=structuredClone(s.records.get('opsAccounts/p'));
+ const snapshot={day:'2026-10-28',students:[{id:'p',name:'Student'}],accounts:[account],attendance:[attendance],legacyAttendance:[],invoices:[],settledInvoices:[],payments:[],notices:[],devices:[],sequenceContext:{positions:{p:8},cycleStarts:[]}};
+ const {billingProjection}=s.load('upcoming-billing');
+ assert.equal(billingProjection(snapshot,'2026-10-28').upcoming[0].lessonDate,day);
+ const legacy={...snapshot,attendance:[],legacyAttendance:[{studentId:'p',day,status:'late_cancel',value:'1',color:''}]};
+ assert.equal(billingProjection(legacy,'2026-10-28').upcoming[0].lessonDate,day);
+ const input={studentId:'p',lessonDate:day,requestId:'cancelled-first-payment',expectedUpdatedAt:account.updatedAt,amount:160000,invoiceAmount:160000,addUnits:false,method:'카드',paymentDate:day};
+ await s.service.monthlyPayment(input,'owner');await s.service.monthlyPayment(input,'owner');
+ const settled=[...s.records.entries()].filter(([k])=>k.startsWith('opsInvoices/')).map(([,v])=>v);
+ assert.equal(settled.length,1);assert.equal(settled[0].status,'paid');assert.equal(settled[0].lessonDate,day);
+ assert.deepEqual(s.records.get(`opsAttendance/${key}`),attendance);
+ assert.equal(s.records.get('opsAccounts/p').remaining,account.remaining);assert.equal(s.records.get('opsAccounts/drum').remaining,2);
+ assert.equal([...s.records.keys()].filter(k=>k.startsWith('opsPayments/')).length,1);
+ assert.equal([...s.records.keys()].filter(k=>k.startsWith('opsNotices/')).length,0);
+ assert.equal(billingProjection({...snapshot,settledInvoices:settled},'2026-10-28').upcoming.some(i=>i.lessonDate===day),false);
+ const {confirmedFirstLessons,monthlyPaymentDue,paidFirstLesson}=s.load('attendance-appearance');
+ const confirmed=confirmedFirstLessons(settled,{p:[day]});
+ const due=monthlyPaymentDue({key,row:attendance,sequence:new Map([[key,'1']]),confirmedFirst:confirmed,cycleFirstDays:{p:[day]},unpaidCycles:new Set(),unpaidForecastFirst:new Set()});
+ assert.equal(due,false);assert.equal(paidFirstLesson('1',attendance.status,due,confirmed.has(key)),true);
+});
+
 test('monthly payment records an old first lesson without crediting the already imported balance or changing attendance',async()=>{
  const s=setup();await s.seed('p',5);await s.seed('drum',2);const day='2026-09-01',a=s.records.get('opsAccounts/p');
  const input={studentId:'p',lessonDate:day,requestId:'monthly-pay-1',expectedUpdatedAt:a.updatedAt,amount:160000,invoiceAmount:160000,addUnits:false,method:'카드',paymentDate:'2026-09-05'};

@@ -26,7 +26,9 @@ export function attendancePaymentDue(row: Pick<Attendance, 'day' | 'status' | 'u
 }
 
 export function isFirstLesson(sequence: string | undefined, status: Attendance['status']) {
-  return (status || 'present') === 'present' && Boolean(sequence?.split('·').some(value => Number(value) === 1));
+  // A same-day cancellation still starts a payable pass. Keep collection
+  // independent of whether the owner deducted a lesson for that cancellation.
+  return ['present', 'late_cancel'].includes(status || 'present') && Boolean(sequence?.split('·').some(value => Number(value) === 1));
 }
 
 export function paidFirstLesson(sequence: string | undefined, status: Attendance['status'], paymentDue: boolean, confirmed = false) {
@@ -72,9 +74,12 @@ export function importedAttendanceAppearance(row: Legacy, account?: Account, inv
   const status = appearance.tone === 'payment-due' ? 'present' : appearance.tone as Attendance['status'];
   const due = attendancePaymentDue({ day: row.day, status, units: 1 }, account, invoice);
   if (due) return { tone: 'payment-due', label: '결제 필요' };
-  if (isFirstLesson(row.value, status)) return confirmed
-    ? { tone: 'paid-first', label: '결제 완료' }
-    : { tone: 'payment-due', label: '결제 확인 필요' };
+  if (isFirstLesson(row.value, status)) {
+    const prefix = status === 'late_cancel' ? '당일 취소 · ' : '';
+    return confirmed
+      ? { tone: 'paid-first', label: `${prefix}결제 완료` }
+      : { tone: 'payment-due', label: `${prefix}결제 확인 필요` };
+  }
   return appearance;
 }
 
