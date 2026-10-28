@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { StudentManager } from "@/components/admin/StudentManager";
 import { TeacherManager } from "@/components/admin/TeacherManager";
 import { FeedbackList } from "@/components/admin/FeedbackList";
+import { canViewPianoAttendance } from "@/lib/teacher-attendance";
 import { ADMIN_ROLES } from "@/lib/constants";
 
 interface UserProfile {
@@ -138,6 +139,7 @@ export default function AdminPage() {
             <header className="flex h-16 items-center justify-between border-b px-6">
                 <h1 className="text-xl font-bold">Admin Dashboard</h1>
                 <div className="flex items-center gap-4">
+                    {canViewPianoAttendance(userData || undefined) && <a href="/teacher/attendance" className="text-sm font-semibold text-blue-700">오늘 출석 · 피아노</a>}
                     <span className="text-sm text-muted-foreground">
                         {userData?.name || user.email} ({isTeacher ? '강사' : '관리자'})
                     </span>
