@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { signInWithEmailAndPassword } from "firebase/auth";
+import { signInWithEmailAndPassword, signOut } from "firebase/auth";
 import { auth } from "@/lib/firebase-auth";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
@@ -24,7 +24,15 @@ export default function LoginPage() {
 
         try {
             await signInWithEmailAndPassword(auth, email, password);
-            router.push(window.location.hostname === 'manage.wheemusic.com' ? '/operations' : '/admin');
+            if (window.location.hostname === 'manage.wheemusic.com') {
+                const response = await fetch('/api/operations/access', { cache: 'no-store', headers: { Authorization: `Bearer ${await auth.currentUser!.getIdToken()}` } });
+                if (!response.ok) {
+                    await signOut(auth);
+                    setError(response.status === 403 ? '관리자 전용 주소입니다. 강사는 wheemusic.com에서 로그인해주세요.' : '관리자 권한을 확인하지 못했습니다. 다시 시도해주세요.');
+                    return;
+                }
+                router.push('/operations');
+            } else router.push('/admin');
         } catch (err: unknown) {
             console.error("Login error:", err);
             const errorCode =
@@ -86,6 +94,7 @@ export default function LoginPage() {
                     <Button type="button" variant="outline" className="w-full" onClick={() => router.push("/teacher-signup")}>
                         강사 계정 신청
                     </Button>
+                    <a className="text-center text-sm text-blue-700" href="https://wheemusic.com/teacher/attendance">피아노 강사용 오늘 출석</a>
                 </form>
             </div>
         </div>
