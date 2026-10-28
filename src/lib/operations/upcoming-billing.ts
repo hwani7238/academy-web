@@ -25,7 +25,7 @@ export function billingProjection(data:Snapshot,today=seoulDay()){
  for(const [key,row] of ledger){
   if(recorded.has(key)||row.day<`${today.slice(0,7)}-01`||row.day>today)continue;
   const tone=legacyAttendanceAppearance(legacyByKey.get(key)||row).tone;
-  if(!['present','payment-due'].includes(tone))continue;
+  if(!['present','payment-due','late_cancel'].includes(tone))continue;
   if(isFirstLesson(sequence.labels.get(key)||row.value,'present'))candidateKeys.add(key);
  }
  const invoiceRows=[...data.invoices,...(data.settledInvoices||[])];
