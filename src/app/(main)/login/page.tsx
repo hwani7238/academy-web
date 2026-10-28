@@ -2,7 +2,9 @@
 
 import { useState } from "react";
 import { signInWithEmailAndPassword } from "firebase/auth";
-import { auth } from "@/lib/firebase";
+import { auth, db } from "@/lib/firebase";
+import { doc, getDoc } from "firebase/firestore";
+import { canViewPianoAttendance } from "@/lib/teacher-attendance";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 
@@ -24,7 +26,8 @@ export default function LoginPage() {
 
         try {
             await signInWithEmailAndPassword(auth, email, password);
-            router.push("/admin"); // 관리자 페이지로 이동
+            const profile = (await getDoc(doc(db, "users", auth.currentUser!.uid))).data();
+            router.push(profile?.role === "teacher" && canViewPianoAttendance(profile) ? "/teacher/attendance" : "/admin");
         } catch (err: unknown) {
             console.error("Login error:", err);
             const errorCode =
