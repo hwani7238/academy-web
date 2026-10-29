@@ -1,6 +1,8 @@
 'use client';
 import { useEffect, useRef, useState } from 'react';
+import Image from 'next/image';
 import './operations.css';
+import './check-in.css';
 type Match = { id: string; name: string };
 type Demo = { lookup: (digits: string) => Match[]; checkIn: (studentId: string) => Promise<Record<string, unknown>> };
 export function CheckIn({ demo }: { demo?: Demo }) {
@@ -38,13 +40,15 @@ export function CheckIn({ demo }: { demo?: Demo }) {
     if (next.length === 4) void lookup(next);
   };
   const attend = (id: string) => run(() => saveAttendance(id));
-  return <div className={`whee-ops kiosk ${demo ? 'embedded' : ''}`}>
-    <div className="kiosk-inner"><p className="brand">WHEE MUSIC</p><h1>{registered ? '오늘도 반가워요' : '출석 기기 등록'}</h1>
+  return <div className={`whee-ops kiosk kiosk-light ${demo ? 'embedded' : ''}`}>
+    <div className="kiosk-shell">
+    <header className="kiosk-topbar"><div className="kiosk-logo"><Image src="/logo.png" alt="WHEE MUSIC ACADEMY 위뮤직 아카데미" width={1024} height={576} priority unoptimized /></div><span className="kiosk-header-label">출석 체크</span></header>
+    <div className="kiosk-inner"><div className="kiosk-heading"><span className="kiosk-eyebrow" aria-hidden="true"><span className="kiosk-sound-bars"><i/><i/><i/></span>WHEE MUSIC</span><h1>{registered ? '오늘도 반가워요' : '출석 기기 등록'}</h1></div>
     {!registered ? <form onSubmit={e => { e.preventDefault(); void run(async () => { await call({ action: 'pair', code: code.trim() }); setRegistered(true); setCode(''); }); }}>
       <p>원장님 관리 화면에서 만든 등록 코드를 입력해주세요.</p><label>기기 등록 코드<input value={code} onChange={e => setCode(e.target.value)} autoComplete="off" required /></label><button className="primary" disabled={busy}>이 아이폰 등록</button>
-    </form> : success ? <div className="kiosk-success" role="status"><span aria-hidden="true">✓</span><h2>{message}</h2><p>잠시 후 처음 화면으로 돌아갑니다.</p></div> : matches.length ? <div className="matches"><p>출석할 학생과 과목을 선택해주세요.</p>{matches.map(m => <button disabled={busy} key={m.id} onClick={() => void attend(m.id)}>{m.name}<span>출석하기 →</span></button>)}<button className="quiet" disabled={busy} onClick={() => { enteredDigits.current=''; setMatches([]); setDigits(''); setMessage(''); }}>번호 다시 입력</button></div> : <form onSubmit={e => e.preventDefault()}>
+    </form> : success ? <div className="kiosk-success" role="status"><span className="kiosk-success-icon" aria-hidden="true">✓</span><h2>{message}</h2><p>잠시 후 처음 화면으로 돌아갑니다.</p></div> : matches.length ? <div className="matches"><p>출석할 학생과 과목을 선택해주세요.</p>{matches.map(m => <button disabled={busy} key={m.id} onClick={() => void attend(m.id)}>{m.name}<span>출석하기 →</span></button>)}<button className="quiet" disabled={busy} onClick={() => { enteredDigits.current=''; setMatches([]); setDigits(''); setMessage(''); }}>번호 다시 입력</button></div> : <form onSubmit={e => e.preventDefault()}>
       <p>번호 4자리를 입력하면 바로 출석됩니다. 여러 명이면 이름을 선택해주세요.</p><label className="sr-only" htmlFor={demo ? 'demo-digits' : 'digits'}>휴대폰 뒷번호</label><input id={demo ? 'demo-digits' : 'digits'} className="digit-display" disabled={busy} inputMode="numeric" autoComplete="off" maxLength={4} value={digits} onChange={e => changeDigits(e.target.value)} placeholder="····" />
       <div className="keypad">{['1','2','3','4','5','6','7','8','9','지우기','0','⌫'].map(k => <button type="button" disabled={busy} key={k} aria-label={k === '⌫' ? '마지막 숫자 지우기' : k} onClick={() => changeDigits(k === '지우기' ? '' : k === '⌫' ? enteredDigits.current.slice(0, -1) : enteredDigits.current + k)}>{k}</button>)}</div>{busy && <p role="status">출석 처리 중…</p>}
-    </form>}{!success && message && <p className="error" role="alert">{message}</p>}<p className="kiosk-footer">{demo ? '체험 번호 1234 · 형제자매 선택 가능' : '위뮤직 아카데미 · 출석 체크'}</p></div>
+    </form>}{!success && message && <p className="error" role="alert">{message}</p>}</div><p className="kiosk-footer">{demo ? '체험 번호 1234 · 형제자매 선택 가능' : '위뮤직 아카데미 · 출석 체크'}</p></div>
   </div>;
 }

@@ -1,0 +1,41 @@
+/* The live kiosk keeps its existing behavior; this skin is isolated from the management UI. */
+.whee-ops.kiosk.kiosk-light{--blue:#5b4ad4;--ink:#202334;--line:#e8e8f1;color:#202334;background:radial-gradient(ellipse at 20% 0%,#e8e5ff 0,transparent 45%),#f1f3f8;padding:24px;min-height:100dvh;color-scheme:light}
+.kiosk-light .kiosk-shell{width:100%;max-width:440px;min-height:min(780px,calc(100dvh - 48px));display:flex;flex-direction:column;background:#fff;border:1px solid #e6e6ef;border-radius:30px;box-shadow:0 24px 70px #26234512;overflow:hidden}
+.kiosk-light .kiosk-topbar{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-shrink:0;padding:18px 22px 14px;border-bottom:1px solid #f0eff5;background:#fff}
+/* Frame the existing logo's white margins without changing the original artwork. */
+.kiosk-light .kiosk-logo{position:relative;width:170px;height:50px;overflow:hidden;flex-shrink:0}
+.kiosk-light .kiosk-logo img{position:absolute;left:-41px;top:-46px;width:253px;height:auto;max-width:none}
+.kiosk-light .kiosk-header-label{font-size:11px;font-weight:600;letter-spacing:.03em;color:#8c8c9e;white-space:nowrap}
+.kiosk-light .kiosk-inner{width:100%;max-width:none;flex:1;padding:28px 26px 24px;background:radial-gradient(ellipse at 50% 0,#f5f2ff 0,transparent 52%);text-align:center}
+.kiosk-light .kiosk-heading{margin-bottom:12px}
+.kiosk-light .kiosk-eyebrow{display:inline-flex;align-items:center;gap:7px;border:1px solid #e6e0ff;background:#f4f1ff;border-radius:30px;padding:6px 10px;font-size:10px;font-weight:750;letter-spacing:1.3px;color:#6a57ca;margin-bottom:12px}
+.kiosk-light .kiosk-sound-bars{display:flex;align-items:center;gap:2px;height:12px}
+.kiosk-light .kiosk-sound-bars i{display:block;width:2px;height:6px;border-radius:2px;background:currentColor}
+.kiosk-light .kiosk-sound-bars i:nth-child(2){height:12px}.kiosk-light .kiosk-sound-bars i:nth-child(3){height:9px}
+.whee-ops.kiosk-light h1{font-size:27px;line-height:1.35;letter-spacing:-1px;color:#202334;margin:0;font-weight:800}
+.whee-ops.kiosk-light p{color:#787c90;font-size:13px;line-height:1.7;word-break:keep-all}
+.whee-ops.kiosk-light form{gap:20px}
+.whee-ops.kiosk-light label{color:#555a70}
+.whee-ops.kiosk-light input{background:#fafafe;color:#25283a;border-color:#dedcec;border-radius:15px}
+.whee-ops.kiosk-light .digit-display{height:78px;border:2px solid #9c8de3;box-shadow:0 0 0 4px #f3effe,inset 0 2px 5px #4338ca04;font-size:32px;letter-spacing:20px;padding:10px 6px 10px 26px;font-variant-numeric:tabular-nums;caret-color:#6a57ca}
+.kiosk-light .digit-display::placeholder{color:#c9c8d9;opacity:1}
+.kiosk-light .keypad{gap:10px}
+.whee-ops.kiosk.kiosk-light .keypad button{min-height:64px;padding:10px;background:linear-gradient(#fff,#f8f8fc);border:1px solid #e7e7f0;border-radius:17px;color:#34384c;font-size:25px;font-weight:650;box-shadow:0 2px 3px #24223c05;user-select:none;-webkit-user-select:none;transition:transform .1s,background-color .1s}
+.whee-ops.kiosk.kiosk-light .keypad button:nth-child(10){font-size:13px;font-weight:650;color:#b45c76;background:#fff4f7;border-color:#f5e4eb}
+.whee-ops.kiosk.kiosk-light .keypad button:nth-child(12){font-size:24px;color:#77788f}
+.whee-ops.kiosk.kiosk-light .keypad button:active:not(:disabled){transform:scale(.95);background:#eae5ff;border-color:#c4b7f0;color:#5944b7;box-shadow:none}
+.whee-ops.kiosk-light .primary{background:linear-gradient(110deg,#6051d7,#8a55cd)!important;color:#fff!important;border-color:transparent!important;border-radius:15px;box-shadow:0 6px 18px #6a50cb24}
+.kiosk-light .matches{gap:12px;margin-top:20px}
+.whee-ops.kiosk-light .matches button{min-height:70px;padding:16px;border:1px solid #e5dff3;border-radius:16px;background:#fff;box-shadow:0 3px 10px #30225805;color:#303249;text-align:left;font-size:17px;line-height:1.5}
+.kiosk-light .matches span{flex-shrink:0;color:#8973c5;font-size:12px}
+.whee-ops.kiosk-light .matches .quiet{min-height:44px;background:transparent;border-color:transparent;box-shadow:none;color:#8a829f;font-size:14px;justify-content:center}
+.kiosk-light .kiosk-success{padding:48px 0 40px}
+.kiosk-light .kiosk-success>.kiosk-success-icon{display:inline-flex;align-items:center;justify-content:center;width:92px;height:92px;background:linear-gradient(135deg,#7360e0,#9c6bdd);border:7px solid #f2edff;border-radius:50%;color:#fff;font-size:42px;box-shadow:0 10px 25px #7661d522}
+.whee-ops.kiosk-light .kiosk-success h2{font-size:23px;line-height:1.6;color:#29273a;margin:25px 0 12px;word-break:keep-all}
+.whee-ops.kiosk-light .error{margin-top:18px!important;padding:12px;background:#fff3f6;border-color:#f5dce5;color:#a34762;font-size:13px;line-height:1.6}
+.whee-ops.kiosk-light .kiosk-footer{flex-shrink:0;margin:0!important;padding:16px 20px;border-top:1px solid #f0eff5;color:#a09daf;font-size:11px!important;letter-spacing:.15px;text-align:center;background:#fff}
+@media(hover:hover) and (pointer:fine){.whee-ops.kiosk.kiosk-light .keypad button:hover:not(:disabled){background:#f0edfa;border-color:#d6cbed;color:#5f4ab5}.whee-ops.kiosk-light .matches button:hover:not(:disabled){background:#f7f4fe;border-color:#c3b5e3;color:#5f4ab5}}
+@media(max-width:520px){.whee-ops.kiosk.kiosk-light:not(.embedded){padding:0;align-items:stretch}.kiosk-light:not(.embedded) .kiosk-shell{max-width:none;min-height:100dvh;border:0;border-radius:0;box-shadow:none}.kiosk-light:not(.embedded) .kiosk-topbar{padding-top:max(18px,env(safe-area-inset-top))}.kiosk-light:not(.embedded) .kiosk-footer{padding-bottom:max(16px,env(safe-area-inset-bottom))}}
+@media(max-height:740px){.kiosk-light .kiosk-inner{padding-block:12px}.kiosk-light .kiosk-topbar{padding-block:12px}.whee-ops.kiosk-light form{gap:16px}.whee-ops.kiosk.kiosk-light .keypad button{min-height:56px}.whee-ops.kiosk-light .digit-display{height:68px}.kiosk-light .kiosk-success{padding:24px 0}}
+.whee-ops.kiosk.kiosk-light.embedded{padding:0;min-height:0;border-radius:20px;background:#fff}.kiosk-light.embedded .kiosk-shell{min-height:0;border-radius:20px;box-shadow:none}.kiosk-light.embedded .kiosk-topbar{padding:14px}.kiosk-light.embedded .kiosk-inner{padding:22px 18px}.kiosk-light.embedded .kiosk-logo{transform:scale(.8);transform-origin:left center;width:140px;margin-right:-15px}.whee-ops.kiosk-light.embedded h1{font-size:23px}.whee-ops.kiosk.kiosk-light.embedded .keypad button{min-height:52px}
+@media(prefers-reduced-motion:reduce){.whee-ops.kiosk.kiosk-light .keypad button{transition:none}}
