@@ -48,3 +48,19 @@ student names, piano classes and attendance metadata. See
 Silent check-in must precede a delayed keypad check-in to prevent its notification.
 A notification already submitted or delivered cannot be recalled. Weekly lesson
 schedules are not changed by recording an actual arrival.
+
+Teacher attendance now uses `/api/teacher/attendance/events` instead of a 15-second
+poll. An authenticated server-side Firestore listener emits only change signals;
+the existing filtered API provides the visible rows. Additions, edits and deleted
+records all invalidate the view. Overlapping events queue a fresh read, so an
+in-flight request cannot swallow a later cancellation. Hidden pages unsubscribe;
+reconnections and failed reads recover with backoff, without normal polling.
+
+The event stream has a bounded four-minute lifetime (also bounded by token expiry
+and Seoul midnight) and then reconnects. Transport keepalives do not read the DB
+or refresh the attendance list. Role changes close the subscription immediately.
+Firestore rules remain server-only for attendance and financial collections.
+
+Validation: `node --test tests/teacher-attendance*.test.mjs`, TypeScript and ESLint.
+The attendance count and time-edit buttons were visually checked with fabricated
+students; production attendance must not be changed for a smoke test.
