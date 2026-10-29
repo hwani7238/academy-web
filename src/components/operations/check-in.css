@@ -1,7 +1,7 @@
 /* The live kiosk keeps its existing behavior; this skin is isolated from the management UI. */
 .whee-ops.kiosk.kiosk-light{--blue:#5b4ad4;--ink:#202334;--line:#e8e8f1;color:#202334;background:radial-gradient(ellipse at 20% 0%,#e8e5ff 0,transparent 45%),#f1f3f8;padding:24px;min-height:100dvh;color-scheme:light}
 .kiosk-light .kiosk-shell{width:100%;max-width:440px;min-height:min(780px,calc(100dvh - 48px));display:flex;flex-direction:column;background:#fff;border:1px solid #e6e6ef;border-radius:30px;box-shadow:0 24px 70px #26234512;overflow:hidden}
-.kiosk-light .kiosk-inner{width:100%;max-width:none;flex:1;padding:48px 26px 32px;background:radial-gradient(ellipse at 50% 0,#f5f2ff 0,transparent 52%);text-align:center}
+.kiosk-light .kiosk-inner{width:100%;max-width:none;flex:1;padding:48px 26px 32px;background:radial-gradient(ellipse 320px 360px at 0 0,#e9e5ff 0,transparent 85%),radial-gradient(ellipse 300px 340px at 100% 0,#f0e5ff 0,transparent 85%),#fff;text-align:center}
 .kiosk-light .kiosk-heading{margin-bottom:26px}
 .kiosk-light .kiosk-eyebrow{display:inline-flex;align-items:center;gap:7px;border:1px solid #e6e0ff;background:#f4f1ff;border-radius:30px;padding:6px 10px;font-size:10px;font-weight:750;letter-spacing:1.3px;color:#6a57ca;margin-bottom:12px}
 .kiosk-light .kiosk-sound-bars{display:flex;align-items:center;gap:2px;height:12px}
