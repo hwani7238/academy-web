@@ -1,7 +1,7 @@
 import type { Attendance } from './model';
 
-/** The daily arrivals list is restricted to actual, non-cancelled kiosk check-ins. */
+/** Actual arrivals include kiosk and teacher-confirmed arrivals, not calendar edits. */
 export function dailyCheckins(rows: Attendance[], day: string): Attendance[] {
-  return rows.filter(row => row.day === day && row.source === 'kiosk'
+  return rows.filter(row => row.day === day && ['kiosk', 'teacher'].includes(row.source || '')
     && (!row.status || row.status === 'present' || row.status === 'makeup'));
 }

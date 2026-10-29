@@ -13,7 +13,7 @@ import { correctedLegacy, legacyCorrectionInput, type LegacyCorrection } from '.
 import { changeSchedule, moveLesson } from './schedule';
 import { attendanceDays, rangeAttendance } from './attendance-range';
 import { enrollmentState, lifecycleInput, courseLifecycle, deleteOrRestoreEnrollment } from './lifecycle';
-import { checkInName, courseGroup, resolveImportedSubjects } from './course-label';
+import { checkInName, courseGroup, courseSubject, resolveImportedSubjects } from './course-label';
 export { resolveImportedSubjects } from './course-label';
 import { correctedArrival } from './attendance-time';
 import { randomUUID, randomBytes } from 'node:crypto';
@@ -226,15 +226,26 @@ async function makeupSource(tx: Transaction, db: Firestore, account: Account, da
 }
 
 export async function checkIn(studentId: string, digits: string, actor: string) {
+  return registerArrival(studentId, digits, actor);
+}
+export async function teacherCheckIn(input: Record<string, unknown>, actor: string) {
+  if (input.day !== seoulDay()) throw new HttpError(409, '오늘 날짜로 새로고침한 뒤 출석해주세요.');
+  const arrivalAt = correctedArrival(seoulDay(), input.time);
+  if (Date.parse(arrivalAt) > Date.now()) throw new HttpError(400, '미래 시간으로 출석할 수 없습니다.');
+  return registerArrival(key(input.studentId), '', actor, { day: String(input.day), arrivalAt });
+}
+async function registerArrival(studentId: string, digits: string, actor: string, teacher?: { day: string; arrivalAt: string }) {
   const db = database(); const id = key(studentId); const day = seoulDay(); const attendanceId = `${id}_${day}`;
   const ref = db.doc(`opsAccounts/${id}`); const attendanceRef = db.doc(`opsAttendance/${attendanceId}`);
   const invoiceId = randomUUID();
   return db.runTransaction(async tx => {
+    if (teacher && (teacher.day !== seoulDay() || day !== teacher.day)) throw new HttpError(409, '날짜가 변경됐습니다. 새로고침해주세요.');
     const [accountSnap, attended] = await Promise.all([tx.get(ref), tx.get(attendanceRef)]);
     let account = accountSnap.data() as Account | undefined;
-    if (!account?.active || !account.checkinSuffixes.includes(digits)) throw new HttpError(404, '등록된 학생을 찾을 수 없습니다.');
+    if (!account?.active || (!teacher && !account.checkinSuffixes.includes(digits))) throw new HttpError(404, '등록된 학생을 찾을 수 없습니다.');
     const owner = (await tx.get(db.doc(`students/${account.sourceStudentId || id}`))).data();
     if (!owner || enrollmentState(courseLifecycle(owner,id)) !== 'active') throw new HttpError(409, '휴원·퇴원 상태입니다. 선생님께 복귀 처리를 요청해주세요.');
+    if (teacher && !courseSubject(account, owner).includes('피아노')) throw new HttpError(403, '피아노 수강생만 출석 처리할 수 있습니다.');
     const imported = account.importId ? (await tx.get(db.doc(`opsImports/${account.importId}`))).data() : undefined;
     const sources = courseGroup(account, owner) ? [] : (await tx.get(db.collection('opsImports').where('matchedStudentId', '==', account.sourceStudentId || id))).docs.map(d => d.data());
     const name = checkInName(account, owner, sources);
@@ -247,6 +258,15 @@ export async function checkIn(studentId: string, digits: string, actor: string) 
     if (attended.exists && attended.data()?.status !== 'cancelled' && !reservation) {
       const status = attended.data()?.status || 'present';
       if (status !== 'present' && status !== 'makeup') throw new HttpError(409, '오늘 결석·취소 기록이 있습니다. 선생님께 출석 변경을 요청해주세요.');
+      // A calendar entry can already have charged this lesson. Confirm the
+      // physical arrival without charging it a second time.
+      if (teacher && attended.data()?.source === 'manual') {
+        const noticeRef = db.doc(`opsNotices/attendance_${attendanceId}`), notice = (await tx.get(noticeRef)).data();
+        tx.update(attendanceRef,{source:'teacher',arrivalAt:teacher.arrivalAt,notificationSuppressed:true,updatedAt:now()});
+        if (notice && ['queued','blocked'].includes(notice.status)) tx.update(noticeRef,{status:'cancelled',error:'강사가 알림 없이 등원을 확인했습니다.'});
+        audit(tx,db,actor,'teacher-confirm-existing-arrival',id,{attendanceId,arrivalAt:teacher.arrivalAt,units:attended.data()?.units,notificationSuppressed:true});
+        return {duplicate:false,name};
+      }
       return { duplicate: true, name };
     }
     const previousNotice = attended.exists ? await tx.get(db.doc(`opsNotices/attendance_${attendanceId}`)) : null;
@@ -256,11 +276,30 @@ export async function checkIn(studentId: string, digits: string, actor: string) 
     if(activation){account=activateNextPass(account,activation.data() as Invoice,day,now());tx.update(activation.ref,{reservedPass:false,cycleStart:day,lessonDate:day,updatedAt:now()});audit(tx,db,actor,'activate-next-pass',id,{invoiceId:activation.id,day,units:account.planUnits});}
     const remaining = adjustBalance(account.remaining, 0, units);
     const openInvoiceId = remaining <= 0 && units > 0 && !account.openInvoiceId ? newInvoice(tx, db, account, invoiceId, '수업 횟수 소진') : account.openInvoiceId;
-    tx.set(attendanceRef, { id: attendanceId, studentId: id, name: account.name, day, at: now(), units, status: reservation ? 'makeup' : 'present', source: 'kiosk', note: reservation?.note || '', ...(reservation ? {relatedDay:reservation.relatedDay} : {}), updatedAt: now() });
+    tx.set(attendanceRef, { id: attendanceId, studentId: id, name: account.name, day, at: now(), units, status: reservation ? 'makeup' : 'present', source: teacher ? 'teacher' : 'kiosk', ...(teacher ? {arrivalAt:teacher.arrivalAt, notificationSuppressed:true} : {}), note: reservation?.note || '', ...(reservation ? {relatedDay:reservation.relatedDay} : {}), updatedAt: now() });
     tx.update(ref, { ...account, remaining, openInvoiceId, updatedAt: now() });
-    if (!previousNotice?.exists) enqueue(tx, db, `attendance_${attendanceId}`, account, 'attendance', { student_name: String(owner.name || account.name), attendance_time: new Date().toLocaleTimeString('ko-KR', { timeZone: 'Asia/Seoul', hour: '2-digit', minute: '2-digit', hour12: false }) });
-    audit(tx, db, actor, 'check-in', id, { attendanceId, units, remaining, ...(activation?{passCreditUnits:account.planUnits}:{}), ...(reservation ? {relatedDay:reservation.relatedDay, completedReservation:true} : {}) });
-    return { duplicate: false, name, noticeId: `attendance_${attendanceId}` };
+    if (!teacher && !previousNotice?.exists) enqueue(tx, db, `attendance_${attendanceId}`, account, 'attendance', { student_name: String(owner.name || account.name), attendance_time: new Date().toLocaleTimeString('ko-KR', { timeZone: 'Asia/Seoul', hour: '2-digit', minute: '2-digit', hour12: false }) });
+    if (teacher && previousNotice?.exists && ['queued','blocked'].includes(previousNotice.data()?.status)) tx.update(previousNotice.ref, { status:'cancelled', error:'강사가 알림 없이 출석 처리했습니다.' });
+    audit(tx, db, actor, teacher ? 'teacher-check-in' : 'check-in', id, { attendanceId, units, remaining, ...(teacher ? {arrivalAt:teacher.arrivalAt, notificationSuppressed:true} : {}), ...(activation?{passCreditUnits:account.planUnits}:{}), ...(reservation ? {relatedDay:reservation.relatedDay, completedReservation:true} : {}) });
+    return { duplicate: false, name, ...(!teacher ? {noticeId: `attendance_${attendanceId}`} : {}) };
+  });
+}
+export async function correctTeacherAttendanceTime(input: Record<string, unknown>, actor: string) {
+  const id = key(input.attendanceId), db = database();
+  return db.runTransaction(async tx => {
+    const ref = db.doc(`opsAttendance/${id}`), old = (await tx.get(ref)).data() as Attendance | undefined;
+    if (!old || old.day !== seoulDay() || input.day !== old.day || !['kiosk','teacher'].includes(old.source || '') || !['present','makeup'].includes(old.status || 'present')) throw new HttpError(409, '오늘의 실제 출석 기록만 수정할 수 있습니다. 새로고침해주세요.');
+    const account = (await tx.get(db.doc(`opsAccounts/${old.studentId}`))).data() as Account | undefined;
+    const owner = account ? (await tx.get(db.doc(`students/${account.sourceStudentId || old.studentId}`))).data() : undefined;
+    if (!account || !owner || !courseSubject(account, owner).includes('피아노')) throw new HttpError(403, '피아노 출석만 수정할 수 있습니다.');
+    const arrivalAt = correctedArrival(old.day, input.time);
+    if (Date.parse(arrivalAt) > Date.now()) throw new HttpError(400, '미래 시간으로 수정할 수 없습니다.');
+    if (old.arrivalAt === arrivalAt) return;
+    if (old.updatedAt !== input.expectedUpdatedAt) throw new HttpError(409, '다른 화면에서 변경된 기록입니다. 새로고침 후 다시 수정해주세요.');
+    const noticeRef = db.doc(`opsNotices/attendance_${id}`), notice = (await tx.get(noticeRef)).data();
+    tx.update(ref, {arrivalAt, notificationSuppressed:true, updatedAt:now()});
+    if (notice && ['queued','blocked'].includes(notice.status)) tx.update(noticeRef,{status:'cancelled',error:'강사가 등원 시간을 정정하여 발송하지 않았습니다.'});
+    audit(tx, db, actor, 'teacher-correct-arrival-time', old.studentId, {attendanceId:id,before:old.arrivalAt || old.at,after:arrivalAt,notificationSuppressed:true});
   });
 }
 export async function adjust(input: Record<string, unknown>, actor: string) {

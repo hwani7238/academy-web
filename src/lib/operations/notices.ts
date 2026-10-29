@@ -46,7 +46,7 @@ export async function processNotices(noticeId?: string) {
         tx.update(item.ref, { status: 'cancelled', error: '지원하지 않는 알림입니다.' }); return null;
       }
       const attendance = (await tx.get(db.doc(`opsAttendance/${item.id.slice('attendance_'.length)}`))).data();
-      if (!attendance || attendance.studentId !== fresh.studentId || attendance.source !== 'kiosk' || !['present', 'makeup'].includes(attendance.status)) {
+      if (!attendance || attendance.notificationSuppressed || attendance.studentId !== fresh.studentId || attendance.source !== 'kiosk' || !['present', 'makeup'].includes(attendance.status)) {
         tx.update(item.ref, { status: 'cancelled', error: '출석 기기에서 완료된 유효한 출석이 아닙니다.' }); return null;
       }
       const age = Date.now() - Date.parse(fresh.createdAt);

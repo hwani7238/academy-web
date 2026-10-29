@@ -2432,3 +2432,55 @@ test('changed destination, blocked template and unavailable approval lookup neve
   }
  });
 });
+
+test('teacher arrival is silent, shared with daily/monthly records and kiosk replay never deducts or notifies again',async()=>{
+ const s=setup();await s.seed('piano',8);s.records.get('opsAccounts/piano').subject='피아노';
+ const day=s.load('model').seoulDay();
+ const results=await Promise.all([s.service.teacherCheckIn({studentId:'piano',day,time:'00:00',units:9},'teacher:t'),s.service.checkIn('piano','1234','device')]);
+ assert.equal(results.filter(r=>!r.duplicate).length,1);assert.equal(s.records.get('opsAccounts/piano').remaining,7);
+ const row=s.records.get(`opsAttendance/piano_${day}`);assert.equal(row.source,'teacher');assert.equal(row.units,1);assert.equal(row.notificationSuppressed,true);assert.equal(row.arrivalAt,new Date(day+'T00:00:00+09:00').toISOString());
+ assert.equal(s.load('daily-checkins').dailyCheckins([row],day).length,1);
+ assert.equal([...s.records.keys()].filter(k=>k.startsWith('opsNotices/attendance_')).length,0);
+ await s.service.teacherCheckIn({studentId:'piano',day,time:'00:00'},'teacher:t');assert.equal(s.records.get('opsAccounts/piano').remaining,7);
+});
+test('teacher time correction does not change balance or day, cancels unsent notice, and rejects stale edits',async()=>{
+ const s=setup();await s.seed('piano',8);s.records.get('opsAccounts/piano').subject='피아노';
+ const result=await s.service.checkIn('piano','1234','device');const day=s.load('model').seoulDay(),id=`piano_${day}`;
+ const old=s.records.get(`opsAttendance/${id}`),balance=s.records.get('opsAccounts/piano').remaining;
+ await s.service.correctTeacherAttendanceTime({attendanceId:id,day,time:'00:00',expectedUpdatedAt:old.updatedAt,units:10},'teacher:t');
+ const row=s.records.get(`opsAttendance/${id}`);assert.equal(row.day,day);assert.equal(row.units,1);assert.equal(s.records.get('opsAccounts/piano').remaining,balance);assert.equal(row.notificationSuppressed,true);assert.equal(s.records.get(`opsNotices/${result.noticeId}`).status,'cancelled');
+ await assert.rejects(s.service.correctTeacherAttendanceTime({attendanceId:id,day,time:'00:01',expectedUpdatedAt:'wrong-revision'},'teacher:t'));
+ assert.equal((await s.service.checkIn('piano','1234','device')).duplicate,true);
+});
+test('teacher scope rejects other instruments, past days, future times and inactive enrollment',async()=>{
+ const s=setup();await s.seed('drum',8);s.records.get('opsAccounts/drum').subject='드럼';const day=s.load('model').seoulDay();
+ await assert.rejects(s.service.teacherCheckIn({studentId:'drum',day,time:'00:00'},'teacher:t'),/피아노/);
+ await s.seed('piano',8);s.records.get('opsAccounts/piano').subject='피아노';
+ await assert.rejects(s.service.teacherCheckIn({studentId:'piano',day:'2000-01-01',time:'00:00'},'teacher:t'));
+ await assert.rejects(s.service.teacherCheckIn({studentId:'piano',day,time:'25:00'},'teacher:t'));
+ s.records.get('students/piano').lifecycle={status:'paused',until:'2999-01-01'};
+ await assert.rejects(s.service.teacherCheckIn({studentId:'piano',day,time:'00:00'},'teacher:t'),/휴원/);
+ assert.equal(s.records.get('opsAccounts/piano').remaining,8);assert.equal([...s.records.keys()].filter(k=>k.startsWith('opsAttendance/')).length,0);
+});
+test('teacher completes a reserved makeup once without double charging the original paid absence',async()=>{
+ const s=setup();await s.seed('piano',8);s.records.get('opsAccounts/piano').subject='피아노';const day=s.load('model').seoulDay(),relatedDay=s.load('model').seoulDay(new Date(Date.now()-86400000));
+ await s.service.recordAttendance({studentId:'piano',day:relatedDay,status:'late_cancel',units:1},'owner');
+ await s.service.recordAttendance({studentId:'piano',day,status:'makeup_reserved',units:0,relatedDay},'owner');
+ await s.service.teacherCheckIn({studentId:'piano',day,time:'00:00'},'teacher:t');
+ const row=s.records.get(`opsAttendance/piano_${day}`);assert.equal(row.status,'makeup');assert.equal(row.relatedDay,relatedDay);assert.equal(row.units,0);assert.equal(row.source,'teacher');assert.equal(s.records.get('opsAccounts/piano').remaining,7);
+ assert.equal((await s.service.checkIn('piano','1234','device')).duplicate,true);
+});
+test('teacher confirms a pre-recorded monthly attendance without charging twice',async()=>{
+ const s=setup();await s.seed('piano',8);s.records.get('opsAccounts/piano').subject='피아노';const day=s.load('model').seoulDay();
+ await s.service.recordAttendance({studentId:'piano',day,status:'present',units:1},'owner');assert.equal(s.records.get('opsAccounts/piano').remaining,7);
+ await s.service.teacherCheckIn({studentId:'piano',day,time:'00:00'},'teacher:t');
+ const row=s.records.get(`opsAttendance/piano_${day}`);assert.equal(row.source,'teacher');assert.equal(row.units,1);assert.equal(s.records.get('opsAccounts/piano').remaining,7);
+ assert.equal((await s.service.checkIn('piano','1234','device')).duplicate,true);assert.equal([...s.records.keys()].filter(k=>k.startsWith('opsNotices/attendance_')).length,0);
+});
+test('teacher correction cannot modify another instrument and suppressed arrivals cannot send if requeued',async()=>{
+ const s=setup();await s.seed('drum',8);s.records.get('opsAccounts/drum').subject='드럼';const day=s.load('model').seoulDay();await s.service.checkIn('drum','1234','device');
+ const drum=s.records.get(`opsAttendance/drum_${day}`);await assert.rejects(s.service.correctTeacherAttendanceTime({attendanceId:drum.id,day,time:'00:00',expectedUpdatedAt:drum.updatedAt},'teacher:t'),/피아노/);
+ await s.seed('piano',8);s.records.get('opsAccounts/piano').subject='피아노';const {noticeId}=await s.service.checkIn('piano','1234','device');const row=s.records.get(`opsAttendance/piano_${day}`);
+ await s.service.correctTeacherAttendanceTime({attendanceId:row.id,day,time:'00:00',expectedUpdatedAt:row.updatedAt},'teacher:t');s.records.get(`opsNotices/${noticeId}`).status='queued';
+ await withAttendanceProvider(async calls=>{await s.load('notices').processNotices(noticeId);assert.equal(calls.length,0);assert.equal(s.records.get(`opsNotices/${noticeId}`).status,'cancelled');});
+});

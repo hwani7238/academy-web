@@ -107,3 +107,30 @@
 - 버튼: `ordering=1`, `type=WL`, `name=문의하기`, `linkMo` 및 `linkPc`는 사용자가 제공한 학원 채널의 채팅 URL `https://pf.kakao.com/_xgfByn/chat`. 채널 제목과 채팅 URL의 정상 응답을 확인했다.
 - 서버 치환 변수 V2 대응은 준비했다. 승인된 템플릿에 저장한 고정 버튼 링크가 치환 발송에 사용된다. V2에서는 문의처 환경변수가 필요 없다.
 - NHN 등록 성공 및 TSC02(검수 중)를 확인했다. 기본 `NHN_ATTENDANCE_TEMPLATE=ATTENDANCE_LOG_V1`을 유지하고, 관리 브랜치에 `NHN_ATTENDANCE_CHAT_TEMPLATE=ATTENDANCE_LOG_V2`를 추가한다. 출석 알림 발송 직전에 후보 템플릿의 TSC03 승인·차단/휴면 여부·정확한 본문·문의하기 버튼과 양쪽 링크를 조회한다(최대 3초, 60초 캐시). 승인 및 양식이 일치할 때만 V2로 자동 전환한다. 심사 중·반려·조회 장애·양식 불일치 시 기존 V1로 정상 발송한다. 이 확인은 출석 응답 후에 이루어지며 별도 예약 작업은 필요 없다. 실제 사용한 템플릿 코드는 알림 기록에 보관한다.
+
+## Teacher arrival correction (2026-10-29)
+
+The public `/teacher/attendance` page relays authenticated requests to the exact
+management `/api/teacher/attendance` endpoint. Deploy the management backend and
+update its domain alias before deploying the public UI. Both endpoints are
+uncached; the management backend verifies the Firebase token and approved piano
+teacher role. No balances, phone numbers or notes are returned to teachers.
+
+Teachers can correct today's arrival time or register a piano student's physical
+arrival silently. Registration uses the existing account/day transaction,
+including reserved makeup completion and pass accounting. It writes source
+`teacher`, so both daily attendance screens and the monthly table share the same
+record. A later keypad check-in is a duplicate and does not charge or notify.
+Existing manual calendar attendance can be confirmed without another deduction.
+Regular weekly schedules are unchanged. Future or historical arrivals cannot be
+entered through this teacher endpoint.
+
+Silent registrations do not enqueue Alimtalk. Corrections suppress pending
+attendance notices; messages already processing or sent cannot be recalled.
+Keypad input alone cannot establish the actual arrival time: when a delayed
+notification must be avoided, teachers should register the arrival before the
+student presses the keypad.
+
+Validation: operations, teacher endpoint, management host routing tests, public
+relay tests, and TypeScript checks. Live smoke tests must remain read-only; do not
+create real student attendance just to test deployment.
