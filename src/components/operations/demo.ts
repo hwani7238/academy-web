@@ -1,3 +1,4 @@
+import {invoiceReviewPatch,invoiceReviewRevision} from '@/lib/operations/invoice-review';
 import {passInvoice,allocatedPass,lessonPass,nextRecordedCycle,paymentPass} from '@/lib/operations/pass-link';
 import {paymentCancellation} from '@/lib/operations/payment-cancellation';
 import {monthlyInvoice} from '@/lib/operations/monthly-payment';
@@ -129,9 +130,10 @@ export function demoAction(current: Snapshot, input: Record<string, unknown>): {
   } else if(input.action === 'correctRemaining'){
     if(!account)throw Error('먼저 수강 등록을 해주세요.');
     if(account.updatedAt!==input.expectedUpdatedAt||account.remaining!==input.expectedRemaining)throw Error('잔여 횟수가 변경됐습니다. 다시 열어주세요.');
+    const beforeRemaining=account.remaining;
     account.remaining=integer(input.remaining,-1000,1000,'남은 횟수');account.updatedAt=at;
     const existing=data.invoices.find(i=>i.id===account.openInvoiceId);
-    if(existing)existing.needsReview=true;
+    if(existing && existing.status==='open' && !existing.reservedPass && beforeRemaining!==account.remaining)Object.assign(existing,invoiceReviewPatch({kind:'balance_changed',beforeRemaining,afterRemaining:account.remaining},at));
     else if(account.remaining<=0){const auto=account.autoBilling;account.autoBilling=false;invoice(account);account.autoBilling=auto;}
   } else if(input.action === 'deleteEnrollment' || input.action === 'restoreEnrollment'){
     const row=data.students.find(s=>s.id===input.studentId && (s.sourceStudentId||s.id)===input.sourceStudentId);
@@ -169,13 +171,14 @@ export function demoAction(current: Snapshot, input: Record<string, unknown>): {
     }
     activate(account,values.day,values.status,old?.status||(old?'present':undefined));
     const passId=allocate(account,values.day,values.units,old,values.status);
+    const beforeRemaining=account.remaining;
     account.remaining = adjustBalance(account.remaining, old?.units || 0, values.units);
     account.updatedAt=at;
     data.attendance = data.attendance.filter(a => a.id !== id);
     data.attendance.push({ ...old, ...values,...(passId?{passId}:{}), id, studentId: account.id, name: account.name, at: old?.at || at, source: old?.source || 'manual', updatedAt: at });
     delete data.attendance[data.attendance.length-1].range;
     if (account.remaining <= 0 && values.units > (old?.units || 0)) invoice(account);
-    if (account.remaining > 0 && values.units < (old?.units || 0)) { const open = data.invoices.find(i => i.id === account.openInvoiceId); if (open) open.needsReview = true; }
+    if (account.remaining > 0 && values.units < (old?.units || 0)) { const open = data.invoices.find(i => i.id === account.openInvoiceId); if (open?.status==='open' && !open.reservedPass) Object.assign(open,invoiceReviewPatch({kind:values.status==='cancelled'?'attendance_cancelled':'attendance_changed',day:values.day,beforeRemaining,afterRemaining:account.remaining},at)); }
   } else if (input.action === 'demoCheckIn') {
     if (!account?.active || enrollmentState(data.students.find(s=>s.id===account.id)?.lifecycle)!=='active') throw new Error('학생 설정을 확인해주세요.');
     const existing = data.attendance.find(a => a.studentId === account.id && a.day === seoulDay());
@@ -229,9 +232,10 @@ export function demoAction(current: Snapshot, input: Record<string, unknown>): {
   else if (input.action === 'adjust') {
     const attendance = data.attendance.find(a => a.id === input.attendanceId)!;
     const a = data.accounts.find(a => a.id === attendance.studentId)!;
+    const beforeRemaining=a.remaining,beforeUnits=attendance.units;
     a.remaining = adjustBalance(a.remaining, attendance.units, Number(input.units)); attendance.units = Number(input.units); attendance.note = String(input.note || '').trim().slice(0, 500);
     if (a.remaining <= 0) invoice(a);
-    else { const open = data.invoices.find(i => i.id === a.openInvoiceId); if (open) open.needsReview = true; }
+    else { const open = data.invoices.find(i => i.id === a.openInvoiceId); if (open?.status==='open' && !open.reservedPass && beforeUnits!==attendance.units) Object.assign(open,invoiceReviewPatch({kind:'attendance_changed',day:attendance.day,beforeRemaining,afterRemaining:a.remaining},at)); }
   } else if(input.action==='monthlyPayment'){
     if(!account)throw Error('수강 정보를 확인해주세요.');const day=validDay(input.lessonDate);
     const id=String(input.invoiceId||`monthly_${account.id}_${day}`),existing=data.payments.find(p=>p.id===input.requestId);
@@ -271,8 +275,9 @@ export function demoAction(current: Snapshot, input: Record<string, unknown>): {
     data.payments.unshift({ id: String(input.requestId), invoiceId: i.id,passId:i.passId, studentId: i.studentId, amount: Number(input.amount), method: String(input.method), paymentDate, at, note: String(input.note || '') });
   } else if (['sendInvoice', 'cancelInvoice', 'confirmInvoice'].includes(String(input.action))) {
     const i = data.invoices.find(i => i.id === input.invoiceId)!;
-    if (input.action === 'confirmInvoice') i.needsReview = false;
-    else if (input.action === 'cancelInvoice') { if (i.paid) throw new Error('수납된 청구는 취소할 수 없습니다.'); i.status = 'cancelled'; data.accounts.find(a => a.id === i.studentId)!.openInvoiceId = null; }
+    if(Object.hasOwn(input,'expectedReviewRevision')&&input.expectedReviewRevision!==invoiceReviewRevision(i))throw Error('청구 내용이 변경됐습니다. 창을 다시 열고 확인해주세요.');
+    if (input.action === 'confirmInvoice') {i.needsReview = false;i.updatedAt=at;}
+    else if (input.action === 'cancelInvoice') { if (i.paid) throw new Error('수납된 청구는 취소할 수 없습니다.'); if(i.reservedPass)throw Error('예약 취소는 수강권 관리에서 해주세요.');i.status = 'cancelled';i.updatedAt=at; const owner=data.accounts.find(a => a.id === i.studentId)!;if(owner.openInvoiceId===i.id)owner.openInvoiceId = null; }
     else { if (i.needsReview) throw new Error('청구 내용을 확인해주세요.'); if (data.notices.some(n => n.id === `billing_${i.id}`)) throw new Error('이미 요청 기록이 있습니다.'); enqueue(data.accounts.find(a => a.id === i.studentId)!, `billing_${i.id}`, 'billing'); }
   } else if (input.action === 'pair') result = { code: '체험에서는 실제 기기를 등록하지 않습니다.' };
   else if (input.action === 'process') result = { submitted: 0 };

@@ -1,3 +1,4 @@
+import type { InvoiceReviewReason } from './invoice-review';
 import type { Lifecycle } from './lifecycle';
 export type Account = {
   currentPassId?: string; currentPassStart?: string; lastPassLessonDay?: string;
@@ -16,7 +17,7 @@ export const ATTENDANCE_LABELS = { present: "출석", absent: "결석", makeup: 
 export type AttendanceStatus = keyof typeof ATTENDANCE_LABELS;
 export type LegacyAttendance = { studentId: string; day: string; value: string; color: string; status?: AttendanceStatus; note?: string; revision?: string };
 export type Attendance = { passId?: string; unpaidCycleStart?: string; range?: {id:string;start:string;end:string}; arrivalAt?: string; status?: AttendanceStatus; notificationSuppressed?: boolean; source?: "kiosk" | "manual" | "teacher"; relatedDay?: string; id: string; studentId: string; name: string; day: string; at: string; units: number; note: string; updatedAt: string };
-export type Invoice = { passId?: string; legacyCreditUnits?: number; allocationState?: 'pending' | 'allocated'; allocatedUnits?: number; allocationAt?: string; linkReview?: boolean; receiptCancelledAt?: string; projected?: boolean; reservedPass?: boolean; lessonDate?: string; updatedAt?: string; creditUnits?: number; cycleStart?: string; id: string; studentId: string; name: string; units: number; amount: number; paid: number; status: 'open' | 'paid' | 'cancelled'; needsReview: boolean; createdAt: string };
+export type Invoice = { reviewReason?: InvoiceReviewReason; passId?: string; legacyCreditUnits?: number; allocationState?: 'pending' | 'allocated'; allocatedUnits?: number; allocationAt?: string; linkReview?: boolean; receiptCancelledAt?: string; projected?: boolean; reservedPass?: boolean; lessonDate?: string; updatedAt?: string; creditUnits?: number; cycleStart?: string; id: string; studentId: string; name: string; units: number; amount: number; paid: number; status: 'open' | 'paid' | 'cancelled'; needsReview: boolean; createdAt: string };
 export type Payment = { passId?: string; cancelledAt?: string; cancelledBy?: string; cancelReason?: string; revertedUnits?: number; paymentDate?: string; id: string; invoiceId: string; studentId: string; amount: number; method: string; at: string; note: string };
 export type Notice = { id: string; studentId: string; name: string; kind: 'attendance' | 'billing'; status: string; createdAt: string; requestId?: string; error?: string };
 export type Device = { id: string; name: string; active: boolean; createdAt: string };

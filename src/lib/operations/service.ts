@@ -1,3 +1,4 @@
+import { invoiceReviewPatch, invoiceReviewRevision } from './invoice-review';
 import { passInvoice, passDay, allocatedPass, lessonPass, nextRecordedCycle, paymentPass, unresolvedReceipts, requireClearPassLinks } from './pass-link';
 import {monthlyInvoice} from './monthly-payment';
 import {paymentCancellation} from './payment-cancellation';
@@ -322,7 +323,7 @@ export async function adjust(input: Record<string, unknown>, actor: string) {
     const passes=(await tx.get(db.collection('opsInvoices').where('studentId','==',account.id))).docs.map(d=>d.data() as Invoice);
     const remaining = adjustBalance(account.remaining, attendance.units, units);
     const openInvoiceId = remaining <= 0 && !account.openInvoiceId && !passes.some(i=>i.allocationState==='pending'&&i.status!=='cancelled') ? newInvoice(tx, db, account, invoiceId, '횟수 수정 후 소진') : account.openInvoiceId;
-    if (remaining > 0 && currentInvoice?.exists && !currentInvoice.data()?.reservedPass) tx.update(currentInvoice.ref, { needsReview: true });
+    if (remaining > 0 && attendance.units !== units && currentInvoice?.data()?.status === 'open' && !currentInvoice.data()?.reservedPass) tx.update(currentInvoice.ref, invoiceReviewPatch({kind:'attendance_changed',day:attendance.day,beforeRemaining:account.remaining,afterRemaining:remaining},now()));
     tx.update(ref, { remaining, openInvoiceId, updatedAt: now() });
     tx.update(attendanceRef, { units, note, updatedAt: now() });
     audit(tx, db, actor, 'adjust', account.id, { attendanceId: id, before: attendance.units, after: units, note, remaining });
@@ -462,17 +463,18 @@ export async function invoiceAction(input: Record<string, unknown>, actor: strin
   await db.runTransaction(async tx => {
     const ref = db.doc(`opsInvoices/${id}`); const invoice = (await tx.get(ref)).data() as Invoice | undefined;
     if (!invoice || invoice.status !== 'open') throw new Error('진행 중인 청구가 아닙니다.');
+    if (Object.hasOwn(input,'expectedReviewRevision') && input.expectedReviewRevision !== invoiceReviewRevision(invoice)) throw Error('청구 내용이 변경됐습니다. 창을 다시 열고 확인해주세요.');
     const accountRef = db.doc(`opsAccounts/${invoice.studentId}`); const account = (await tx.get(accountRef)).data() as Account;
     const noticeRef = db.doc(`opsNotices/billing_${id}`); const notice = await tx.get(noticeRef);
     if (input.action === 'cancelInvoice') {
       if(invoice.reservedPass)throw Error('예약 청구는 총 등록 현황의 수강권에서 예약을 취소해주세요.');
       if (invoice.paid !== 0) throw new Error('수납된 청구는 취소할 수 없습니다.');
       if (notice.data()?.status === 'processing') throw new Error('발송 처리 중입니다. 잠시 후 확인해주세요.');
-      tx.update(ref, { status: 'cancelled' });
+      tx.update(ref, { status: 'cancelled', updatedAt: now() });
       if (account.openInvoiceId === id) tx.update(accountRef, { openInvoiceId: null });
-      if (notice.exists && ['queued', 'blocked', 'failed'].includes(notice.data()?.status)) tx.update(noticeRef, { status: 'cancelled' });
+      if (notice.exists && ['queued', 'blocked', 'failed', 'review'].includes(notice.data()?.status)) tx.update(noticeRef, { status: 'cancelled' });
     } else if (input.action === 'confirmInvoice') {
-      tx.update(ref, { needsReview: false });
+      tx.update(ref, { needsReview: false, updatedAt: now() });
       if (notice.data()?.status === 'review') tx.update(noticeRef, { status: 'queued', error: '' });
     } else {
       if (invoice.needsReview) throw new Error('횟수 수정에 따른 청구 내용을 먼저 확인해주세요.');
@@ -569,7 +571,8 @@ export async function recordAttendance(input: Record<string, unknown>, actor: st
     const remaining = adjustBalance(account.remaining, old?.units || 0, values.units);
     const openInvoiceId = remaining <= 0 && values.units > (old?.units || 0) && !account.openInvoiceId && !passRows.some(i=>i.allocationState==='pending'&&i.status!=='cancelled') && !unresolvedReceipts(passRows).length ? newInvoice(tx, db, account, invoiceId, '수동 출결 기록 후 소진', stamp) : account.openInvoiceId;
     const review = remaining > 0 && values.units < (old?.units || 0);
-    if (review && currentInvoice?.exists && !currentInvoice.data()?.reservedPass) tx.update(currentInvoice.ref, { needsReview: true });
+    const reviewPatch = review && currentInvoice?.data()?.status === 'open' && !currentInvoice.data()?.reservedPass ? invoiceReviewPatch({kind:values.status==='cancelled'?'attendance_cancelled':'attendance_changed',day:values.day,beforeRemaining:accountSnap.data()!.remaining,afterRemaining:remaining},stamp) : undefined;
+    if (reviewPatch) tx.update(currentInvoice!.ref, reviewPatch);
     const attendance:Attendance={ ...old, ...values,...(pass.passId?{passId:pass.passId}:{}), id, studentId, name: account.name, source: old?.source || 'manual', at: old?.at || stamp, updatedAt: stamp };
     delete attendance.range;
     const updatedAccount={...account,remaining,openInvoiceId,updatedAt:stamp};
@@ -577,7 +580,7 @@ export async function recordAttendance(input: Record<string, unknown>, actor: st
     tx.update(accountRef, { ...account, remaining, openInvoiceId, updatedAt: stamp });
     audit(tx, db, actor, 'record-attendance', studentId, { attendanceId: id, before: old?.units || 0, ...values, remaining, ...(activation?{passCreditUnits:account.planUnits}:{}) });
     if(account.nextPass)return;
-    const invoices:Invoice[]=openInvoiceId && openInvoiceId!==account.openInvoiceId ? [passInvoice({id:openInvoiceId,studentId:account.id,name:account.name,units:account.planUnits,amount:account.planAmount,paid:0,status:'open',needsReview:false,createdAt:stamp},false,stamp)] : currentInvoice?.exists ? [{...currentInvoice.data(),id:currentInvoice.id,...(review?{needsReview:true}:{})} as Invoice] : [];
+    const invoices:Invoice[]=openInvoiceId && openInvoiceId!==account.openInvoiceId ? [passInvoice({id:openInvoiceId,studentId:account.id,name:account.name,units:account.planUnits,amount:account.planAmount,paid:0,status:'open',needsReview:false,createdAt:stamp},false,stamp)] : currentInvoice?.exists ? [{...currentInvoice.data(),id:currentInvoice.id,...(reviewPatch||{})} as Invoice] : [];
     if(activation||pass.invoice)return; // Full refresh also loads the new cycle boundary and invoice date.
     return { attendance:[attendance], accounts:[updatedAccount], invoices };
   });
@@ -620,7 +623,8 @@ export async function correctRemaining(input: Record<string, unknown>, actor: st
       openInvoiceId=newInvoice(tx,db,{...account,autoBilling:false},randomUUID(),'잔여 횟수 정정 후 소진',at);
       invoice={id:openInvoiceId,studentId,name:account.name,units:account.planUnits,amount:account.planAmount,paid:0,status:'open',needsReview:false,createdAt:at};
     }else if(remaining!==account.remaining && invoice?.status==='open' && !invoice.reservedPass){
-      invoice={...invoice,needsReview:true};tx.update(invoiceSnap!.ref,{needsReview:true});
+      const patch=invoiceReviewPatch({kind:'balance_changed',beforeRemaining:account.remaining,afterRemaining:remaining},at);
+      invoice={...invoice,...patch};tx.update(invoiceSnap!.ref,patch);
     }
     const updated={...account,remaining,openInvoiceId,updatedAt:at};
     tx.update(ref,{remaining,openInvoiceId,updatedAt:at});

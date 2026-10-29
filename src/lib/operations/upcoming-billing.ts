@@ -55,7 +55,7 @@ export function finalLessonInvoices(data: Snapshot, invoices: Invoice[], today =
   const account=eligible.get(i.studentId);
   if(i.status!=='open'||!account)return false;
   const first=invoiceCycleStart(i,sequence.cycleFirstDays,sequence.firstLessonTimes);
-  return Boolean(i.receiptCancelledAt)||account.remaining<=1||Boolean(first&&first<=today);
+  return i.needsReview||Boolean(i.receiptCancelledAt)||account.remaining<=1||Boolean(first&&first<=today);
  });
 }
 

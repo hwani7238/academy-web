@@ -2640,3 +2640,68 @@ test('decreasing a twelve-lesson pass to eight on check-in restarts at one and c
  await testPayment(s,{invoiceId:id,requestId:'smaller-pass-paid',amount:160000,method:'현금',expectedInvoiceUpdatedAt:invoice.updatedAt},'owner');
  assert.equal(s.records.get('opsAccounts/piano').remaining,7);assert.equal(s.records.get(`opsInvoices/${id}`).status,'paid');
 });
+
+test('invoice review records why the balance changed and keeps the approved invoice without altering money or lessons',async()=>{
+ const s=setup();await s.seed('p',0);await s.service.createInvoice('p','owner');
+ const a=s.records.get('opsAccounts/p'),id=a.openInvoiceId;
+ await s.service.correctRemaining({studentId:'p',requestId:'review-balance',remaining:3,expectedRemaining:0,expectedUpdatedAt:a.updatedAt},'owner');
+ const i=s.records.get(`opsInvoices/${id}`),{invoiceReviewMessage,invoiceReviewRevision}=s.load('invoice-review');
+ assert.deepEqual(i.reviewReason,{kind:'balance_changed',beforeRemaining:0,afterRemaining:3});
+ assert.equal(invoiceReviewMessage(i),'잔여 횟수가 변경됐어요. 기존 청구를 유지할까요?');
+ const account=structuredClone(s.records.get('opsAccounts/p'));
+ await s.service.invoiceAction({action:'confirmInvoice',invoiceId:id,expectedReviewRevision:invoiceReviewRevision(i)},'owner');
+ const after=s.records.get(`opsInvoices/${id}`);assert.equal(after.needsReview,false);assert.equal(after.status,'open');assert.equal(after.paid,0);assert.equal(after.amount,i.amount);
+ assert.deepEqual(s.records.get('opsAccounts/p'),account);
+ assert.equal([...s.records.keys()].some(k=>/^ops(Payments|Notices)\//.test(k)),false);
+});
+test('attendance cancellation and unit corrections include their date and before/after remaining in invoice review',async()=>{
+ for(const action of ['recordAttendance','adjust']){
+ const s=setup();await s.seed('p',2);const day=s.load('model').seoulDay();
+ await s.service.recordAttendance({studentId:'p',day,status:'present',units:2},'owner');
+ const a=s.records.get('opsAccounts/p'),old=s.records.get(`opsAttendance/p_${day}`),id=a.openInvoiceId;
+ if(action==='recordAttendance'){
+  const response=await s.service.recordAttendance({studentId:'p',day,status:'cancelled',units:0,expectedUpdatedAt:old.updatedAt},'owner');
+  assert.deepEqual(response.invoices[0].reviewReason,{kind:'attendance_cancelled',day,beforeRemaining:0,afterRemaining:2});
+ }else await s.service.adjust({attendanceId:`p_${day}`,units:0},'owner');
+ const i=s.records.get(`opsInvoices/${id}`);assert.equal(i.reviewReason.day,day);assert.equal(i.reviewReason.beforeRemaining,0);assert.equal(i.reviewReason.afterRemaining,2);
+ assert.match(s.load('invoice-review').invoiceReviewMessage(i),action==='recordAttendance'?/출석이 취소/:/차감 횟수가 변경/);
+ }
+});
+test('review choices reject stale details and cancelling a reviewed invoice cancels its held notice without touching lessons',async()=>{
+ const s=setup();await s.seed('p',0);await s.service.createInvoice('p','owner');
+ const a=s.records.get('opsAccounts/p'),id=a.openInvoiceId;
+ await s.service.correctRemaining({studentId:'p',requestId:'review-1',remaining:2,expectedRemaining:0,expectedUpdatedAt:a.updatedAt},'owner');
+ const {invoiceReviewRevision}=s.load('invoice-review'),old=invoiceReviewRevision(s.records.get(`opsInvoices/${id}`)),owner=s.records.get('opsAccounts/p');
+ await s.service.correctRemaining({studentId:'p',requestId:'review-2',remaining:3,expectedRemaining:2,expectedUpdatedAt:owner.updatedAt},'owner');
+ for(const action of ['confirmInvoice','cancelInvoice'])await assert.rejects(s.service.invoiceAction({action,invoiceId:id,expectedReviewRevision:old},'owner'),/변경/);
+ assert.equal(s.records.get(`opsInvoices/${id}`).needsReview,true);
+ s.records.set(`opsNotices/billing_${id}`,{status:'review'});
+ await s.service.invoiceAction({action:'cancelInvoice',invoiceId:id,expectedReviewRevision:invoiceReviewRevision(s.records.get(`opsInvoices/${id}`))},'owner');
+ assert.equal(s.records.get(`opsInvoices/${id}`).status,'cancelled');assert.equal(s.records.get(`opsNotices/billing_${id}`).status,'cancelled');
+ assert.equal(s.records.get('opsAccounts/p').remaining,3);assert.equal(s.records.get('opsAccounts/p').openInvoiceId,null);
+ assert.equal([...s.records.keys()].some(k=>k.startsWith('opsPayments/')),false);
+});
+test('legacy review has an honest fallback and partial receipts cannot be discarded through review',async()=>{
+ const s=setup();await s.seed('p',0);await s.service.createInvoice('p','owner');const id=s.records.get('opsAccounts/p').openInvoiceId;
+ const i=s.records.get(`opsInvoices/${id}`);Object.assign(i,{needsReview:true,paid:10000});
+ assert.equal(s.load('invoice-review').invoiceReviewMessage(i),'기존 청구 내용을 다시 확인해주세요.');
+ const before=structuredClone([...s.records]);
+ await assert.rejects(s.service.invoiceAction({action:'cancelInvoice',invoiceId:id,expectedReviewRevision:s.load('invoice-review').invoiceReviewRevision(i)},'owner'),/수납된 청구/);
+ assert.deepEqual([...s.records],before);
+});
+test('review invoices stay visible after a balance increase until the owner chooses, without showing paid or inactive courses',()=>{
+ const s=setup(),{finalLessonInvoices}=s.load('upcoming-billing');
+ const data={accounts:[{id:'p',active:true,planUnits:8,remaining:6}],students:[{id:'p'}],attendance:[],legacyAttendance:[]};
+ const i={id:'review',studentId:'p',status:'open',needsReview:true,units:8,amount:160000,paid:0,createdAt:'2026-10-01T00:00:00Z'};
+ assert.equal(finalLessonInvoices(data,[i],'2026-10-29').length,1);
+ assert.equal(finalLessonInvoices(data,[{...i,needsReview:false}],'2026-10-29').length,0);
+ assert.equal(finalLessonInvoices(data,[{...i,status:'paid'}],'2026-10-29').length,0);
+ assert.equal(finalLessonInvoices({...data,accounts:[{...data.accounts[0],active:false}]},[i],'2026-10-29').length,0);
+});
+test('note-only attendance edits do not create a misleading invoice review',async()=>{
+ const s=setup();await s.seed('p',3);const day=s.load('model').seoulDay();
+ await s.service.recordAttendance({studentId:'p',day,status:'present',units:1},'owner');await s.service.createInvoice('p','owner');
+ const id=s.records.get('opsAccounts/p').openInvoiceId;
+ await s.service.adjust({attendanceId:`p_${day}`,units:1,note:'비고만 수정'},'owner');
+ assert.equal(s.records.get(`opsInvoices/${id}`).needsReview,false);assert.equal(s.records.get(`opsInvoices/${id}`).reviewReason,undefined);
+});
