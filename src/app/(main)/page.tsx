@@ -1,35 +1,36 @@
 import Link from "next/link";
 import Image from "next/image";
 import { Button } from "@/components/ui/button";
-import { ArrowRight, Music, Star, Users } from "lucide-react";
+import { ArrowUpRight, Music, Star, Users } from "lucide-react";
+import styles from "./home.module.css";
 
 export default function Home() {
   return (
     <div className="flex flex-col">
       {/* Hero Section */}
-      <section className="relative flex min-h-[80vh] flex-col items-center justify-center overflow-hidden px-4 py-24 text-center md:px-8">
-        <Image
-          src="/hero-bg.png"
-          alt="Music Academy Interior"
-          fill
-          className="object-cover -z-20"
-          priority
-        />
-        <div className="absolute inset-0 -z-10 bg-black/40"></div>
-        <h1 className="mb-6 text-4xl font-extrabold tracking-tight sm:text-6xl md:text-7xl text-white">
-          당신의 <span className="text-secondary">음악 여정</span>을<br className="md:hidden" /> 시작하세요
-        </h1>
-        <p className="mb-8 max-w-2xl text-lg text-white/90 sm:text-xl">
-          위뮤직 아카데미는 모든 연령대를 위한 전문 음악 교육을 제공합니다.
-          최고의 강사진과 함께 여러분의 재능을 발견해보세요.
-        </p>
-        <div className="flex flex-col gap-4 sm:flex-row">
-          <Button size="lg" className="rounded-full text-lg">
-            상담 신청하기 <ArrowRight className="ml-2 h-4 w-4" />
-          </Button>
-          <Button variant="outline" size="lg" className="rounded-full text-lg">
-            수업 과정 보기
-          </Button>
+      <section className={styles.hero} aria-labelledby="hero-title">
+        <div className={styles.heroMain}>
+          <div className={styles.copy}>
+            <h1 id="hero-title" className={styles.title}>
+              <span>음악이 시작되는 곳,</span>
+              <span>내가 달라지는 시간.</span>
+            </h1>
+            <p className={styles.subtitle}>위뮤직 아카데미에서 시작하세요.</p>
+            <div className={styles.actions}>
+              <Link href="#contact" className={styles.primaryLink}>상담 신청하기</Link>
+              <Link href="#classes" className={styles.secondaryLink}>
+                수업 과정 보기 <ArrowUpRight size={20} aria-hidden="true" />
+              </Link>
+            </div>
+          </div>
+          <div className={styles.art} aria-hidden="true">
+            <Image src="/whee-wave.png" alt="" width={1586} height={992}
+              sizes="(max-width: 767px) 90vw, 46vw" priority className={styles.wave} />
+          </div>
+        </div>
+        <div id="classes" className={styles.subjects} aria-label="주요 수업 과목">
+          <span lang="en">PIANO</span><span lang="en">GUITAR</span>
+          <span lang="en">DRUMS</span><span lang="en">VOCAL</span>
         </div>
       </section>
 
@@ -61,7 +62,7 @@ export default function Home() {
       </section>
 
       {/* Call to Action */}
-      <section className="bg-primary py-24 text-primary-foreground">
+      <section id="contact" className="bg-primary py-24 text-primary-foreground">
         <div className="container mx-auto px-4 text-center sm:px-8">
           <h2 className="mb-4 text-3xl font-bold sm:text-4xl text-white">연주할 준비 되셨나요?</h2>
           <p className="mb-8 text-white/80">
