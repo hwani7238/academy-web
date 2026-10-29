@@ -34,3 +34,17 @@ You can check out [the Next.js GitHub repository](https://github.com/vercel/next
 The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
 
 Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+
+### Piano teacher attendance
+
+`/teacher/attendance` supports actual arrival time correction and silent teacher
+check-in. Its same-origin API relays Firebase-authenticated requests to
+`https://manage.wheemusic.com/api/teacher/attendance`; deploy that management
+endpoint before this frontend. The backend owns authorization, course scope,
+transactional lesson deductions and notice suppression. The client only receives
+student names, piano classes and attendance metadata. See
+`tests/teacher-attendance.test.mjs` for the relay/privacy contract.
+
+Silent check-in must precede a delayed keypad check-in to prevent its notification.
+A notification already submitted or delivered cannot be recalled. Weekly lesson
+schedules are not changed by recording an actual arrival.
