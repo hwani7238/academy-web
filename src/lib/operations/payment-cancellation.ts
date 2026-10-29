@@ -9,6 +9,6 @@ export function paymentCancellation(payment:Payment,invoice:Invoice,account:Acco
  integer(payment.amount,1,100000000,'수납 금액');
  integer(invoice.paid,payment.amount,invoice.amount,'누적 수납 금액');
  if((invoice.status==='paid')!==(invoice.paid===invoice.amount))throw Error('청구의 수납 상태를 먼저 확인해주세요.');
- const revertedUnits=invoice.status==='paid'?integer(invoice.creditUnits??invoice.units,0,200,'추가된 횟수'):0;
+ const revertedUnits=invoice.passId?0:invoice.status==='paid'?integer(invoice.creditUnits??invoice.units,0,200,'추가된 횟수'):0;
  return {paid:invoice.paid-payment.amount,revertedUnits,remaining:account.remaining-revertedUnits};
 }

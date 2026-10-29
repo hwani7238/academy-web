@@ -134,3 +134,13 @@ student presses the keypad.
 Validation: operations, teacher endpoint, management host routing tests, public
 relay tests, and TypeScript checks. Live smoke tests must remain read-only; do not
 create real student attendance just to test deployment.
+
+## Stable pass allocation and receipt linking (2026-10-29)
+
+- An invoice's stable `passId` identifies one student/course pass. Attendance and receipts reference that ID. Changing a displayed first-day date does not create a new pass.
+- New passes are `pending` until their first charged regular lesson, or an explicit owner-confirmed start. `allocatedUnits` records the one-time grant. Existing balances marked "already reflected" are not regranted. Reserved makeup does not activate a new regular pass.
+- Receipt creation, partial receipt, cancellation and repayment change money only for linked passes. The server enforces request IDs, revision checks and unique course/first-day links in transactions. Receipt cancellation is a bookkeeping correction, not a payment-provider refund.
+- Legacy records retain their existing balances. `legacyCreditUnits` preserves historical audit interpretation. Unlinked paid receipts and uncertain old allocations appear under "수강권 연결 확인"; attendance remains possible while duplicate billing is blocked until the owner links the record.
+- Deploy the management branch first. Run `scripts/reconcile-pass-links.cjs` without arguments for a dry run, then with `--apply` for authorized metadata migration. It uses an existing Firebase CLI login via `FIREBASE_CLI_ROOT`, saves private backups, uses update-time preconditions, and does not change balances or financial amounts. Re-run the dry run to confirm idempotence. Keep backups outside Git.
+- Kim Ji-yoon's separately authorized reconciliation cancelled the duplicate receipt record, linked the retained receipt to the October 28 pass and restored 7 remaining lessons. It did not send a parent notice or issue a real refund.
+- Validation includes simultaneous clicks, partial/prepayment, receipt cancellation and repayment, legacy ambiguity, reserved makeup, moved first-day identity, preview parity, and mobile dialog overflow checks. Production smoke checks are read-only.

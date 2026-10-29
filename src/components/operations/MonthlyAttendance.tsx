@@ -7,7 +7,7 @@ import { ScheduleSummary } from './ScheduleSummary';
 import { ScheduleDialog, MoveLessonDialog } from './ScheduleDialog';
 import { plannedLesson, scheduleLabel } from '@/lib/operations/schedule';
 import { AttendanceRangeDialog, type RangeSelection } from './AttendanceRangeDialog';
-import { monthlyPaymentDue, unpaidForecastFirstLessons, legacyAttendanceAppearance, isUnpaidAttendance, unpaidAttendanceCycles, lessonCycleStart, confirmedFirstLessons, isFirstLesson, importedAttendanceAppearance, paidFirstLesson } from '@/lib/operations/attendance-appearance';
+import { monthlyPaymentDue, unpaidForecastFirstLessons, legacyAttendanceAppearance, isUnpaidAttendance, unpaidAttendanceCycles, lessonCycleStart, confirmedPassLessons, isFirstLesson, importedAttendanceAppearance, paidFirstLesson } from '@/lib/operations/attendance-appearance';
 import { attendanceForecastSequence } from '@/lib/operations/attendance-forecast';
 import { CloseButton } from './CloseButton';
 import { enrollmentState } from '@/lib/operations/lifecycle';
@@ -69,7 +69,7 @@ export function MonthlyAttendance({ data, day, busy, loading, onDayChange, save 
   const sequence = sequenceState.labels;
   const references = useMemo(() => new Map((data.sequenceContext?.references || []).filter(r=>r.day.startsWith(month+'-')).map(r=>[`${r.studentId}_${r.day}`,r])), [data.sequenceContext,month]);
   const displayLegacy = useMemo(() => new Map([...legacy].map(([key,row])=>[key, sequence.has(key) ? {...row,value:sequence.get(key)!} : row])), [legacy,sequence]);
-  const confirmedFirst = useMemo(() => confirmedFirstLessons([...data.invoices, ...(data.settledInvoices || [])], sequenceState.cycleFirstDays, sequenceState.firstLessonTimes), [data.invoices, data.settledInvoices, sequenceState.cycleFirstDays, sequenceState.firstLessonTimes]);
+  const confirmedFirst = useMemo(() => confirmedPassLessons([...data.invoices, ...(data.settledInvoices || [])],data.attendance, sequenceState.cycleFirstDays, sequenceState.firstLessonTimes,sequence), [data.invoices, data.settledInvoices,data.attendance,sequence, sequenceState.cycleFirstDays, sequenceState.firstLessonTimes]);
   const unpaidCycles = useMemo(() => unpaidAttendanceCycles(data.attendance, confirmedFirst, data.unpaidCycleKeys), [data.attendance, confirmedFirst, data.unpaidCycleKeys]);
   const missedDates = selected ? Object.entries(sequenceState.missedLessons)
     .filter(([key]) => key.startsWith(`${selected.studentId}_`) && key.slice(-10) !== selected.day && !data.attendance.some(r=>r.studentId===selected.studentId && r.day!==selected.day && r.relatedDay===key.slice(-10) && ['makeup','makeup_reserved'].includes(r.status||'')))

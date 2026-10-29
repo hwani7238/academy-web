@@ -19,7 +19,7 @@ export function registrationInput(input: Record<string, unknown>) {
 
 // Initial lessons are allocated at registration, so receiving payment must not add them again.
 export function firstEnrollmentInvoice(account: Account, firstLessonDate: string, createdAt: string): Invoice {
-  return { id: `first_${account.id}`, studentId: account.id, name: account.name,
+  return { id: `first_${account.id}`, passId:`first_${account.id}`,allocationState:'allocated',allocatedUnits:account.planUnits,allocationAt:createdAt, studentId: account.id, name: account.name,
     units: account.planUnits, amount: account.planAmount, paid: 0, status: 'open', needsReview: false,
     createdAt, cycleStart: validDay(firstLessonDate), creditUnits: 0 };
 }

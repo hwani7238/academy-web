@@ -1,3 +1,4 @@
+import {passInvoice,allocatedPass,lessonPass,nextRecordedCycle,paymentPass} from '@/lib/operations/pass-link';
 import {paymentCancellation} from '@/lib/operations/payment-cancellation';
 import {monthlyInvoice} from '@/lib/operations/monthly-payment';
 import {nextPassInput,nextPassDue,activateNextPass} from '@/lib/operations/next-pass';
@@ -45,16 +46,22 @@ export function demoAction(current: Snapshot, input: Record<string, unknown>): {
   const account = data.accounts.find(a => a.id === input.studentId);
   const enqueue = (a: Account, id: string, kind: 'attendance' | 'billing') => data.notices.unshift({ id, studentId: a.id, name: a.name, kind, status: 'demo', createdAt: at });
   const invoice = (a: Account) => {
-    if (a.openInvoiceId || a.nextPass) return;
+    if (a.openInvoiceId || a.nextPass || [...data.invoices,...(data.settledInvoices||[])].some(i=>i.studentId===a.id&&i.status!=='cancelled'&&i.allocationState==='pending')) return;
     const id = crypto.randomUUID(); a.openInvoiceId = id;
-    data.invoices.push({ id, studentId: a.id, name: a.name, units: a.planUnits, amount: a.planAmount, paid: 0, status: 'open', needsReview: false, createdAt: at });
+    data.invoices.push({ id, studentId: a.id, name: a.name, units: a.planUnits, amount: a.planAmount, paid: 0, status: 'open', needsReview: false, createdAt: at,passId:id,creditUnits:0,allocationState:'pending',allocatedUnits:0 });
     if (a.autoBilling) enqueue(a, `billing_${id}`, 'billing');
   };
   const activate=(a:Account,day:string,status:string,previousStatus?:string)=>{
     if(!nextPassDue(a,day,status,previousStatus))return;
     const i=[...data.invoices,...(data.settledInvoices||[])].find(i=>i.id===a.nextPass!.invoiceId)!;
-    Object.assign(a,activateNextPass(a,i,day,at));Object.assign(i,{reservedPass:false,cycleStart:day,lessonDate:day,updatedAt:at});
+    Object.assign(a,activateNextPass(a,i,day,at));Object.assign(i,passInvoice(i,true,at),{reservedPass:false,cycleStart:day,lessonDate:day,updatedAt:at});
     data.sequenceContext={...data.sequenceContext,positions:data.sequenceContext?.positions||{},cycleStarts:[...(data.sequenceContext?.cycleStarts||[]),{studentId:a.id,day}]};
+  };
+  const allocate=(a:Account,day:string,units:number,old:Snapshot['attendance'][number]|undefined,status:string)=>{
+    const rows=[...data.invoices,...(data.settledInvoices||[])].filter(i=>i.studentId===a.id);
+    const next={studentId:a.id,day,units,status} as Snapshot['attendance'][number];
+    const change=lessonPass(a,rows,day,status==='makeup'?0:units,old,at,crypto.randomUUID(),nextRecordedCycle(a,data.attendance.filter(r=>r.studentId===a.id),next));
+    Object.assign(a,change.account);if(change.invoice){const existing=rows.find(i=>i.id===change.invoice!.id);if(existing)Object.assign(existing,change.invoice);else data.invoices.push(change.invoice);}return change.passId;
   };
   let result: Record<string, unknown> = { ok: true };
   if(input.action==='correctLegacyAttendance'){
@@ -66,7 +73,7 @@ export function demoAction(current: Snapshot, input: Record<string, unknown>): {
     if(!account)throw Error('수강 정보를 확인해주세요.');
     const day=String(input.lessonDate);const existing=[...data.invoices,...(data.settledInvoices||[])].find(i=>i.studentId===account.id&&(i.lessonDate||i.cycleStart)===day&&i.status!=='cancelled');
     if(existing)result.invoice=existing;
-    else{if(account.updatedAt!==input.expectedUpdatedAt)throw Error('수강 정보가 변경됐습니다.');const id=`upcoming_${account.id}_${day}`;const i={id,studentId:account.id,name:account.name,units:account.planUnits,amount:account.planAmount,paid:0,status:'open' as const,needsReview:false,createdAt:at,lessonDate:day};data.invoices.push(i);account.openInvoiceId||=id;account.updatedAt=at;result.invoice=i;}
+    else{if(account.updatedAt!==input.expectedUpdatedAt)throw Error('수강 정보가 변경됐습니다.');const id=`upcoming_${account.id}_${day}`;const i={passId:id,creditUnits:0,allocationState:'pending' as const,allocatedUnits:0,id,studentId:account.id,name:account.name,units:account.planUnits,amount:account.planAmount,paid:0,status:'open' as const,needsReview:false,createdAt:at,lessonDate:day};data.invoices.push(i);account.openInvoiceId||=id;account.updatedAt=at;result.invoice=i;}
   } else if(input.action==='saveNextPass'){
     if(!account||account.updatedAt!==input.expectedUpdatedAt)throw Error('수강 정보가 변경됐습니다. 다시 확인해주세요.');
     const old=[...data.invoices,...(data.settledInvoices||[])].find(i=>i.id===account.nextPass?.invoiceId);
@@ -75,7 +82,7 @@ export function demoAction(current: Snapshot, input: Record<string, unknown>): {
     else{
       const next=nextPassInput(input,old?.id||crypto.randomUUID());
       data.invoices=data.invoices.filter(i=>i.id!==next.invoiceId);
-      data.invoices.push({id:next.invoiceId,studentId:account.id,name:account.name,units:next.units,amount:next.amount,paid:0,status:'open',needsReview:false,createdAt:at,updatedAt:at,reservedPass:true,creditUnits:0,lessonDate:next.start});
+      data.invoices.push({id:next.invoiceId,studentId:account.id,name:account.name,units:next.units,amount:next.amount,paid:0,status:'open',needsReview:false,createdAt:at,updatedAt:at,reservedPass:true,passId:next.invoiceId,allocationState:'pending',allocatedUnits:0,creditUnits:0,lessonDate:next.start});
       account.nextPass=next;
     }
     account.updatedAt=at;
@@ -161,10 +168,11 @@ export function demoAction(current: Snapshot, input: Record<string, unknown>): {
       if(values.status==='makeup'&&(source?.units||0)>0)values.units=0;
     }
     activate(account,values.day,values.status,old?.status||(old?'present':undefined));
+    const passId=allocate(account,values.day,values.units,old,values.status);
     account.remaining = adjustBalance(account.remaining, old?.units || 0, values.units);
     account.updatedAt=at;
     data.attendance = data.attendance.filter(a => a.id !== id);
-    data.attendance.push({ ...old, ...values, id, studentId: account.id, name: account.name, at: old?.at || at, source: old?.source || 'manual', updatedAt: at });
+    data.attendance.push({ ...old, ...values,...(passId?{passId}:{}), id, studentId: account.id, name: account.name, at: old?.at || at, source: old?.source || 'manual', updatedAt: at });
     delete data.attendance[data.attendance.length-1].range;
     if (account.remaining <= 0 && values.units > (old?.units || 0)) invoice(account);
     if (account.remaining > 0 && values.units < (old?.units || 0)) { const open = data.invoices.find(i => i.id === account.openInvoiceId); if (open) open.needsReview = true; }
@@ -180,10 +188,11 @@ export function demoAction(current: Snapshot, input: Record<string, unknown>): {
     if(reservation&&!['absent','travel','sick','late_cancel'].includes(original?.status||(imported?legacyAttendanceAppearance(imported).tone:'')))throw Error('원래 날짜의 결석·여행 기록을 확인해주세요.');
     const units=(original?.units||0)>0?0:1;
     activate(account,seoulDay(),reservation?'makeup':'present');
+    const passId=allocate(account,seoulDay(),units,existing,reservation?'makeup':'present');
     account.remaining = adjustBalance(account.remaining, 0, units);
     account.updatedAt=at;
     data.attendance=data.attendance.filter(r=>r.id!==id);
-    data.attendance.unshift({ id, studentId: account.id, name: account.name, day: seoulDay(), at, units, status: reservation?'makeup':'present', source: 'kiosk', note: reservation?.note||'', ...(reservation?{relatedDay:reservation.relatedDay}:{}), updatedAt: at });
+    data.attendance.unshift({ ...(passId?{passId}:{}),id, studentId: account.id, name: account.name, day: seoulDay(), at, units, status: reservation?'makeup':'present', source: 'kiosk', note: reservation?.note||'', ...(reservation?{relatedDay:reservation.relatedDay}:{}), updatedAt: at });
     if(!data.notices.some(n=>n.id===`attendance_${id}`))enqueue(account, `attendance_${id}`, 'attendance'); if (account.remaining <= 0 && units>0) invoice(account);
     result = { name: checkInName(account, {}), duplicate: false };
   } else if (input.action === 'configure') {
@@ -207,13 +216,14 @@ export function demoAction(current: Snapshot, input: Record<string, unknown>): {
     account.openInvoiceId=id;
     data.sequenceContext ||= {positions:{},cycleStarts:[]};
     if(cycleStart)data.sequenceContext.cycleStarts.push({studentId:account.id,day:cycleStart});
-    data.invoices.push({id,studentId:account.id,name:account.name,units:account.planUnits,amount:account.planAmount,paid:0,status:'open',needsReview:false,createdAt:at,creditUnits:0,...(cycleStart?{cycleStart}:{})});
+    data.invoices.push({id,studentId:account.id,name:account.name,units:account.planUnits,amount:account.planAmount,paid:0,status:'open',needsReview:false,createdAt:at,passId:id,allocationState:'allocated',allocatedUnits:account.planUnits,creditUnits:0,...(cycleStart?{cycleStart}:{})});
   } else if (input.action === 'linkInvoiceLesson') {
-    const invoice=data.invoices.find(i=>i.id===input.invoiceId),lessonDate=validDay(input.lessonDate);
-    if(!invoice||invoice.status!=='open')throw Error('진행 중인 청구를 확인해주세요.');
+    const invoice=[...data.invoices,...(data.settledInvoices||[])].find(i=>i.id===input.invoiceId),lessonDate=validDay(input.lessonDate);
+    if(!invoice||invoice.status==='cancelled')throw Error('진행 중인 청구를 확인해주세요.');
     if((invoice.updatedAt||'')!==(input.expectedUpdatedAt||''))throw Error('청구 내용이 변경됐습니다.');
     if([...data.invoices,...(data.settledInvoices||[])].some(i=>i.id!==invoice.id&&i.studentId===invoice.studentId&&i.status!=='cancelled'&&(i.lessonDate||i.cycleStart)===lessonDate))throw Error('이 1회차 날짜에 연결된 다른 청구가 있습니다.');
-    invoice.lessonDate=lessonDate;invoice.updatedAt=at;
+    if(!invoice.passId){const a=data.accounts.find(a=>a.id===invoice.studentId)!;Object.assign(invoice,passInvoice(invoice,invoice.status==='paid'||invoice.creditUnits===0||input.allocation==='already',at));if(input.allocation==='activate'){const change=allocatedPass(a,invoice,lessonDate,at);Object.assign(a,change.account);Object.assign(invoice,change.invoice);}}
+    invoice.lessonDate=lessonDate;invoice.linkReview=false;invoice.updatedAt=at;
   } else if (input.action === 'invoice') { if (!account) throw new Error('수강 설정을 저장해주세요.'); if (account.openInvoiceId) throw new Error('진행 중인 청구가 있습니다.'); invoice(account); }
   else if (input.action === 'adjust') {
     const attendance = data.attendance.find(a => a.id === input.attendanceId)!;
@@ -227,15 +237,16 @@ export function demoAction(current: Snapshot, input: Record<string, unknown>): {
     if(existing){if(existing.cancelledAt)throw Error('취소된 수납 요청입니다. 새로 수납해주세요.');return {data,result};}
     const rows=[...data.invoices,...(data.settledInvoices||[])];let i=rows.find(i=>i.id===id);
     if(i&&i.studentId!==account.id)throw Error('다른 과목의 청구입니다.');
-    if(rows.some(i=>i.id!==id&&i.status!=='cancelled'&&(i.lessonDate||i.cycleStart)===day))throw Error('이 날짜의 다른 청구가 있습니다.');
-    if(input.linkOnly){if(!i||i.status!=='paid')throw Error('수납 완료된 내역을 확인해주세요.');i.lessonDate=day;i.updatedAt=at;}
+    if(rows.some(i=>i.studentId===account.id&&i.id!==id&&i.status!=='cancelled'&&(i.lessonDate||i.cycleStart)===day))throw Error('이 날짜의 다른 청구가 있습니다.');
+    if(input.linkOnly){if(!i||i.status!=='paid')throw Error('수납 완료된 내역을 확인해주세요.');Object.assign(i,passInvoice(i,true,at),{lessonDate:day,linkReview:false,updatedAt:at});}
     else{
       if(account.updatedAt!==input.expectedUpdatedAt)throw Error('수강 정보가 변경됐습니다.');
-      if(!i){i=monthlyInvoice(account,id,day,input,at);data.invoices.push(i);}
+      if(!i){i=passInvoice(monthlyInvoice(account,id,day,input,at),input.passAllocation==='already',at);if(input.passAllocation==='activate'){const change=allocatedPass(account,i,day,at);Object.assign(account,change.account);i=change.invoice;}data.invoices.push(i);}
+      Object.assign(i,paymentPass(i,day,rows.filter(r=>r.studentId===account.id),at));
       const paymentDate=paymentDateInput(input.paymentDate),paid=settle(i,Number(input.amount));
       Object.assign(i,{lessonDate:day,paid:paid.paid,status:paid.complete?'paid':'open',updatedAt:at});
-      if(paid.complete){account.remaining+=i.creditUnits??i.units;if(account.openInvoiceId===id)account.openInvoiceId=null;}else account.openInvoiceId||=id;
-      account.updatedAt=at;data.payments.unshift({id:String(input.requestId),invoiceId:id,studentId:account.id,amount:Number(input.amount),method:String(input.method),paymentDate,at,note:String(input.note||'')});
+      if(paid.complete){if(account.openInvoiceId===id)account.openInvoiceId=null;}else account.openInvoiceId||=id;
+      account.updatedAt=at;data.payments.unshift({id:String(input.requestId),invoiceId:id,passId:i.passId,studentId:account.id,amount:Number(input.amount),method:String(input.method),paymentDate,at,note:String(input.note||'')});
     }
   } else if(input.action==='cancelPayment'){
     const p=data.payments.find(p=>p.id===input.paymentId);if(!p)throw Error('수납 기록을 찾을 수 없습니다.');
@@ -253,10 +264,10 @@ export function demoAction(current: Snapshot, input: Record<string, unknown>): {
     const paymentDate = paymentDateInput(input.paymentDate);
     const existing = data.payments.find(p => p.id === input.requestId);
     if (existing) { if(existing.cancelledAt)throw Error('취소된 수납 요청입니다. 새로 수납해주세요.'); if(existing.invoiceId!==input.invoiceId || existing.amount!==Number(input.amount) || existing.method!==input.method || (input.paymentDate!==undefined && existing.paymentDate!==paymentDate))throw Error('중복 요청 내용이 다릅니다.');return { data, result }; }
-    const i = data.invoices.find(i => i.id === input.invoiceId)!; const s = settle(i, Number(input.amount));
+    const i = data.invoices.find(i => i.id === input.invoiceId)!; Object.assign(i,paymentPass(i,i.lessonDate||i.cycleStart||'',data.invoices.filter(r=>r.studentId===i.studentId),at));const s = settle(i, Number(input.amount));
     i.paid = s.paid;
-    if (s.complete) { i.status = 'paid'; const a = data.accounts.find(a => a.id === i.studentId)!; a.remaining += i.creditUnits ?? i.units; a.openInvoiceId = a.openInvoiceId===i.id?null:a.openInvoiceId; a.updatedAt=at; }
-    data.payments.unshift({ id: String(input.requestId), invoiceId: i.id, studentId: i.studentId, amount: Number(input.amount), method: String(input.method), paymentDate, at, note: String(input.note || '') });
+    if (s.complete) { i.status = 'paid'; const a = data.accounts.find(a => a.id === i.studentId)!; a.openInvoiceId = a.openInvoiceId===i.id?null:a.openInvoiceId; a.updatedAt=at; }
+    data.payments.unshift({ id: String(input.requestId), invoiceId: i.id,passId:i.passId, studentId: i.studentId, amount: Number(input.amount), method: String(input.method), paymentDate, at, note: String(input.note || '') });
   } else if (['sendInvoice', 'cancelInvoice', 'confirmInvoice'].includes(String(input.action))) {
     const i = data.invoices.find(i => i.id === input.invoiceId)!;
     if (input.action === 'confirmInvoice') i.needsReview = false;

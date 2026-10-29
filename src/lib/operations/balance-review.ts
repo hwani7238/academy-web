@@ -4,10 +4,10 @@ export type BalanceAudit = {id:string;studentId?:string;action:string;at:string;
 type Cell={day:string;value:string;color:string};
 export type BalanceSource={id:string;asOf:string;attendanceAsOf?:string;attendanceRevision?:number;attendanceCutoffs?:Record<string,string>;remainingCandidate:number;planUnits:number;openingHistory?:{cells?:Cell[]}[];history?:{cells?:Cell[]}[]};
 export type BalanceReview={id:string;name:string;group:string;current:number;expected:number|null;ledger:number|null;status:'correct'|'verified'|'confirmed'|'review';reason:string;missingDays:string[];fingerprint:string;updatedAt:string;evidence:{planUnits:number;openingSnapshot:Cell[];invoices:Pick<Invoice,'id'|'units'|'creditUnits'|'cycleStart'|'status'>[];openingDay:string;openingRemaining:number|null;lastCorrection:string;lastOrdinal:string;events:{at:string;action:string;detail:Record<string,unknown>}[];legacy:Cell[];attendance:Pick<Attendance,'day'|'status'|'units'>[]}};
-const ignored=new Set(['activate-next-pass','reserve-next-pass','cancel-next-pass','pass-history','delete-enrollment','restore-enrollment','invoice','cancelInvoice','confirmInvoice','sendInvoice','correct-attendance-time','attendance-range','course-lifecycle','lifecycle','lesson-schedule','move-lesson','manage-course','notice-config-retry','current-cycle-invoice','invoice-lesson-date','configure-invoice']);
+const ignored=new Set(['pass-link-migration','teacher-correct-arrival-time','teacher-confirm-existing-arrival','activate-next-pass','reserve-next-pass','cancel-next-pass','pass-history','delete-enrollment','restore-enrollment','invoice','cancelInvoice','confirmInvoice','sendInvoice','correct-attendance-time','attendance-range','course-lifecycle','lifecycle','lesson-schedule','move-lesson','manage-course','notice-config-retry','current-cycle-invoice','invoice-lesson-date','configure-invoice']);
 const gray=new Set(['FFCCCCCC','FFD9D9D9','FFB7B7B7']);
 export function reviewBalance(account:Account,source:BalanceSource|undefined,audits:BalanceAudit[],attendance:Attendance[],invoices:Invoice[]):BalanceReview{
- const events=audits.filter(a=>a.studentId===account.id).sort((a,b)=>a.at.localeCompare(b.at)||a.id.localeCompare(b.id));
+ const events=audits.filter(a=>a.studentId===account.id).sort((a,b)=>a.at.localeCompare(b.at)||(a.action==='allocate-pass'?-1:b.action==='allocate-pass'?1:0)||a.id.localeCompare(b.id));
  const corrections=events.filter(a=>a.action==='correct-remaining');
  const correction=corrections.at(-1);
  const baseline=correction || events.find(a=>['import-opening-balance','register-student','configure'].includes(a.action)&&Number.isSafeInteger(a.detail.remaining));
@@ -24,14 +24,15 @@ export function reviewBalance(account:Account,source:BalanceSource|undefined,aud
  const credited=new Set<string>();
  for(const event of events.slice(events.indexOf(baseline)+1)){
   const d=event.detail;
-  if(event.action==='check-in')ledger+=Number(d.passCreditUnits||0)-Number(d.units);
+  if(event.action==='check-in'||event.action==='teacher-check-in')ledger+=Number(d.passCreditUnits||0)-Number(d.units);
   else if(event.action==='record-attendance')ledger+=Number(d.passCreditUnits||0)-Number(d.units)+Number(d.before);
+  else if(event.action==='allocate-pass')ledger+=Number(d.units);
   else if(event.action==='apply-past-pass')ledger+=Number(d.passCreditUnits);
   else if(event.action==='adjust')ledger-=Number(d.after)-Number(d.before);
   else if(event.action==='payment' && d.complete){
    const invoice=invoices.find(i=>i.id===d.invoiceId&&i.studentId===account.id);
    if(!invoice||credited.has(invoice.id))return stop('수납의 수강 횟수 반영 근거를 확인해주세요.');
-   credited.add(invoice.id);ledger+=invoice.creditUnits??invoice.units;
+   credited.add(invoice.id);ledger+=typeof d.creditedUnits==='number'?d.creditedUnits:(invoice.legacyCreditUnits??invoice.creditUnits??invoice.units);
   }else if(event.action==='cancel-payment'){
    if(!Number.isSafeInteger(d.revertedUnits)||Number(d.revertedUnits)<0)return stop('수납 취소의 횟수 반영 근거를 확인해주세요.');
    ledger-=Number(d.revertedUnits);

@@ -240,11 +240,11 @@ test('new registration creates exactly one first invoice and keeps lessons uncha
  assert.equal([...s.records.keys()].some(k=>k.startsWith('opsPayments/')||k.startsWith('opsNotices/')),false);
  await assert.rejects(s.service.registerStudent({...input,requestId:'other'},'owner'));
  await assert.rejects(s.service.registerStudent({...input,planAmount:190000},'owner'));
- await s.service.payment({invoiceId:invoice.id,requestId:'new-partial',amount:70000,method:'현금'},'owner');
+ await testPayment(s,{invoiceId:invoice.id,requestId:'new-partial',amount:70000,method:'현금'},'owner');
  assert.equal(s.records.get(`opsAccounts/${a.id}`).remaining,8);
  await s.service.checkIn(a.id,'5678','device');assert.equal(s.records.get(`opsAccounts/${a.id}`).remaining,7);
  const payment={invoiceId:invoice.id,requestId:'new-final',amount:100000,method:'카드'};
- await Promise.all([s.service.payment(payment,'owner'),s.service.payment(payment,'owner')]);
+ await Promise.all([testPayment(s,payment,'owner'),testPayment(s,payment,'owner')]);
  assert.equal(s.records.get(`opsAccounts/${a.id}`).remaining,7);assert.equal(s.records.get(`opsAccounts/${a.id}`).openInvoiceId,null);
  assert.equal(s.records.get(`opsInvoices/${invoice.id}`).status,'paid');
  await s.service.registerStudent(input,'owner');
@@ -260,7 +260,7 @@ test('first configuration of an existing student can create a first invoice with
  assert.equal([...s.records.keys()].some(k=>k.startsWith('opsNotices/')),false);
  await s.service.editInvoice({invoiceId:invoice.id,kind:'current',cycleStart:'2999-01-03',units:12,amount:180000},'owner');
  const revised=s.records.get(`opsInvoices/${invoice.id}`);assert.equal(revised.cycleStart,'2999-01-03');assert.equal(revised.creditUnits,0);
- await s.service.payment({invoiceId:invoice.id,requestId:'new-course-paid',amount:180000,method:'현금',expectedInvoiceUpdatedAt:revised.updatedAt},'owner');
+ await testPayment(s,{invoiceId:invoice.id,requestId:'new-course-paid',amount:180000,method:'현금',expectedInvoiceUpdatedAt:revised.updatedAt},'owner');
  assert.equal(s.records.get('opsAccounts/new-course').remaining,12);
  await s.service.configure(input,'owner');
  assert.equal([...s.records.keys()].filter(k=>k.startsWith('opsInvoices/')).length,1);
@@ -292,7 +292,7 @@ test('a missed initial invoice can await its first lesson date without inventing
  const today=s.load('model').seoulDay();
  assert.equal(s.load('billing-display').invoiceCycleStart(invoice,{[account.id]:[today]}),today);
  assert.equal(s.load('billing-display').invoiceCycleStart({...invoice,id:'renewal'},{[account.id]:[today]}),undefined);
- await s.service.payment({invoiceId:invoice.id,requestId:'undated-paid',amount:160000,method:'현금'},'owner');
+ await testPayment(s,{invoiceId:invoice.id,requestId:'undated-paid',amount:160000,method:'현금'},'owner');
  assert.equal(s.records.get('opsAccounts/undated-new').remaining,12);
 });
 test('registration rejects existing legacy students and invalid input before creating records',async()=>{
@@ -490,23 +490,23 @@ test('adjust to two lessons and reverse to zero preserves accounting and flags i
   await s.service.adjust({attendanceId,units:2,note:'연속 수업'},'owner'); assert.equal(s.records.get('opsAccounts/student-a').remaining,-1);
   await s.service.adjust({attendanceId,units:0,note:'출석 취소'},'owner'); assert.equal(s.records.get('opsAccounts/student-a').remaining,1);
   const invoiceId=s.records.get('opsAccounts/student-a').openInvoiceId; assert.equal(s.records.get(`opsInvoices/${invoiceId}`).needsReview,true);
-  await assert.rejects(s.service.payment({invoiceId,requestId:'p1',amount:160000,method:'현금'},'owner'));
+  await assert.rejects(testPayment(s,{invoiceId,requestId:'p1',amount:160000,method:'현금'},'owner'));
 });
-test('partial then concurrent duplicate final payment credits units only once', async () => {
+test('partial then concurrent duplicate final payment leaves a pending pass unallocated', async () => {
   const s=setup(); await s.seed(); await s.service.checkIn('student-a','1234','device');
   const invoiceId=s.records.get('opsAccounts/student-a').openInvoiceId;
-  await s.service.payment({invoiceId,requestId:'part',amount:60000,method:'현금'},'owner'); assert.equal(s.records.get('opsAccounts/student-a').remaining,0);
+  await testPayment(s,{invoiceId,requestId:'part',amount:60000,method:'현금'},'owner'); assert.equal(s.records.get('opsAccounts/student-a').remaining,0);
   const request={invoiceId,requestId:'finish',amount:100000,method:'지역화폐'};
-  await Promise.all([s.service.payment(request,'owner'),s.service.payment(request,'owner')]);
-  assert.equal(s.records.get('opsAccounts/student-a').remaining,8); assert.equal(s.records.get('opsAccounts/student-a').openInvoiceId,null);
+  await Promise.all([testPayment(s,request,'owner'),testPayment(s,request,'owner')]);
+  assert.equal(s.records.get('opsAccounts/student-a').remaining,0); assert.equal(s.records.get('opsAccounts/student-a').openInvoiceId,null);
   assert.equal([...s.records.keys()].filter(k=>k.startsWith('opsPayments/')).length,2);
 });
 test('overpayment and duplicate id with changed amount fail without writes', async () => {
   const s=setup();await s.seed();await s.service.createInvoice('student-a','owner');const invoiceId=s.records.get('opsAccounts/student-a').openInvoiceId;
-  await assert.rejects(s.service.payment({invoiceId,requestId:'bad',amount:170000,method:'카드'},'owner'));
+  await assert.rejects(testPayment(s,{invoiceId,requestId:'bad',amount:170000,method:'카드'},'owner'));
   assert.equal(s.records.has('opsPayments/bad'),false);
-  await s.service.payment({invoiceId,requestId:'same',amount:10000,method:'카드'},'owner');
-  await assert.rejects(s.service.payment({invoiceId,requestId:'same',amount:20000,method:'카드'},'owner'));
+  await testPayment(s,{invoiceId,requestId:'same',amount:10000,method:'카드'},'owner');
+  await assert.rejects(testPayment(s,{invoiceId,requestId:'same',amount:20000,method:'카드'},'owner'));
 });
 test('changing plan synchronizes the linked unpaid invoice without resetting balance', async () => {
   const s=setup();await s.seed();await s.service.createInvoice('student-a','owner'); const invoiceId=s.records.get('opsAccounts/student-a').openInvoiceId;
@@ -517,12 +517,12 @@ test('changing plan synchronizes the linked unpaid invoice without resetting bal
   assert.deepEqual(Object.keys(feeOnly), ['accounts', 'invoices']);
   assert.deepEqual(feeOnly.invoices, [s.records.get(`opsInvoices/${invoiceId}`)]);
   assert.equal(s.records.get('opsAccounts/student-a').remaining,1);
-  const invoice=s.records.get(`opsInvoices/${invoiceId}`);assert.equal(invoice.amount,230000);assert.equal(invoice.units,12);assert.equal(invoice.creditUnits,12);
+  const invoice=s.records.get(`opsInvoices/${invoiceId}`);assert.equal(invoice.amount,230000);assert.equal(invoice.units,12);assert.equal(invoice.creditUnits,0);
 });
-test('prepayment adds units without losing remaining lessons', async () => {
+test('prepayment reserves a pass without changing current remaining lessons', async () => {
   const s=setup();await s.seed('student-a',3);await s.service.createInvoice('student-a','owner');const invoiceId=s.records.get('opsAccounts/student-a').openInvoiceId;
-  await s.service.payment({invoiceId,requestId:'prepay',amount:160000,method:'계좌이체'},'owner');
-  assert.equal(s.records.get('opsAccounts/student-a').remaining,11);
+  await testPayment(s,{invoiceId,requestId:'prepay',amount:160000,method:'계좌이체'},'owner');
+  assert.equal(s.records.get('opsAccounts/student-a').remaining,3);
 });
 test('pairing is one-use and expired code is rejected', async () => {
   const s=setup(); const {code}=await s.service.issuePair('owner');const token=await s.service.pair(code);assert.equal(token.length,64);await assert.rejects(s.service.pair(code));
@@ -531,7 +531,7 @@ test('pairing is one-use and expired code is rejected', async () => {
 test('invoice cancellation clears pending claim; partial payments block cancellation',async()=>{
  const s=setup();await s.seed();await s.service.createInvoice('student-a','owner');const invoiceId=s.records.get('opsAccounts/student-a').openInvoiceId;
  await s.service.invoiceAction({invoiceId,action:'cancelInvoice'},'owner');assert.equal(s.records.get('opsAccounts/student-a').openInvoiceId,null);
- await s.service.createInvoice('student-a','owner');const next=s.records.get('opsAccounts/student-a').openInvoiceId;await s.service.payment({invoiceId:next,requestId:'partial',amount:1000,method:'현금'},'owner');await assert.rejects(s.service.invoiceAction({invoiceId:next,action:'cancelInvoice'},'owner'));
+ await s.service.createInvoice('student-a','owner');const next=s.records.get('opsAccounts/student-a').openInvoiceId;await testPayment(s,{invoiceId:next,requestId:'partial',amount:1000,method:'현금'},'owner');await assert.rejects(s.service.invoiceAction({invoiceId:next,action:'cancelInvoice'},'owner'));
 });
 test('NHN timeout becomes unknown and is never automatically resent',async()=>{
  const s=setup();await s.seed();await s.service.checkIn('student-a','1234','device');
@@ -591,8 +591,8 @@ test('two courses for one student deduct and settle independently',async()=>{
  await s.service.checkIn(piano,'1234','device');await s.service.checkIn(vocal,'1234','device');
  assert.equal(s.records.get(`opsAccounts/${piano}`).remaining,0);assert.equal(s.records.get(`opsAccounts/${vocal}`).remaining,2);
  const invoiceId=s.records.get(`opsAccounts/${piano}`).openInvoiceId;
- await s.service.payment({invoiceId,requestId:'course-payment',amount:160000,method:'현금'},'owner');
- assert.equal(s.records.get(`opsAccounts/${piano}`).remaining,4);assert.equal(s.records.get(`opsAccounts/${vocal}`).remaining,2);
+ await testPayment(s,{invoiceId,requestId:'course-payment',amount:160000,method:'현금'},'owner');
+ assert.equal(s.records.get(`opsAccounts/${piano}`).remaining,0);assert.equal(s.records.get(`opsAccounts/${vocal}`).remaining,2);
  assert.equal([...s.records.keys()].filter(k=>k.startsWith('opsAttendance/')).length,2);
  await assert.rejects(s.service.configure({studentId:piano,sourceStudentId:'person',subject:'보컬',planUnits:4,planAmount:160000,phone:'01000001234',phones:['1234']},'owner'));
 });
@@ -740,10 +740,10 @@ test('current-cycle debt preserves credited lessons through partial and final pa
  assert.equal(inv.creditUnits,0);assert.equal(inv.units,8);assert.equal(inv.cycleStart,input.cycleStart);assert.equal(changes.accounts[0].remaining,6);
  assert.equal([...s.records.keys()].some(k=>k.startsWith('opsNotices/')),false);
  await assert.rejects(s.service.createCurrentCycleInvoice(input,'owner'));
- await s.service.payment({invoiceId:inv.id,requestId:'part',amount:60000,method:'현금'},'owner');
+ await testPayment(s,{invoiceId:inv.id,requestId:'part',amount:60000,method:'현금'},'owner');
  assert.equal(s.records.get('opsAccounts/student-a').remaining,6);
  const final={invoiceId:inv.id,requestId:'final',amount:100000,method:'현금'};
- await s.service.payment(final,'owner');await s.service.payment(final,'owner');
+ await testPayment(s,final,'owner');await testPayment(s,final,'owner');
  assert.equal(s.records.get('opsAccounts/student-a').remaining,6);assert.equal(s.records.get('opsAccounts/student-a').openInvoiceId,null);
  await assert.rejects(s.service.createCurrentCycleInvoice(input,'owner'));
 });
@@ -1019,9 +1019,9 @@ test('unpaid invoice can change from 170000/8 to 230000/12 without duplicating a
  assert.deepEqual(s.records.get('opsAccounts/student-a'),before);
  assert.equal([...s.records.keys()].filter(k=>k.startsWith('opsPayments/')||k.startsWith('opsNotices/')).length,0);
  const audit=[...s.records.values()].find(v=>v.action==='edit-invoice');assert.equal(audit.detail.before.amount,170000);assert.equal(audit.detail.after.amount,230000);
- await assert.rejects(s.service.payment({invoiceId:id,requestId:'stale',amount:170000,method:'카드'},'owner'),/청구 내용이 변경/);
+ await assert.rejects(testPayment(s,{invoiceId:id,requestId:'stale',expectedInvoiceUpdatedAt:'',amount:170000,method:'카드'},'owner'),/청구 내용이 변경/);
  const payment={invoiceId:id,requestId:'new-payment',amount:230000,method:'카드',expectedInvoiceUpdatedAt:invoice.updatedAt};
- await s.service.payment(payment,'owner');await s.service.payment(payment,'owner');
+ await testPayment(s,payment,'owner');await testPayment(s,payment,'owner');
  assert.equal(s.records.get('opsAccounts/student-a').remaining,11);
  assert.equal(s.records.get(`opsInvoices/${id}`).status,'paid');
  await assert.rejects(s.service.createCurrentCycleInvoice({studentId:'student-a',cycleStart,expectedUpdatedAt:s.records.get('opsAccounts/student-a').updatedAt},'owner'),/이미 있습니다/);
@@ -1031,12 +1031,12 @@ test('editing a new-pass invoice credits only its revised units and rejects stal
  const id=s.records.get('opsAccounts/student-a').openInvoiceId;
  const input={invoiceId:id,units:12,amount:230000,kind:'next',expectedUpdatedAt:''};
  await s.service.editInvoice(input,'owner');const invoice=s.records.get(`opsInvoices/${id}`);
- assert.equal(invoice.creditUnits,12);
+ assert.equal(invoice.creditUnits,0);
  await assert.rejects(s.service.editInvoice({...input,amount:240000},'owner'),/변경/);
- await s.service.payment({invoiceId:id,requestId:'part-edit',amount:100000,method:'현금',expectedInvoiceUpdatedAt:invoice.updatedAt},'owner');
+ await testPayment(s,{invoiceId:id,requestId:'part-edit',amount:100000,method:'현금',expectedInvoiceUpdatedAt:invoice.updatedAt},'owner');
  await assert.rejects(s.service.editInvoice({...input,expectedUpdatedAt:invoice.updatedAt},'owner'),/수납하지 않은/);
- await s.service.payment({invoiceId:id,requestId:'rest-edit',amount:130000,method:'현금',expectedInvoiceUpdatedAt:invoice.updatedAt},'owner');
- assert.equal(s.records.get('opsAccounts/student-a').remaining,12);
+ await testPayment(s,{invoiceId:id,requestId:'rest-edit',amount:130000,method:'현금',expectedInvoiceUpdatedAt:s.records.get(`opsInvoices/${id}`).updatedAt},'owner');
+ assert.equal(s.records.get('opsAccounts/student-a').remaining,0);
 });
 test('invoice edits update unsent billing amounts without sending and reject uncertain delivery or invalid input',async()=>{
  const s=setup();await s.seed();await s.service.createInvoice('student-a','owner');
@@ -1057,7 +1057,7 @@ test('a payment racing an invoice edit cannot settle using obsolete terms',async
  const s=setup();await s.seed('student-a',0);await s.service.createInvoice('student-a','owner');const id=s.records.get('opsAccounts/student-a').openInvoiceId;
  const results=await Promise.allSettled([
   s.service.editInvoice({invoiceId:id,units:12,amount:230000,kind:'next',expectedUpdatedAt:''},'owner'),
-  s.service.payment({invoiceId:id,requestId:'racing-payment',amount:160000,method:'현금'},'owner'),
+  testPayment(s,{invoiceId:id,requestId:'racing-payment',amount:160000,method:'현금'},'owner'),
  ]);
  assert.equal(results[0].status,'fulfilled');assert.equal(results[1].status,'rejected');
  assert.equal(s.records.get(`opsInvoices/${id}`).paid,0);assert.equal(s.records.get('opsAccounts/student-a').remaining,0);
@@ -1404,9 +1404,9 @@ test('unpaid attendance loop: mark, edit, repeat, cancel and later collect witho
  const restored=await s.service.recordAttendance({...base,expectedUpdatedAt:cancelled.attendance[0].updatedAt},'owner');
  await s.service.createCurrentCycleInvoice({studentId:'student-a',cycleStart:day,expectedUpdatedAt:restored.accounts[0].updatedAt},'owner');
  const invoice=[...s.records.values()].find(r=>r.cycleStart===day && r.status==='open');
- await s.service.payment({invoiceId:invoice.id,requestId:'partial-unpaid',amount:80000,method:'현금'},'owner');
+ await testPayment(s,{invoiceId:invoice.id,requestId:'partial-unpaid',amount:80000,method:'현금'},'owner');
  assert.equal(s.records.get('opsAccounts/student-a').remaining,7);
- await s.service.payment({invoiceId:invoice.id,requestId:'full-unpaid',amount:80000,method:'현금'},'owner');
+ await testPayment(s,{invoiceId:invoice.id,requestId:'full-unpaid',amount:80000,method:'현금'},'owner');
  assert.equal(s.records.get('opsAccounts/student-a').remaining,7);
  const {confirmedFirstLessons,unpaidAttendanceCycles}=s.load('attendance-appearance');
  const confirmed=confirmedFirstLessons([s.records.get(`opsInvoices/${invoice.id}`)],{'student-a':[day]});
@@ -1465,23 +1465,23 @@ test('date linking rejects another paid invoice for the same course and cycle bu
  s.records.get('opsInvoices/paid').studentId='drums';
  await s.service.linkInvoiceLesson({invoiceId:id,lessonDate:'2026-09-16'},'owner');
  const changed=s.records.get(`opsInvoices/${id}`);
- await s.service.payment({invoiceId:id,requestId:'linked-payment',amount:160000,method:'현금',expectedInvoiceUpdatedAt:changed.updatedAt},'owner');
- assert.equal(s.records.get('opsAccounts/piano').remaining,16);
- await assert.rejects(s.service.linkInvoiceLesson({invoiceId:id,lessonDate:'2026-09-17',expectedUpdatedAt:changed.updatedAt},'owner'),/진행 중/);
+ await testPayment(s,{invoiceId:id,requestId:'linked-payment',amount:160000,method:'현금',expectedInvoiceUpdatedAt:changed.updatedAt},'owner');
+ assert.equal(s.records.get('opsAccounts/piano').remaining,8);
+ await assert.rejects(s.service.linkInvoiceLesson({invoiceId:id,lessonDate:'2026-09-17',expectedUpdatedAt:changed.updatedAt},'owner'),/변경/);
 });
 test('actual payment date is stored separately from entry time and retries cannot change it',async()=>{
  const s=setup();await s.seed();await s.service.createInvoice('student-a','owner');
  const invoiceId=s.records.get('opsAccounts/student-a').openInvoiceId;
  const request={invoiceId,requestId:'backdated',amount:60000,method:'현금',paymentDate:'2026-09-16'};
- await s.service.payment(request,'owner');await s.service.payment(request,'owner');
+ await testPayment(s,request,'owner');await testPayment(s,request,'owner');
  const payment=s.records.get('opsPayments/backdated');
  assert.equal(payment.paymentDate,'2026-09-16');assert.ok(payment.at.startsWith(s.load('model').seoulDay().slice(0,7)));
  assert.equal(s.records.get('opsAccounts/student-a').remaining,1);
- await assert.rejects(s.service.payment({...request,paymentDate:'2026-09-17'},'owner'),/중복 요청/);
- for(const paymentDate of ['2999-01-01','2026-02-30','','bad'])await assert.rejects(s.service.payment({...request,requestId:'invalid-date',paymentDate},'owner'));
+ await assert.rejects(testPayment(s,{...request,paymentDate:'2026-09-17'},'owner'),/중복 요청/);
+ for(const paymentDate of ['2999-01-01','2026-02-30','','bad'])await assert.rejects(testPayment(s,{...request,requestId:'invalid-date',paymentDate},'owner'));
  assert.equal(s.records.has('opsPayments/invalid-date'),false);
- await s.service.payment({...request,requestId:'final-date',amount:100000,paymentDate:'2026-09-18'},'owner');
- assert.equal(s.records.get('opsAccounts/student-a').remaining,9);
+ await testPayment(s,{...request,requestId:'final-date',amount:100000,paymentDate:'2026-09-18'},'owner');
+ assert.equal(s.records.get('opsAccounts/student-a').remaining,1);
  assert.equal(s.records.get('opsPayments/final-date').paymentDate,'2026-09-18');
  const {paymentDay,courseInitial,invoiceCycleStart}=s.load('billing-display');
  assert.equal(paymentDay(payment),'2026-09-16');
@@ -1598,7 +1598,7 @@ test('plan sync repairs an existing mismatch without altering dates, paid histor
 test('plan sync preserves a partial receipt and only the revised unpaid remainder can settle',async()=>{
  const s=setup();await s.seed('student-a',0);await s.service.createInvoice('student-a','owner');
  const id=s.records.get('opsAccounts/student-a').openInvoiceId;
- await s.service.payment({invoiceId:id,requestId:'partial-fee',amount:60000,method:'카드',paymentDate:'2026-09-28'},'owner');
+ await testPayment(s,{invoiceId:id,requestId:'partial-fee',amount:60000,method:'카드',paymentDate:'2026-09-28'},'owner');
  const receipt=structuredClone(s.records.get('opsPayments/partial-fee'));
  const input={studentId:'student-a',planUnits:12,planAmount:210000,phone:'01000001234',phones:['1234']};
  await s.service.configure(input,'owner');
@@ -1607,20 +1607,20 @@ test('plan sync preserves a partial receipt and only the revised unpaid remainde
  for(const amount of [60000,50000]){
   const before=structuredClone([...s.records]);await assert.rejects(s.service.configure({...input,planAmount:amount},'owner'),/이미 수납/);assert.deepEqual([...s.records],before);
  }
- await assert.rejects(s.service.payment({invoiceId:id,requestId:'stale-fee',amount:100000,method:'현금'},'owner'),/변경/);
+ await assert.rejects(testPayment(s,{invoiceId:id,requestId:'stale-fee',expectedInvoiceUpdatedAt:'',amount:100000,method:'현금'},'owner'),/변경/);
  const payment={invoiceId:id,requestId:'revised-fee',amount:150000,method:'현금',expectedInvoiceUpdatedAt:invoice.updatedAt};
- await Promise.all([s.service.payment(payment,'owner'),s.service.payment(payment,'owner')]);
- assert.equal(s.records.get('opsAccounts/student-a').remaining,12);assert.equal(s.records.get(`opsInvoices/${id}`).status,'paid');
+ await Promise.all([testPayment(s,payment,'owner'),testPayment(s,payment,'owner')]);
+ assert.equal(s.records.get('opsAccounts/student-a').remaining,0);assert.equal(s.records.get(`opsInvoices/${id}`).status,'paid');
  const paidInvoice=structuredClone(s.records.get(`opsInvoices/${id}`));
  await s.service.configure({...input,planUnits:4,planAmount:150000,syncOpenInvoice:true},'owner');
- assert.deepEqual(s.records.get(`opsInvoices/${id}`),paidInvoice);assert.equal(s.records.get('opsAccounts/student-a').remaining,12);
+ assert.deepEqual(s.records.get(`opsInvoices/${id}`),paidInvoice);assert.equal(s.records.get('opsAccounts/student-a').remaining,0);
 });
 test('current-cycle plan sync never adds already credited lessons again on payment',async()=>{
  const s=setup();await s.seed('student-a',6);await s.service.createInvoice('student-a','owner');
  const id=s.records.get('opsAccounts/student-a').openInvoiceId;Object.assign(s.records.get(`opsInvoices/${id}`),{creditUnits:0,cycleStart:'2026-09-19'});
  await s.service.configure({studentId:'student-a',planUnits:12,planAmount:210000,phone:'01000001234',phones:['1234']},'owner');
  const invoice=s.records.get(`opsInvoices/${id}`);assert.equal(invoice.creditUnits,0);assert.equal(invoice.units,12);
- await s.service.payment({invoiceId:id,requestId:'current-plan',amount:210000,method:'현금',expectedInvoiceUpdatedAt:invoice.updatedAt},'owner');
+ await testPayment(s,{invoiceId:id,requestId:'current-plan',amount:210000,method:'현금',expectedInvoiceUpdatedAt:invoice.updatedAt},'owner');
  assert.equal(s.records.get('opsAccounts/student-a').remaining,6);
 });
 test('plan sync refreshes an unsent billing notice without sending and rejects in-flight notices atomically',async()=>{
@@ -1934,7 +1934,7 @@ test('prepaid reserved pass activates once on kiosk arrival with new sequence an
  const s=setup();await s.seed('piano',0);const today=s.load('model').seoulDay();
  await s.service.saveNextPass({studentId:'piano',expectedUpdatedAt:s.records.get('opsAccounts/piano').updatedAt,units:16,amount:250000,mode:'depleted'},'owner');
  const invoiceId=s.records.get('opsAccounts/piano').nextPass.invoiceId,i=s.records.get(`opsInvoices/${invoiceId}`);
- await s.service.payment({invoiceId,requestId:'prepaid',amount:250000,method:'카드',expectedInvoiceUpdatedAt:i.updatedAt},'owner');
+ await testPayment(s,{invoiceId,requestId:'prepaid',amount:250000,method:'카드',expectedInvoiceUpdatedAt:i.updatedAt},'owner');
  assert.equal(s.records.get('opsAccounts/piano').remaining,0);
  const results=await Promise.all([s.service.checkIn('piano','1234','device'),s.service.checkIn('piano','1234','device')]);
  assert.equal(results.filter(r=>r.duplicate).length,1);
@@ -1958,7 +1958,7 @@ test('dated unpaid pass carries unused lessons, preserves the old debt and late 
  await s.service.recordAttendance({studentId:'piano',day:today,status:'present',units:1,expectedUpdatedAt:r.updatedAt},'owner');
  assert.equal(s.records.get('opsAccounts/piano').remaining,14);assert.equal(s.records.get(`opsInvoices/${oldId}`).status,'open');
  const i=s.records.get(`opsInvoices/${id}`);
- await s.service.payment({invoiceId:id,requestId:'late-pay',amount:210000,method:'현금',expectedInvoiceUpdatedAt:i.updatedAt},'owner');
+ await testPayment(s,{invoiceId:id,requestId:'late-pay',amount:210000,method:'현금',expectedInvoiceUpdatedAt:i.updatedAt},'owner');
  assert.equal(s.records.get('opsAccounts/piano').remaining,14);
  r=s.records.get(`opsAttendance/piano_${today}`);
  await s.service.recordAttendance({studentId:'piano',day:today,status:'present',units:1,expectedUpdatedAt:r.updatedAt},'owner');assert.equal(s.records.get('opsAccounts/piano').remaining,14);
@@ -1973,7 +1973,7 @@ test('a reservation can be edited/cancelled atomically, but receipts and reserve
  await assert.rejects(s.service.invoiceAction({invoiceId:id,action:'cancelInvoice'},'owner'),/예약/);
  await save({cancel:true});assert.equal(s.records.get(`opsInvoices/${id}`).status,'cancelled');assert.equal(s.records.get('opsAccounts/piano').remaining,2);
  await save({});const nextId=s.records.get('opsAccounts/piano').nextPass.invoiceId,i=s.records.get(`opsInvoices/${nextId}`);
- await s.service.payment({invoiceId:nextId,requestId:'partial',amount:10000,method:'현금',expectedInvoiceUpdatedAt:i.updatedAt},'owner');
+ await testPayment(s,{invoiceId:nextId,requestId:'partial',amount:10000,method:'현금',expectedInvoiceUpdatedAt:i.updatedAt},'owner');
  await assert.rejects(save({cancel:true}),/수납/);
  const {nextPassInput}=s.load('next-pass');for(const v of [{units:0},{amount:0},{mode:'bad'},{mode:'date',start:'2026-02-30'}])assert.throws(()=>nextPassInput({...input,...v},'test'));
 });
@@ -2022,7 +2022,7 @@ test('confirming a projected first lesson is idempotent, dated, course scoped an
  const a=structuredClone(s.records.get('opsAccounts/p')),input={studentId:'p',lessonDate:tomorrow,expectedUpdatedAt:a.updatedAt,expectedScheduleUpdatedAt:'schedule-v1'};
  const rows=await Promise.all([s.service.prepareUpcomingInvoice(input,'owner'),s.service.prepareUpcomingInvoice(input,'owner')]);assert.equal(rows[0].id,rows[1].id);assert.equal(rows[0].lessonDate,tomorrow);assert.equal(rows[0].amount,160000);
  assert.equal(s.records.get('opsAccounts/p').remaining,1);assert.equal(s.records.get('opsAccounts/d').remaining,3);assert.equal([...s.records.keys()].filter(k=>k.startsWith('opsInvoices/')).length,1);assert.equal([...s.records.keys()].some(k=>k.startsWith('opsNotices/')),false);
- await s.service.payment({invoiceId:rows[0].id,requestId:'advance-1',amount:160000,method:'현금'},'owner');assert.equal(s.records.get('opsAccounts/p').remaining,9);
+ await testPayment(s,{invoiceId:rows[0].id,requestId:'advance-1',amount:160000,method:'현금'},'owner');assert.equal(s.records.get('opsAccounts/p').remaining,1);
  assert.equal((await s.service.prepareUpcomingInvoice(input,'owner')).status,'paid');
 });
 
@@ -2056,7 +2056,7 @@ test('cancelled first-lesson collection settles once without altering cancellati
  assert.equal(billingProjection(snapshot,'2026-10-28').upcoming[0].lessonDate,day);
  const legacy={...snapshot,attendance:[],legacyAttendance:[{studentId:'p',day,status:'late_cancel',value:'1',color:''}]};
  assert.equal(billingProjection(legacy,'2026-10-28').upcoming[0].lessonDate,day);
- const input={studentId:'p',lessonDate:day,requestId:'cancelled-first-payment',expectedUpdatedAt:account.updatedAt,amount:160000,invoiceAmount:160000,addUnits:false,method:'카드',paymentDate:day};
+ const input={studentId:'p',lessonDate:day,requestId:'cancelled-first-payment',expectedUpdatedAt:account.updatedAt,amount:160000,invoiceAmount:160000,addUnits:false,passAllocation:'already',method:'카드',paymentDate:day};
  await s.service.monthlyPayment(input,'owner');await s.service.monthlyPayment(input,'owner');
  const settled=[...s.records.entries()].filter(([k])=>k.startsWith('opsInvoices/')).map(([,v])=>v);
  assert.equal(settled.length,1);assert.equal(settled[0].status,'paid');assert.equal(settled[0].lessonDate,day);
@@ -2073,7 +2073,7 @@ test('cancelled first-lesson collection settles once without altering cancellati
 
 test('monthly payment records an old first lesson without crediting the already imported balance or changing attendance',async()=>{
  const s=setup();await s.seed('p',5);await s.seed('drum',2);const day='2026-09-01',a=s.records.get('opsAccounts/p');
- const input={studentId:'p',lessonDate:day,requestId:'monthly-pay-1',expectedUpdatedAt:a.updatedAt,amount:160000,invoiceAmount:160000,addUnits:false,method:'카드',paymentDate:'2026-09-05'};
+ const input={studentId:'p',lessonDate:day,requestId:'monthly-pay-1',expectedUpdatedAt:a.updatedAt,amount:160000,invoiceAmount:160000,addUnits:false,passAllocation:'already',method:'카드',paymentDate:'2026-09-05'};
  await Promise.all([s.service.monthlyPayment(input,'owner'),s.service.monthlyPayment(input,'owner')]);
  assert.equal(s.records.get('opsAccounts/p').remaining,5);assert.equal(s.records.get('opsAccounts/drum').remaining,2);
  const invoices=[...s.records.values()].filter(i=>i.studentId==='p'&&i.status==='paid');assert.equal(invoices.length,1);assert.equal(invoices[0].lessonDate,day);assert.equal(invoices[0].creditUnits,0);
@@ -2081,24 +2081,24 @@ test('monthly payment records an old first lesson without crediting the already 
  assert.ok(s.load('attendance-appearance').confirmedFirstLessons(invoices,{p:[day]}).has(`p_${day}`));
  await assert.rejects(s.service.monthlyPayment({...input,amount:150000},'owner'),/중복/);
 });
-test('monthly payment reuses the selected cycle, supports partial payment, and credits a new pass only once on full settlement',async()=>{
+test('monthly payment reuses the selected cycle and partial payment leaves pending lessons unchanged',async()=>{
  const s=setup();await s.seed('p',1);await s.service.createInvoice('p','owner');const id=s.records.get('opsAccounts/p').openInvoiceId,day='2026-10-07';
  const input={studentId:'p',invoiceId:id,lessonDate:day,requestId:'part-one',expectedUpdatedAt:s.records.get('opsAccounts/p').updatedAt,expectedInvoiceUpdatedAt:'',amount:60000,method:'현금'};
  await s.service.monthlyPayment(input,'owner');assert.equal(s.records.get('opsInvoices/'+id).status,'open');assert.equal(s.records.get('opsAccounts/p').remaining,1);
  const last={...input,requestId:'part-two',amount:100000,expectedUpdatedAt:s.records.get('opsAccounts/p').updatedAt,expectedInvoiceUpdatedAt:s.records.get('opsInvoices/'+id).updatedAt};
- await s.service.monthlyPayment(last,'owner');await s.service.monthlyPayment(last,'owner');assert.equal(s.records.get('opsInvoices/'+id).status,'paid');assert.equal(s.records.get('opsAccounts/p').remaining,9);
+ await s.service.monthlyPayment(last,'owner');await s.service.monthlyPayment(last,'owner');assert.equal(s.records.get('opsInvoices/'+id).status,'paid');assert.equal(s.records.get('opsAccounts/p').remaining,1);
  assert.equal([...s.records.keys()].filter(k=>k.startsWith('opsInvoices/')).length,1);
 });
 test('linking an existing paid receipt to a monthly first lesson does not record another payment or add units',async()=>{
  const s=setup();await s.seed('p',1);await s.service.createInvoice('p','owner');const id=s.records.get('opsAccounts/p').openInvoiceId;
- await s.service.payment({invoiceId:id,requestId:'already-paid',amount:160000,method:'현금'},'owner');
+ s.records.set('opsPayments/already-paid',{id:'already-paid',invoiceId:id,studentId:'p',amount:160000,method:'현금'});s.records.get('opsInvoices/'+id).paid=160000;s.records.get('opsInvoices/'+id).status='paid';
  const before=s.records.get('opsAccounts/p').remaining,input={studentId:'p',invoiceId:id,lessonDate:'2026-09-10',requestId:'link-receipt',linkOnly:true,expectedInvoiceUpdatedAt:''};
  await s.service.monthlyPayment(input,'owner');await s.service.monthlyPayment(input,'owner');assert.equal(s.records.get('opsInvoices/'+id).lessonDate,'2026-09-10');assert.equal(s.records.get('opsAccounts/p').remaining,before);assert.equal([...s.records.keys()].filter(k=>k.startsWith('opsPayments/')).length,1);
  await assert.rejects(s.service.monthlyPayment({...input,lessonDate:'2026-09-11'},'owner'),/다른 수강권/);
 });
 test('monthly payment rejects another course, conflicting cycle, stale balance, and future receipt dates',async()=>{
  const s=setup();await s.seed('p',1);await s.seed('d',3);await s.service.createInvoice('d','owner');const foreign=s.records.get('opsAccounts/d').openInvoiceId;
- const base={studentId:'p',lessonDate:'2026-09-01',requestId:'validation',expectedUpdatedAt:s.records.get('opsAccounts/p').updatedAt,amount:160000,invoiceAmount:160000,addUnits:false,method:'현금'};
+ const base={studentId:'p',lessonDate:'2026-09-01',requestId:'validation',expectedUpdatedAt:s.records.get('opsAccounts/p').updatedAt,amount:160000,invoiceAmount:160000,addUnits:false,passAllocation:'already',method:'현금'};
  await assert.rejects(s.service.monthlyPayment({...base,invoiceId:foreign},'owner'),/다른 과목/);
  await assert.rejects(s.service.monthlyPayment({...base,expectedUpdatedAt:'stale'},'owner'),/변경/);
  await assert.rejects(s.service.monthlyPayment({...base,paymentDate:'2999-01-01'},'owner'),/결제받은 날짜/);
@@ -2128,29 +2128,30 @@ function receiptCancellationInput(s,paymentId){
 async function receiptFixture(creditUnits){
  const s=setup();await s.seed('piano',0);await s.seed('drum',4);
  const i={id:'receipt-invoice',studentId:'piano',name:'가상 학생',units:8,amount:160000,paid:0,status:'open',needsReview:false,createdAt:'2026-09-01T00:00:00.000Z',lessonDate:'2026-09-02',...(creditUnits===undefined?{}:{creditUnits})};
+ Object.assign(i,s.load('pass-link').passInvoice(i,true,i.createdAt));s.records.get('opsAccounts/piano').remaining=8;
  s.records.set('opsInvoices/receipt-invoice',i);s.records.get('opsAccounts/piano').openInvoiceId=i.id;
- s.pay=async(id,amount)=>s.service.payment({invoiceId:i.id,requestId:id,amount,method:'현금',paymentDate:'2026-09-02',expectedInvoiceUpdatedAt:s.records.get('opsInvoices/receipt-invoice').updatedAt||''},'owner');
+ s.pay=async(id,amount)=>testPayment(s,{invoiceId:i.id,requestId:id,amount,method:'현금',paymentDate:'2026-09-02',expectedInvoiceUpdatedAt:s.records.get('opsInvoices/receipt-invoice').updatedAt||''},'owner');
  return s;
 }
-test('receipt cancellation reopens the bill and reverses credited units exactly once while preserving attendance and other courses',async()=>{
+test('receipt cancellation reopens the bill without reversing pass units or changing attendance and other courses',async()=>{
  const s=await receiptFixture();await s.pay('paid-receipt',160000);
  const account=s.records.get('opsAccounts/piano');account.remaining=6;account.updatedAt='after-attendance';
  s.records.set('opsAttendance/piano_old',{studentId:'piano',day:'2026-09-03',units:2});
  const beforeAttendance=structuredClone(s.records.get('opsAttendance/piano_old')),drum=structuredClone(s.records.get('opsAccounts/drum'));
  const input=receiptCancellationInput(s,'paid-receipt');await Promise.all([s.service.cancelPayment(input,'owner'),s.service.cancelPayment(input,'owner')]);
  const invoice=s.records.get('opsInvoices/receipt-invoice'),receipt=s.records.get('opsPayments/paid-receipt');
- assert.equal(invoice.status,'open');assert.equal(invoice.paid,0);assert.equal(s.records.get('opsAccounts/piano').remaining,-2);
- assert.equal(s.records.get('opsAccounts/piano').openInvoiceId,invoice.id);assert.equal(receipt.revertedUnits,8);assert.ok(receipt.cancelledAt);assert.equal(receipt.amount,160000);
+ assert.equal(invoice.status,'open');assert.equal(invoice.paid,0);assert.equal(s.records.get('opsAccounts/piano').remaining,6);
+ assert.equal(s.records.get('opsAccounts/piano').openInvoiceId,invoice.id);assert.equal(receipt.revertedUnits,0);assert.ok(receipt.cancelledAt);assert.equal(receipt.amount,160000);
  assert.deepEqual(s.records.get('opsAttendance/piano_old'),beforeAttendance);assert.deepEqual(s.records.get('opsAccounts/drum'),drum);
  assert.equal([...s.records.values()].filter(v=>v.action==='cancel-payment').length,1);assert.equal([...s.records.keys()].filter(k=>k.startsWith('opsNotices/')).length,0);
  assert.equal(s.load('attendance-appearance').confirmedFirstLessons([invoice],{}).size,0);
  await assert.rejects(s.pay('paid-receipt',160000),/취소된 수납/);
  await s.pay('new-receipt',160000);assert.equal(s.records.get('opsAccounts/piano').remaining,6);assert.equal(s.records.get('opsInvoices/receipt-invoice').status,'paid');
 });
-test('cancelling either partial receipt rolls full-settlement credit back once, then allows repayment',async()=>{
+test('cancelling either partial receipt retains pass units and allows repayment',async()=>{
  const s=await receiptFixture();await s.pay('part-a',60000);await s.pay('part-b',100000);
  await s.service.cancelPayment(receiptCancellationInput(s,'part-a'),'owner');
- assert.equal(s.records.get('opsInvoices/receipt-invoice').paid,100000);assert.equal(s.records.get('opsAccounts/piano').remaining,0);
+ assert.equal(s.records.get('opsInvoices/receipt-invoice').paid,100000);assert.equal(s.records.get('opsAccounts/piano').remaining,8);
  await s.service.cancelPayment(receiptCancellationInput(s,'part-b'),'owner');
  assert.equal(s.records.get('opsInvoices/receipt-invoice').paid,0);assert.equal(s.records.get('opsPayments/part-b').revertedUnits,0);
  await s.pay('repayment',160000);assert.equal(s.records.get('opsAccounts/piano').remaining,8);
@@ -2206,7 +2207,7 @@ test('unlinked late receipts never confirm actual, imported or forecast first le
  const data={day:'2026-10-15',students:[{id:'drums'}],accounts:[{id:'drums',active:true,name:'Test',planUnits:4,planAmount:180000,remaining:1,schedule:{rules:[{start:'2026-09-01',weekdays:[6]}],moves:[]}}],attendance:[],legacyAttendance:[{studentId:'drums',day:'2026-10-10',value:'3',color:''}],invoices:[],settledInvoices:[paid]};
  const before=structuredClone(data);
  const upcoming=s.load('upcoming-billing').billingProjection(data,'2026-10-15').upcoming;
- assert.equal(upcoming[0].lessonDate,'2026-10-24');assert.deepEqual(data,before);
+ assert.equal(upcoming.length,0); // Unlinked historical receipt requires review before generating another bill.assert.deepEqual(data,before);
  assert.equal(s.load('upcoming-billing').billingProjection({...data,settledInvoices:[{...paid,lessonDate:'2026-10-24'}]},'2026-10-15').upcoming.length,0);
  // Explicit prepayment remains paid even when its actual collection date is earlier.
  assert.deepEqual([...due(new Map([['drums_2026-10-24','1'],['drums_2026-11-21','1']]),[{...paid,lessonDate:'2026-10-24'}],{drums:dates})],['drums_2026-11-21']);
@@ -2279,7 +2280,7 @@ test('a backdated pass activates on the first recorded regular lesson without re
  assert.equal(s.records.get('opsAccounts/piano').remaining,balance+12);
  const audit=[...s.records.entries()].filter(([k])=>k.startsWith('opsAudit/')).map(([id,r])=>({id,...r}));
  assert.equal(s.load('balance-review').reviewBalance(a,undefined,audit,records.map(([,r])=>r),[invoice]).ledger,balance+12);
- await s.service.payment({invoiceId:invoice.id,requestId:'retro-paid',amount:210000,method:'현금',expectedInvoiceUpdatedAt:invoice.updatedAt},'owner');
+ await testPayment(s,{invoiceId:invoice.id,requestId:'retro-paid',amount:210000,method:'현금',expectedInvoiceUpdatedAt:invoice.updatedAt},'owner');
  assert.equal(s.records.get('opsAccounts/piano').remaining,balance+12);
 });
 test('a backdated reservation without attendance can activate on later entry of a past lesson exactly once',async()=>{
@@ -2483,4 +2484,114 @@ test('teacher correction cannot modify another instrument and suppressed arrival
  await s.seed('piano',8);s.records.get('opsAccounts/piano').subject='피아노';const {noticeId}=await s.service.checkIn('piano','1234','device');const row=s.records.get(`opsAttendance/piano_${day}`);
  await s.service.correctTeacherAttendanceTime({attendanceId:row.id,day,time:'00:00',expectedUpdatedAt:row.updatedAt},'teacher:t');s.records.get(`opsNotices/${noticeId}`).status='queued';
  await withAttendanceProvider(async calls=>{await s.load('notices').processNotices(noticeId);assert.equal(calls.length,0);assert.equal(s.records.get(`opsNotices/${noticeId}`).status,'cancelled');});
+});
+
+
+// Synthetic fixture date, plus the optimistic revision a real refreshed form sends.
+async function testPayment(s,input,actor){
+ const invoice=s.records.get('opsInvoices/'+input.invoiceId);
+ return s.service.payment({expectedInvoiceUpdatedAt:invoice?.updatedAt||'',lessonDate:invoice?.lessonDate||invoice?.cycleStart||input.paymentDate||s.load('model').seoulDay(),...input},actor);
+}
+// Pass identity regressions: no external payment provider or notification calls.
+test('pass identity: unpaid first attendance grants once, late split receipts never add lessons',async()=>{
+ const s=setup(),day=s.load('model').seoulDay();await s.seed('p',0);await s.service.createInvoice('p','owner');
+ const id=s.records.get('opsAccounts/p').openInvoiceId;
+ await s.service.checkIn('p','1234','device');
+ assert.equal(s.records.get('opsAccounts/p').remaining,7);assert.equal(s.records.get(`opsAttendance/p_${day}`).passId,id);
+ const inv=()=>s.records.get(`opsInvoices/${id}`);
+ await s.service.payment({invoiceId:id,requestId:'a',amount:60000,method:'카드',expectedInvoiceUpdatedAt:inv().updatedAt},'owner');
+ const input={invoiceId:id,requestId:'b',amount:100000,method:'카드',expectedInvoiceUpdatedAt:inv().updatedAt};
+ await Promise.all([s.service.payment(input,'owner'),s.service.payment(input,'owner')]);
+ assert.equal(s.records.get('opsAccounts/p').remaining,7);assert.equal(inv().status,'paid');
+ assert.equal([...s.records.values()].filter(x=>x.action==='allocate-pass').length,1);
+ await assert.rejects(s.service.payment({...input,requestId:'c',expectedInvoiceUpdatedAt:inv().updatedAt},'owner'),/청구 상태/);
+ assert.equal([...s.records.keys()].filter(x=>x.startsWith('opsPayments/')).length,2);
+ const paid=s.load('attendance-appearance').confirmedPassLessons([inv()],[s.records.get(`opsAttendance/p_${day}`)],{p:[day]},{},new Map([[`p_${day}`,'1']]));assert.ok(paid.has(`p_${day}`));
+});
+test('pass identity: cancellation and repayment change money only, and preserve attendance',async()=>{
+ const s=setup();await s.seed('p',0);await s.service.checkIn('p','1234','device');const a=s.records.get('opsAccounts/p'),id=a.currentPassId;
+ await s.service.payment({invoiceId:id,requestId:'receipt-pass',amount:160000,method:'현금',expectedInvoiceUpdatedAt:s.records.get(`opsInvoices/${id}`).updatedAt},'owner');
+ const before=[...s.records.entries()].filter(([k])=>k.startsWith('opsAttendance/'));
+ const input=receiptCancellationInput(s,'receipt-pass');await Promise.all([s.service.cancelPayment(input,'owner'),s.service.cancelPayment(input,'owner')]);
+ assert.equal(s.records.get('opsAccounts/p').remaining,7);assert.equal(s.records.get('opsPayments/receipt-pass').revertedUnits,0);
+ await s.service.payment({invoiceId:id,requestId:'repay-pass',amount:160000,method:'현금',expectedInvoiceUpdatedAt:s.records.get(`opsInvoices/${id}`).updatedAt},'owner');
+ assert.equal(s.records.get('opsAccounts/p').remaining,7);assert.deepEqual([...s.records.entries()].filter(([k])=>k.startsWith('opsAttendance/')),before);
+});
+test('pass identity: unlinked paid receipt blocks a duplicate bill but never blocks attendance',async()=>{
+ const s=setup(),day=s.load('model').seoulDay();await s.seed('p',7);const old={id:'legacy-paid',studentId:'p',name:'학생',units:8,amount:160000,paid:160000,status:'paid',needsReview:false,createdAt:day+'T00:00:00Z'};s.records.set('opsInvoices/legacy-paid',old);
+ const a=s.records.get('opsAccounts/p'),before=structuredClone([...s.records]);
+ await assert.rejects(s.service.prepareUpcomingInvoice({studentId:'p',lessonDate:day,expectedUpdatedAt:a.updatedAt,expectedScheduleUpdatedAt:''},'owner'),/연결 확인/);
+ await assert.rejects(s.service.createInvoice('p','owner'),/연결 확인/);
+ await assert.rejects(s.service.monthlyPayment({studentId:'p',lessonDate:day,requestId:'dup',amount:160000,invoiceAmount:160000,method:'현금',addUnits:false,passAllocation:'activate',expectedUpdatedAt:a.updatedAt},'owner'),/연결 확인/);
+ assert.deepEqual([...s.records],before);await s.service.checkIn('p','1234','device');assert.equal(s.records.get('opsAccounts/p').remaining,6);
+ await s.service.monthlyPayment({studentId:'p',invoiceId:old.id,lessonDate:day,linkOnly:true,requestId:'link',expectedInvoiceUpdatedAt:''},'owner');
+ assert.equal(s.records.get('opsInvoices/legacy-paid').passId,old.id);assert.equal(s.records.get('opsAccounts/p').remaining,6);
+ assert.equal([...s.records.keys()].filter(k=>k.startsWith('opsPayments/')).length,0);
+});
+test('pass identity: two screens cannot open and collect two passes for the same first day',async()=>{
+ const s=setup(),day=s.load('model').seoulDay();await s.seed('p',0);const a=s.records.get('opsAccounts/p');
+ const common={studentId:'p',lessonDate:day,amount:160000,invoiceAmount:160000,method:'현금',addUnits:false,passAllocation:'activate',expectedUpdatedAt:a.updatedAt};
+ const results=await Promise.allSettled(['screen-a','screen-b'].map(requestId=>s.service.monthlyPayment({...common,requestId},'owner')));
+ assert.equal(results.filter(r=>r.status==='fulfilled').length,1);assert.equal(s.records.get('opsAccounts/p').remaining,8);
+ assert.equal([...s.records.keys()].filter(k=>k.startsWith('opsInvoices/')).length,1);assert.equal([...s.records.keys()].filter(k=>k.startsWith('opsPayments/')).length,1);
+});
+test('pass identity: prepayment waits for depletion and activates once on arrival',async()=>{
+ const s=setup(),day=s.load('model').seoulDay();await s.seed('p',1);await s.service.createInvoice('p','owner');const id=s.records.get('opsAccounts/p').openInvoiceId;
+ await s.service.linkInvoiceLesson({invoiceId:id,lessonDate:day},'owner');
+ await s.service.payment({invoiceId:id,requestId:'prepaid-pass',amount:160000,method:'카드',expectedInvoiceUpdatedAt:s.records.get(`opsInvoices/${id}`).updatedAt},'owner');
+ assert.equal(s.records.get('opsAccounts/p').remaining,1);
+ // Simulate the previous pass's last lesson already consumed before today's arrival.
+ s.records.get('opsAccounts/p').remaining=0;
+ await Promise.all([s.service.checkIn('p','1234','device'),s.service.checkIn('p','1234','device')]);
+ assert.equal(s.records.get('opsAccounts/p').remaining,7);assert.equal(s.records.get(`opsAttendance/p_${day}`).passId,id);
+});
+test('pass identity: historical edits and makeup cannot allocate a new regular pass',()=>{
+ const s=setup(),{lessonPass}=s.load('pass-link');const a={id:'p',name:'p',remaining:0,planUnits:8,planAmount:160000,currentPassId:'old',currentPassStart:'2026-10-01',lastPassLessonDay:'2026-10-28'};
+ assert.equal(lessonPass(a,[],'2026-10-19',1,undefined,'stamp','new').invoice,undefined);
+ assert.equal(lessonPass(a,[],'2026-10-29',0,undefined,'stamp','new').invoice,undefined);
+ assert.equal(lessonPass(a,[],'2026-10-28',2,{units:1,passId:'old'},'stamp','new').passId,'old');
+});
+test('pass identity: a renamed first day retains the identity and rejects a second bill at its attendance',async()=>{
+ const s=setup(),day=s.load('model').seoulDay();await s.seed('p',0);await s.service.checkIn('p','1234','device');const a=s.records.get('opsAccounts/p'),id=a.currentPassId,inv=s.records.get(`opsInvoices/${id}`);
+ await s.service.linkInvoiceLesson({invoiceId:id,lessonDate:'2026-10-01',expectedUpdatedAt:inv.updatedAt},'owner');assert.equal(s.records.get(`opsInvoices/${id}`).passId,id);
+ const result=await s.service.prepareUpcomingInvoice({studentId:'p',lessonDate:day,expectedUpdatedAt:a.updatedAt,expectedScheduleUpdatedAt:''},'owner');assert.equal(result.id,id);
+ assert.equal([...s.records.keys()].filter(k=>k.startsWith('opsInvoices/')).length,1);
+});
+test('pass identity: pending passes survive partial plan changes and activated units cannot be regranted',()=>{
+ const s=setup(),{allocatedPass,passInvoice}=s.load('pass-link');const a={id:'p',remaining:0};const i=passInvoice({id:'i',studentId:'p',units:8,amount:160000,status:'open'},false,'stamp');
+ const one=allocatedPass(a,i,'2026-10-01','stamp');const two=allocatedPass(one.account,one.invoice,'2026-10-02','next');assert.equal(two.account.remaining,8);assert.equal(two.invoice.passId,'i');
+});
+
+test('pass identity: missed regular lessons advance the cycle while preserving makeup credits',()=>{
+ const s=setup(),{nextRecordedCycle,lessonPass,passInvoice}=s.load('pass-link');const a={id:'p',name:'p',planUnits:2,planAmount:160000,remaining:1,currentPassId:'old',currentPassStart:'2026-10-01',lastPassLessonDay:'2026-10-02'};
+ const rows=[{studentId:'p',day:'2026-10-01',status:'present',units:1},{studentId:'p',day:'2026-10-02',status:'absent',units:0}],next={studentId:'p',day:'2026-10-03',status:'present',units:1};
+ const start=nextRecordedCycle(a,rows,next);assert.equal(start,'2026-10-03');const change=lessonPass(a,[],next.day,1,undefined,'stamp','new',start);assert.equal(change.account.remaining,3);assert.equal(change.passId,'new');
+ assert.equal(nextRecordedCycle(a,rows,{...next,status:'makeup'}),'');
+});
+test('pass identity: consuming the old pass after prepayment does not create a second pending pass',async()=>{
+ const s=setup(),today=s.load('model').seoulDay();await s.seed('p',1);await s.service.createInvoice('p','owner');const id=s.records.get('opsAccounts/p').openInvoiceId;
+ await s.service.linkInvoiceLesson({invoiceId:id,lessonDate:today},'owner');await s.service.payment({invoiceId:id,requestId:'prepay-end',amount:160000,method:'카드',expectedInvoiceUpdatedAt:s.records.get(`opsInvoices/${id}`).updatedAt},'owner');
+ await s.service.checkIn('p','1234','device');assert.equal(s.records.get('opsAccounts/p').remaining,0);assert.equal([...s.records.keys()].filter(k=>k.startsWith('opsInvoices/')).length,1);
+ const pending=s.records.get(`opsInvoices/${id}`);assert.equal(pending.allocationState,'pending');assert.equal(pending.allocatedUnits,0);
+ const activated=s.load('pass-link').allocatedPass(s.records.get('opsAccounts/p'),pending,today,'later');assert.equal(activated.invoice.allocatedUnits,8);
+});
+
+test('reserved makeup on an exhausted balance never activates a fresh regular pass',async()=>{
+ const s=setup();await s.seed('p',0);const today=s.load('model').seoulDay(),yesterday=new Date(Date.parse(today)-86400000).toISOString().slice(0,10);
+ await s.service.recordAttendance({studentId:'p',day:yesterday,status:'travel',units:0},'owner');
+ await s.service.recordAttendance({studentId:'p',day:today,status:'makeup_reserved',units:0,relatedDay:yesterday},'owner');
+ await s.service.checkIn('p','1234','device');assert.equal(s.records.get('opsAccounts/p').remaining,-1);
+ assert.equal([...s.records.values()].filter(x=>x.action==='allocate-pass').length,0);
+});
+test('demo uses the same once-only pass allocation and receipt cancellation semantics',()=>{
+ const s=setup(),ex={};const code=ts.transpileModule(fs.readFileSync('src/components/operations/demo.ts','utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText;
+ new Function('require','exports',code)(id=>s.load(id.split('/').at(-1)),ex);
+ let data=ex.sample();data.accounts[0].remaining=0;
+ data=ex.demoAction(data,{action:'demoCheckIn',studentId:'demo-a'}).data;
+ const a=data.accounts[0],i=data.invoices.find(i=>i.id===a.currentPassId);assert.equal(a.remaining,7);assert.ok(i);
+ data=ex.demoAction(data,{action:'payment',invoiceId:i.id,requestId:'demo-receipt',amount:160000,method:'현금'}).data;
+ assert.equal(data.accounts[0].remaining,7);
+ const paid=[...data.invoices,...(data.settledInvoices||[])].find(x=>x.id===i.id);
+ data=ex.demoAction(data,{action:'cancelPayment',paymentId:'demo-receipt',expectedPaid:160000,expectedInvoiceUpdatedAt:paid.updatedAt,expectedAccountUpdatedAt:data.accounts[0].updatedAt}).data;
+ assert.equal(data.accounts[0].remaining,7);assert.equal(data.payments[0].revertedUnits,0);
 });

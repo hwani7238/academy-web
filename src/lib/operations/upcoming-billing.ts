@@ -1,3 +1,4 @@
+import {unresolvedReceipts} from './pass-link';
 import {attendanceForecast} from './attendance-forecast';
 import {attendanceSequence} from './attendance-sequence';
 import {isFirstLesson,legacyAttendanceAppearance} from './attendance-appearance';
@@ -37,6 +38,7 @@ export function billingProjection(data:Snapshot,today=seoulDay()){
   if(seen.has(id)||!a?.active||a.nextPass||!s||enrollmentState(s.lifecycle,today)!=='active'||enrollmentState(s.lifecycle,day)!=='active')continue;
   if(data.cancelledInvoiceKeys?.includes(key)||covered.has(key)){if(day>=today)seen.add(id);continue;}
   // An unlinked open bill must be resolved rather than duplicated.
+  if(unresolvedReceipts(invoiceRows.filter(i=>i.studentId===id)).length)continue;
   if(data.invoices.some(i=>i.studentId===id&&i.status==='open'&&!invoiceCycleStart(i,cycles,times)))continue;
   seen.add(id);upcoming.push({id:`upcoming_${id}_${day}`,studentId:id,name:a.name,units:a.planUnits,amount:a.planAmount,paid:0,status:'open',needsReview:false,createdAt:`${today}T00:00:00.000Z`,lessonDate:day,projected:true});
  }

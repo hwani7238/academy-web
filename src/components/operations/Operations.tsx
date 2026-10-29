@@ -1,5 +1,6 @@
 'use client';
 import {billingProjection, finalLessonInvoices} from '@/lib/operations/upcoming-billing';
+import {PassPaymentSummary} from './PassPaymentSummary';
 import { BillingList } from './BillingList';
 import { CollapsibleOverview } from './CollapsibleOverview';
 import { Trash2 } from 'lucide-react';
@@ -220,7 +221,7 @@ export function Operations({ demo = false }: { demo?: boolean }) {
         <button className="primary" disabled={busy}>{busy?'저장 중…':'잔여 횟수 저장'}</button>
       </form>}
       {panel.type === 'adjust' && <AttendanceEdit attendance={panel.row} busy={busy} save={act} close={() => setPanel(null)} />}
-      {panel.type === 'payment' && <form onSubmit={e => submit(e, 'payment', { invoiceId: panel.row.id, requestId: panel.requestId, expectedInvoiceUpdatedAt: panel.row.updatedAt || '' })}><p>현재 미납 금액 <strong>{won(panel.row.amount - panel.row.paid)}</strong></p><label>이번 수납 금액 (원)<PaymentAmountInput amount={panel.row.amount - panel.row.paid} /></label><label>결제받은 날짜<input name="paymentDate" type="date" defaultValue={seoulDay()} max={seoulDay()} required /></label><label>결제 수단<select name="method">{METHODS.map(m => <option key={m}>{m}</option>)}</select></label><label>비고<textarea name="note" maxLength={500} placeholder="입금자명, 확인 사항 등" /></label><p className="subtle">실제 결제를 확인한 금액만 기록하세요. {panel.row.reservedPass?'예약 수강권입니다. 횟수는 예약한 첫 출석 때 추가됩니다.':panel.row.creditUnits===0?'이미 반영된 수강권이므로 수납해도 횟수가 추가되지 않습니다.':`전액 수납 시 ${panel.row.creditUnits ?? panel.row.units}회가 추가됩니다.`}</p><button className="primary" disabled={busy}>{busy ? '저장 중…' : '수납 확인·저장'}</button></form>}
+      {panel.type === 'payment' && <form onSubmit={e => submit(e, 'payment', { invoiceId: panel.row.id, requestId: panel.requestId, expectedInvoiceUpdatedAt: panel.row.updatedAt || '' })}><PassPaymentSummary invoice={panel.row} account={data.accounts.find(a=>a.id===panel.row.studentId)}/><p>현재 미납 금액 <strong>{won(panel.row.amount - panel.row.paid)}</strong></p><label>이번 수납 금액 (원)<PaymentAmountInput amount={panel.row.amount - panel.row.paid} /></label><label>결제받은 날짜<input name="paymentDate" type="date" defaultValue={seoulDay()} max={seoulDay()} required /></label><label>결제 수단<select name="method">{METHODS.map(m => <option key={m}>{m}</option>)}</select></label><label>비고<textarea name="note" maxLength={500} placeholder="입금자명, 확인 사항 등" /></label><p className="subtle">실제 결제를 확인한 금액만 기록하세요. {panel.row.reservedPass?'예약 수강권입니다. 횟수는 예약한 첫 출석 때 추가됩니다.':panel.row.creditUnits===0?'이미 반영된 수강권이므로 수납해도 횟수가 추가되지 않습니다.':'수납은 결제 상태만 변경합니다.'}</p><button className="primary" disabled={busy}>{busy ? '저장 중…' : '수납 확인·저장'}</button></form>}
       {error && <p className="error" role="alert">{error}</p>}
     </section></div>}
   </div>;

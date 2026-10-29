@@ -18,6 +18,7 @@ export function applySnapshotChanges(current: Snapshot, changes: SnapshotChanges
     attendance: merge(current.attendance, changes.attendance?.filter(a=>a.day.slice(0,7)===current.day.slice(0,7))),
     accounts: merge(current.accounts, changes.accounts),
     invoices: merge(current.invoices, changes.invoices).filter(i=>i.status==='open'),
+    settledInvoices: merge(current.settledInvoices || [], changes.invoices).filter(i=>i.status==='paid'),
   };
 }
 

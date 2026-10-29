@@ -71,15 +71,17 @@ test('combined endpoint authorizes first; unchanged revision skips all ledger qu
   let authorized = false, revisionStamp = 'one', scheduleStamp = 'schedule-one'; const reads = [];
   const query = name => ({
     orderBy(field){this.field=field;return this;},limit(){return this;},select(){return this;},where(){return this;},
-    async get(){reads.push(name);return {docs:name==='opsAttendance'&&reads.length===1?[{id:'private-id',data:()=>({updatedAt:'time'}),updateTime:revisionStamp}]:name==='opsAccounts'&&this.field==='schedule.updatedAt'?[{id:'private-course',data:()=>({schedule:{updatedAt:scheduleStamp}}),updateTime:scheduleStamp}]:[]};},
+    async get(){reads.push(name);return {docs:name==='opsAttendance'&&this.field==='updatedAt'?[{id:'private-id',data:()=>({updatedAt:'time'}),updateTime:revisionStamp}]:name==='opsAccounts'&&this.field==='schedule.updatedAt'?[{id:'private-course',data:()=>({schedule:{updatedAt:scheduleStamp}}),updateTime:scheduleStamp}]:[]};},
   });
   const hash = value => createHash('sha256').update(value).digest('hex');
   const timing = {measure:async(_name,work)=>work(),header:()=>''};
   const {GET} = load('src/app/api/operations/route.ts', name => {
-    if(name.endsWith('/auth')) return {manager:async()=>{if(!authorized)throw Error('unauthorized');},database:()=>({collection:query}),hash,failure:()=>Response.json({}, {status:401})};
+    if(name.endsWith('/auth')) return {manager:async()=>{if(!authorized)throw Error('unauthorized');},database:()=>({collection:query}),hash,failure:e=>{if(authorized)throw e;return Response.json({}, {status:401})}};
     if(name.endsWith('/revision')) return load('src/lib/operations/revision.ts',{hash});
     if(name.endsWith('/server-timing')) return {serverTiming:()=>timing};
     if(name.endsWith('/import-cache'))return {importSources:async()=>({docs:[]})};
+    if(name.endsWith('/upcoming-billing'))return {billingHorizon:()=> '2026-10-15'};
+    if(name.endsWith('/pass-history'))return {passCycleStarts:()=> []};
     if(name.endsWith('/attendance-sequence'))return {attendanceSequence:()=>({positions:{}})};
     if(name.endsWith('/model'))return {validDay:()=>{},seoulDay:()=> '2026-09-30'};
     if(name.endsWith('/notices'))return {noticeConfigured:()=>false};
@@ -89,10 +91,10 @@ test('combined endpoint authorizes first; unchanged revision skips all ledger qu
   assert.equal((await GET(request())).status,401); assert.equal(reads.length,0);
   authorized=true;
   const first=await GET(request()); const snapshot=await first.json();
-  assert.equal(first.status,200); assert.ok(snapshot.students); assert.equal(reads[0],'opsAttendance');
+  assert.equal(first.status,200); assert.ok(snapshot.students); assert.equal(reads[0],'opsLessonReferences');
   assert.ok(reads.includes('opsAccounts')); reads.length=0;
   const same=await (await GET(request(snapshot.revision))).json();
-  assert.deepEqual(same,{unchanged:true,revision:snapshot.revision}); assert.deepEqual(reads,['opsAttendance','opsAccounts','opsLegacyCorrections']);
+  assert.deepEqual(same,{unchanged:true,revision:snapshot.revision}); assert.deepEqual(reads,['opsLessonReferences','opsAttendance','opsAccounts','opsLegacyCorrections']);
   scheduleStamp='schedule-two'; reads.length=0;
   const scheduleChanged=await(await GET(request(snapshot.revision))).json();
   assert.ok(scheduleChanged.students);assert.notEqual(scheduleChanged.revision,snapshot.revision);

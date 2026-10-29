@@ -5,7 +5,8 @@ import {integer,type Snapshot,type Account,type Invoice} from './model';
 export function monthlyPaymentOptions(data:Snapshot,studentId:string,day:string){
  const sequence=attendanceSequence(data.accounts,data.attendance,data.legacyAttendance||[],data.sequenceContext);
  const rows=[...data.invoices,...(data.settledInvoices||[])].filter(i=>i.studentId===studentId&&i.status!=='cancelled');
- const match=rows.filter(i=>invoiceCycleStart(i,sequence.cycleFirstDays,sequence.firstLessonTimes)===day);
+ const passId=data.attendance.find(r=>r.studentId===studentId&&r.day===day)?.passId;
+ const match=rows.filter(i=>(passId&&i.passId===passId)||invoiceCycleStart(i,sequence.cycleFirstDays,sequence.firstLessonTimes)===day);
  const unresolved=rows.filter(i=>!match.includes(i)&&!invoiceCycleStart(i,sequence.cycleFirstDays,sequence.firstLessonTimes));
  return {match,unresolved};
 }

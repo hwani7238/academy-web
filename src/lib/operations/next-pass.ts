@@ -15,7 +15,7 @@ export function activateNextPass(account:Account,invoice:Invoice,day:string,at:s
  if(!next||invoice.id!==next.invoiceId||invoice.studentId!==account.id||invoice.status==='cancelled'||!invoice.reservedPass||invoice.creditUnits!==0)throw Error('예약 수강권의 청구를 확인해주세요.');
  if(invoice.units!==next.units||invoice.amount!==next.amount)throw Error('예약 수강권과 청구 내용이 다릅니다.');
  return {...account,initialPlanUnits:account.initialPlanUnits||account.planUnits,planUnits:next.units,planAmount:next.amount,
- remaining:account.remaining+next.units,nextPass:null,updatedAt:at,
+ remaining:account.remaining+(invoice.allocationState==='allocated'?0:next.units),currentPassId:invoice.passId||invoice.id,currentPassStart:day,lastPassLessonDay:day,nextPass:null,updatedAt:at,
  ...(next.mode==='date'&&next.start<=next.reservedOn?{referenceResetFrom:account.referenceResetFrom&&account.referenceResetFrom<day?account.referenceResetFrom:day}:{}),
  openInvoiceId:invoice.status==='open'?invoice.id:account.openInvoiceId===invoice.id?null:account.openInvoiceId,
  passHistory:[...(account.passHistory||[]).filter(r=>r.start!==day),{start:day,units:next.units}].sort((a,b)=>a.start.localeCompare(b.start))};

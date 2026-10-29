@@ -1,5 +1,6 @@
 import type { Lifecycle } from './lifecycle';
 export type Account = {
+  currentPassId?: string; currentPassStart?: string; lastPassLessonDay?: string;
   nextPass?: import('./next-pass').NextPass | null;
   initialPlanUnits?: number;
   referenceResetFrom?: string;
@@ -14,9 +15,9 @@ export type Account = {
 export const ATTENDANCE_LABELS = { present: "출석", absent: "결석", makeup: "보강", makeup_reserved: "보강 예약", late_cancel: "당일 취소", travel: "여행", sick: "병가", paused: "수강 일시 정지", cancelled: "취소" } as const;
 export type AttendanceStatus = keyof typeof ATTENDANCE_LABELS;
 export type LegacyAttendance = { studentId: string; day: string; value: string; color: string; status?: AttendanceStatus; note?: string; revision?: string };
-export type Attendance = { unpaidCycleStart?: string; range?: {id:string;start:string;end:string}; arrivalAt?: string; status?: AttendanceStatus; notificationSuppressed?: boolean; source?: "kiosk" | "manual" | "teacher"; relatedDay?: string; id: string; studentId: string; name: string; day: string; at: string; units: number; note: string; updatedAt: string };
-export type Invoice = { receiptCancelledAt?: string; projected?: boolean; reservedPass?: boolean; lessonDate?: string; updatedAt?: string; creditUnits?: number; cycleStart?: string; id: string; studentId: string; name: string; units: number; amount: number; paid: number; status: 'open' | 'paid' | 'cancelled'; needsReview: boolean; createdAt: string };
-export type Payment = { cancelledAt?: string; cancelledBy?: string; cancelReason?: string; revertedUnits?: number; paymentDate?: string; id: string; invoiceId: string; studentId: string; amount: number; method: string; at: string; note: string };
+export type Attendance = { passId?: string; unpaidCycleStart?: string; range?: {id:string;start:string;end:string}; arrivalAt?: string; status?: AttendanceStatus; notificationSuppressed?: boolean; source?: "kiosk" | "manual" | "teacher"; relatedDay?: string; id: string; studentId: string; name: string; day: string; at: string; units: number; note: string; updatedAt: string };
+export type Invoice = { passId?: string; legacyCreditUnits?: number; allocationState?: 'pending' | 'allocated'; allocatedUnits?: number; allocationAt?: string; linkReview?: boolean; receiptCancelledAt?: string; projected?: boolean; reservedPass?: boolean; lessonDate?: string; updatedAt?: string; creditUnits?: number; cycleStart?: string; id: string; studentId: string; name: string; units: number; amount: number; paid: number; status: 'open' | 'paid' | 'cancelled'; needsReview: boolean; createdAt: string };
+export type Payment = { passId?: string; cancelledAt?: string; cancelledBy?: string; cancelReason?: string; revertedUnits?: number; paymentDate?: string; id: string; invoiceId: string; studentId: string; amount: number; method: string; at: string; note: string };
 export type Notice = { id: string; studentId: string; name: string; kind: 'attendance' | 'billing'; status: string; createdAt: string; requestId?: string; error?: string };
 export type Device = { id: string; name: string; active: boolean; createdAt: string };
 export type Snapshot = { cancelledInvoiceKeys?: string[]; forecastAttendance?: Attendance[]; unpaidCycleKeys?: string[]; settledInvoices?: Invoice[]; sequenceContext?: import('./attendance-sequence').SequenceContext; legacyAttendance?: LegacyAttendance[]; students: { phoneUpdatedAt?: string; courseUpdatedAt?: string; lifecycle?: Lifecycle; id: string; name: string; phone: string; sourceStudentId?: string; subject?: string; importId?: string; openingAsOf?: string; instruments?: string[]; attendanceGroup?: string }[]; accounts: Account[]; attendance: Attendance[]; invoices: Invoice[]; payments: Payment[]; notices: Notice[]; devices: Device[]; day: string; configured: boolean };

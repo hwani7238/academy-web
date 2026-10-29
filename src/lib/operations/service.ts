@@ -1,3 +1,4 @@
+import { passInvoice, passDay, allocatedPass, lessonPass, nextRecordedCycle, paymentPass, unresolvedReceipts, requireClearPassLinks } from './pass-link';
 import {monthlyInvoice} from './monthly-payment';
 import {paymentCancellation} from './payment-cancellation';
 import {nextPassInput,nextPassDue,activateNextPass,recordedPassStart} from './next-pass';
@@ -33,7 +34,7 @@ function enqueue(tx: Transaction, db: Firestore, id: string, account: Account, k
 }
 function newInvoice(tx: Transaction, db: Firestore, account: Account, id: string, reason: string, createdAt = now()) {
   if(account.nextPass)return account.openInvoiceId || account.nextPass.invoiceId;
-  const invoice: Invoice = { id, studentId: account.id, name: account.name, units: account.planUnits, amount: account.planAmount, paid: 0, status: 'open', needsReview: false, createdAt };
+  const invoice: Invoice = passInvoice({ id, studentId: account.id, name: account.name, units: account.planUnits, amount: account.planAmount, paid: 0, status: 'open', needsReview: false, createdAt }, false, createdAt);
   tx.create(db.doc(`opsInvoices/${id}`), { ...invoice, reason });
   if (account.autoBilling) enqueue(tx, db, `billing_${id}`, account, 'billing', { student_name: account.name, amount: String(invoice.amount), lesson_count: String(invoice.units) });
   return id;
@@ -136,7 +137,7 @@ export async function registerStudent(input: Record<string, unknown>, actor: str
       name: `${v.name} · ${v.subject}`, phone: v.phone, checkinSuffixes: [...new Set([v.phone.slice(-4), ...(v.personalPhone ? [v.personalPhone.slice(-4)] : [])])],
       planUnits: v.planUnits, planAmount: v.planAmount, remaining: v.remaining, openInvoiceId: null, autoBilling: false, active: true, updatedAt: at };
     const invoice = firstEnrollmentInvoice(account, v.firstLessonDate, at);
-    tx.create(accountRef, { ...account, openInvoiceId: invoice.id });
+    tx.create(accountRef, { ...account, currentPassId:invoice.id,currentPassStart:v.firstLessonDate,openInvoiceId: invoice.id });
     tx.create(db.doc(`opsInvoices/${invoice.id}`), { ...invoice, reason: '신규 등록' });
     audit(tx, db, actor, 'register-student', id, { sourceStudentId, group: v.group, planUnits: v.planUnits, planAmount: v.planAmount, remaining: v.remaining, invoiceId: invoice.id, firstLessonDate: v.firstLessonDate });
     return { ok: true, studentId: id };
@@ -168,7 +169,7 @@ export async function configure(input: Record<string, unknown>, actor: string) {
     const overrideGroup=student.data()?.operationsCourseGroups?.[subject] as string|undefined;
     const overrideSubject=overrideGroup?(overrideGroup.includes('피아노')?'피아노':overrideGroup):undefined;
     const remaining = old ? old.remaining : integer(input.remaining, -1000, 1000, '현재 남은 횟수');
-    const saved = { id, ...(old?.nextPass?{nextPass:old.nextPass}:{}), ...(old?.initialPlanUnits?{initialPlanUnits:old.initialPlanUnits}:{}), ...(old?.passHistory ? {passHistory:old.passHistory} : {}), ...(old?.schedule ? {schedule:old.schedule} : {}), ...(old?.importId ? { importId: old.importId, openingAsOf: old.openingAsOf } : {}), ...(old?.attendanceGroup ? { attendanceGroup: old.attendanceGroup } : {}), ...(old?.displaySubject ? { displaySubject: old.displaySubject } : {}), ...(subject ? { sourceStudentId, subject } : {}), name: subject ? `${student.data()?.name || '학생'} · ${subject}` : student.data()?.name || '학생', phone, checkinSuffixes: codes, planUnits, planAmount, remaining, openInvoiceId: old?.openInvoiceId || null, active: input.active !== false, autoBilling: input.autoBilling === true, updatedAt: now(), ...(overrideGroup?{attendanceGroup:overrideGroup,displaySubject:overrideSubject,name:`${student.data()?.name} · ${overrideSubject}`}:{}) };
+    const saved = { id, ...(old?.currentPassId?{currentPassId:old.currentPassId,currentPassStart:old.currentPassStart || ""}:{}),...(old?.lastPassLessonDay?{lastPassLessonDay:old.lastPassLessonDay}:{}), ...(old?.nextPass?{nextPass:old.nextPass}:{}), ...(old?.initialPlanUnits?{initialPlanUnits:old.initialPlanUnits}:{}), ...(old?.passHistory ? {passHistory:old.passHistory} : {}), ...(old?.schedule ? {schedule:old.schedule} : {}), ...(old?.importId ? { importId: old.importId, openingAsOf: old.openingAsOf } : {}), ...(old?.attendanceGroup ? { attendanceGroup: old.attendanceGroup } : {}), ...(old?.displaySubject ? { displaySubject: old.displaySubject } : {}), ...(subject ? { sourceStudentId, subject } : {}), name: subject ? `${student.data()?.name || '학생'} · ${subject}` : student.data()?.name || '학생', phone, checkinSuffixes: codes, planUnits, planAmount, remaining, openInvoiceId: old?.openInvoiceId || null, active: input.active !== false, autoBilling: input.autoBilling === true, updatedAt: now(), ...(overrideGroup?{attendanceGroup:overrideGroup,displaySubject:overrideSubject,name:`${student.data()?.name} · ${overrideSubject}`}:{}) };
     const firstInvoice = !old && input.firstBilling === true ? firstEnrollmentInvoice(saved as Account, validDay(input.firstLessonDate), saved.updatedAt) : null;
     let revisedInvoice: Invoice | undefined, invoiceBefore: Invoice | undefined;
     let billingNotice: FirebaseFirestore.DocumentSnapshot | undefined;
@@ -187,7 +188,7 @@ export async function configure(input: Record<string, unknown>, actor: string) {
       saved.openInvoiceId = firstInvoice.id;
       tx.create(db.doc(`opsInvoices/${firstInvoice.id}`), { ...firstInvoice, reason: '신규 수강 등록' });
     }
-    tx.set(ref, saved);
+    tx.set(ref, {...saved,...(firstInvoice?{currentPassId:firstInvoice.id,currentPassStart:firstInvoice.cycleStart}: {})});
     if (revisedInvoice) {
       tx.update(db.doc(`opsInvoices/${revisedInvoice.id}`), { units: revisedInvoice.units, amount: revisedInvoice.amount, creditUnits: revisedInvoice.creditUnits, updatedAt: revisedInvoice.updatedAt });
       if (billingNotice?.exists && billingNotice.data()?.status !== 'cancelled') tx.update(billingNotice.ref, { parameters: { ...billingNotice.data()?.parameters, amount: String(revisedInvoice.amount - revisedInvoice.paid), lesson_count: String(revisedInvoice.units) } });
@@ -272,11 +273,17 @@ async function registerArrival(studentId: string, digits: string, actor: string,
     const previousNotice = attended.exists ? await tx.get(db.doc(`opsNotices/attendance_${attendanceId}`)) : null;
     const source = reservation ? await makeupSource(tx, db, account, day, reservation.relatedDay || '', attendanceId) : undefined;
     const units = source?.charged ? 0 : 1;
+    const passRows=(await tx.get(db.collection('opsInvoices').where('studentId','==',id))).docs.map(d=>({...d.data(),id:d.id}) as Invoice);
+    const passRecords=(await tx.get(db.collection('opsAttendance').where('studentId','==',id))).docs.map(d=>d.data() as Attendance);
+    const cycle=nextRecordedCycle(account,passRecords,{id:attendanceId,studentId:id,day,units,status:reservation?'makeup':'present'} as Attendance);
     const activation=nextPassDue(account,day,reservation?'makeup':'present')?await tx.get(db.doc(`opsInvoices/${account.nextPass!.invoiceId}`)):null;
-    if(activation){account=activateNextPass(account,activation.data() as Invoice,day,now());tx.update(activation.ref,{reservedPass:false,cycleStart:day,lessonDate:day,updatedAt:now()});audit(tx,db,actor,'activate-next-pass',id,{invoiceId:activation.id,day,units:account.planUnits});}
+    if(activation){account=activateNextPass(account,activation.data() as Invoice,day,now());tx.update(activation.ref,{...passInvoice(activation.data() as Invoice,true,now()),reservedPass:false,cycleStart:day,lessonDate:day,updatedAt:now()});audit(tx,db,actor,'activate-next-pass',id,{invoiceId:activation.id,day,units:account.planUnits});}
+    const pass=activation?{account,passId:account.currentPassId}:lessonPass(account,passRows,day,reservation?0:units,attended.data() as Attendance|undefined,now(),invoiceId,cycle);
+    account=pass.account;
+    if(pass.invoice){if(pass.created)tx.create(db.doc(`opsInvoices/${pass.invoice.id}`),pass.invoice);else tx.update(db.doc(`opsInvoices/${pass.invoice.id}`),{...pass.invoice});audit(tx,db,actor,'allocate-pass',id,{passId:pass.passId,day,units:pass.invoice.units,remaining:account.remaining});}
     const remaining = adjustBalance(account.remaining, 0, units);
-    const openInvoiceId = remaining <= 0 && units > 0 && !account.openInvoiceId ? newInvoice(tx, db, account, invoiceId, '수업 횟수 소진') : account.openInvoiceId;
-    tx.set(attendanceRef, { id: attendanceId, studentId: id, name: account.name, day, at: now(), units, status: reservation ? 'makeup' : 'present', source: teacher ? 'teacher' : 'kiosk', ...(teacher ? {arrivalAt:teacher.arrivalAt, notificationSuppressed:true} : {}), note: reservation?.note || '', ...(reservation ? {relatedDay:reservation.relatedDay} : {}), updatedAt: now() });
+    const openInvoiceId = remaining <= 0 && units > 0 && !account.openInvoiceId && !passRows.some(i=>i.allocationState==='pending'&&i.status!=='cancelled') && !unresolvedReceipts(passRows).length ? newInvoice(tx, db, account, invoiceId, '수업 횟수 소진') : account.openInvoiceId;
+    tx.set(attendanceRef, { ...(pass.passId?{passId:pass.passId}:{}),id: attendanceId, studentId: id, name: account.name, day, at: now(), units, status: reservation ? 'makeup' : 'present', source: teacher ? 'teacher' : 'kiosk', ...(teacher ? {arrivalAt:teacher.arrivalAt, notificationSuppressed:true} : {}), note: reservation?.note || '', ...(reservation ? {relatedDay:reservation.relatedDay} : {}), updatedAt: now() });
     tx.update(ref, { ...account, remaining, openInvoiceId, updatedAt: now() });
     if (!teacher && !previousNotice?.exists) enqueue(tx, db, `attendance_${attendanceId}`, account, 'attendance', { student_name: String(owner.name || account.name), attendance_time: new Date().toLocaleTimeString('ko-KR', { timeZone: 'Asia/Seoul', hour: '2-digit', minute: '2-digit', hour12: false }) });
     if (teacher && previousNotice?.exists && ['queued','blocked'].includes(previousNotice.data()?.status)) tx.update(previousNotice.ref, { status:'cancelled', error:'강사가 알림 없이 출석 처리했습니다.' });
@@ -312,8 +319,9 @@ export async function adjust(input: Record<string, unknown>, actor: string) {
     if (attendance.status === 'cancelled' && units !== 0) throw new Error('취소 기록은 월별 출석표에서 상태를 먼저 변경해주세요.');
     const ref = db.doc(`opsAccounts/${attendance.studentId}`); const account = (await tx.get(ref)).data() as Account;
     const currentInvoice = account.openInvoiceId ? await tx.get(db.doc(`opsInvoices/${account.openInvoiceId}`)) : null;
+    const passes=(await tx.get(db.collection('opsInvoices').where('studentId','==',account.id))).docs.map(d=>d.data() as Invoice);
     const remaining = adjustBalance(account.remaining, attendance.units, units);
-    const openInvoiceId = remaining <= 0 && !account.openInvoiceId ? newInvoice(tx, db, account, invoiceId, '횟수 수정 후 소진') : account.openInvoiceId;
+    const openInvoiceId = remaining <= 0 && !account.openInvoiceId && !passes.some(i=>i.allocationState==='pending'&&i.status!=='cancelled') ? newInvoice(tx, db, account, invoiceId, '횟수 수정 후 소진') : account.openInvoiceId;
     if (remaining > 0 && currentInvoice?.exists && !currentInvoice.data()?.reservedPass) tx.update(currentInvoice.ref, { needsReview: true });
     tx.update(ref, { remaining, openInvoiceId, updatedAt: now() });
     tx.update(attendanceRef, { units, note, updatedAt: now() });
@@ -342,6 +350,8 @@ export async function createInvoice(studentId: unknown, actor: string) {
     if (!account?.active) throw new Error('수강 설정을 먼저 저장해주세요.');
     if(account.nextPass)throw Error('다음 수강권의 예약 청구가 이미 있습니다. 청구·수납에서 확인해주세요.');
     if (account.openInvoiceId) throw new Error('아직 완료하지 않은 청구가 있습니다.');
+    const all=(await tx.get(db.collection('opsInvoices').where('studentId','==',id))).docs.map(d=>({...d.data(),id:d.id}) as Invoice);requireClearPassLinks(all);
+    if(all.some(i=>i.status!=='cancelled'&&i.allocationState==='pending'))throw Error('이미 다음 수강권이 있습니다. 기존 청구를 확인해주세요.');
     newInvoice(tx, db, account, invoiceId, '원장 등록');
     tx.update(ref, { openInvoiceId: invoiceId, updatedAt: now() }); audit(tx, db, actor, 'invoice', id, { invoiceId });
   });
@@ -362,11 +372,13 @@ export async function payment(input: Record<string, unknown>, actor: string) {
     const invoice = snap.data() as Invoice | undefined; if (!invoice) throw new Error('청구를 찾을 수 없습니다.');
     if ((invoice.updatedAt || '') !== (input.expectedInvoiceUpdatedAt || '')) throw new Error('청구 내용이 변경됐습니다. 창을 닫고 다시 수납해주세요.');
     const accountRef = db.doc(`opsAccounts/${invoice.studentId}`); const account = (await tx.get(accountRef)).data() as Account;
+    const all=(await tx.get(db.collection('opsInvoices').where('studentId','==',invoice.studentId))).docs.map(d=>({...d.data(),id:d.id}) as Invoice);
+    const stamp=new Date(Math.max(Date.now(),(Date.parse(invoice.updatedAt||'')||0)+1)).toISOString(),linked=paymentPass(invoice,passDay(invoice)||text(input.lessonDate),all,stamp);
     const { paid, complete } = settle(invoice, input.amount as number);
-    tx.create(paymentRef, { id: requestId, invoiceId: id, studentId: invoice.studentId, amount: input.amount, method, paymentDate, at: now(), note: text(input.note), actor });
-    tx.update(invoiceRef, { paid, status: complete ? 'paid' : 'open' });
-    if (complete) tx.update(accountRef, { remaining: account.remaining + (invoice.creditUnits ?? invoice.units), openInvoiceId: account.openInvoiceId === id ? null : account.openInvoiceId, updatedAt: now() });
-    audit(tx, db, actor, 'payment', invoice.studentId, { invoiceId: id, amount: input.amount, method, paymentDate, complete });
+    tx.create(paymentRef, { id: requestId, invoiceId: id, passId:linked.passId, studentId: invoice.studentId, amount: input.amount, method, paymentDate, at: now(), note: text(input.note), actor });
+    tx.update(invoiceRef, { ...linked, paid, status: complete ? 'paid' : 'open' });
+    if (complete) tx.update(accountRef, { remaining: account.remaining, openInvoiceId: account.openInvoiceId === id ? null : account.openInvoiceId, updatedAt: now() });
+    audit(tx, db, actor, 'payment', invoice.studentId, { invoiceId: id, passId:linked.passId,lessonDate:passDay(linked),amount: input.amount, method, paymentDate, complete,creditedUnits:0,remaining:account.remaining });
   });
 }
 export async function cancelPayment(input:Record<string,unknown>,actor:string){
@@ -404,14 +416,15 @@ export async function editInvoice(input: Record<string, unknown>, actor: string)
     if (!account || account.openInvoiceId !== id) throw Error('현재 청구 연결을 확인해주세요.');
     const noticeRef = db.doc(`opsNotices/billing_${id}`), notice = (await tx.get(noticeRef)).data();
     if (notice && !['queued', 'blocked', 'review', 'cancelled'].includes(notice.status)) throw Error('결제 안내 처리 기록이 있어 수정할 수 없습니다. 발송 결과를 먼저 확인해주세요.');
-    const creditUnits = input.kind === 'current' ? 0 : units;
+    const creditUnits = old.passId ? 0 : input.kind === 'current' ? 0 : units;
+    if(old.passId&&old.allocationState==='allocated'&&old.units!==units)throw Error('이미 시작된 수강권 횟수는 총 등록 현황에서 수강권 변경으로 조정해주세요.');
     if (cycleStart) {
       const cycles = await tx.get(db.collection('opsInvoices').where('studentId', '==', old.studentId));
       if (cycles.docs.some(d => d.id !== id && d.data().status !== 'cancelled' && d.data().cycleStart === cycleStart)) throw Error('이 재등록일의 청구가 이미 있습니다. 기존 청구를 확인해주세요.');
     }
     if (old.units === units && old.amount === amount && (old.creditUnits ?? old.units) === creditUnits && (old.cycleStart || '') === cycleStart && !old.needsReview) return;
     const updatedAt = new Date(Math.max(Date.now(), Date.parse(old.updatedAt || '') + 1 || 0)).toISOString();
-    tx.update(ref, { units, amount, creditUnits, cycleStart, ...(old.lessonDate && cycleStart ? {lessonDate:cycleStart} : {}), needsReview: false, updatedAt });
+    tx.update(ref, { units, amount, creditUnits, cycleStart, ...(old.passId&&input.kind==='current'?{allocationState:'allocated',allocatedUnits:units,allocationAt:old.allocationAt||updatedAt}:{}), ...(old.lessonDate && cycleStart ? {lessonDate:cycleStart} : {}), needsReview: false, updatedAt });
     if (notice && notice.status !== 'cancelled') tx.update(noticeRef, { parameters: { ...notice.parameters, amount: String(amount), lesson_count: String(units) } });
     audit(tx, db, actor, 'edit-invoice', old.studentId, {
       invoiceId: id, before: { units: old.units, amount: old.amount, creditUnits: old.creditUnits ?? old.units, cycleStart: old.cycleStart || '' },
@@ -423,17 +436,25 @@ export async function linkInvoiceLesson(input: Record<string, unknown>, actor: s
   const id = key(input.invoiceId), lessonDate = validDay(input.lessonDate), db = database();
   return db.runTransaction(async tx => {
     const ref = db.doc(`opsInvoices/${id}`), invoice = (await tx.get(ref)).data() as Invoice | undefined;
-    if (!invoice || invoice.status !== 'open') throw Error('진행 중인 청구를 확인해주세요.');
+    if (!invoice || invoice.status === 'cancelled') throw Error('진행 중인 청구·수납을 확인해주세요.');
     if ((invoice.updatedAt || '') !== (input.expectedUpdatedAt || '')) throw Error('청구 내용이 변경됐습니다. 창을 닫고 다시 확인해주세요.');
     if(invoice.reservedPass)throw Error('예약 청구의 날짜는 총 등록 현황에서 수강권 예약을 변경해주세요.');
-    if (invoice.lessonDate === lessonDate) return { invoices: [invoice] };
+    if (invoice.lessonDate === lessonDate && invoice.passId && !invoice.linkReview) return { invoices: [invoice] };
     const others = await tx.get(db.collection('opsInvoices').where('studentId', '==', invoice.studentId));
     if (others.docs.some(d => d.id !== id && d.data().status !== 'cancelled' && (d.data().lessonDate || d.data().cycleStart) === lessonDate)) throw Error('이 1회차 날짜에 연결된 다른 청구가 있습니다. 수납 기록을 확인해주세요.');
+    const accountRef=db.doc(`opsAccounts/${invoice.studentId}`),account=(await tx.get(accountRef)).data() as Account;
+    let linked=invoice;
+    if(!invoice.passId){
+      const allocated=invoice.status==='paid'||invoice.creditUnits===0;
+      if(!allocated&&!['already','activate','pending'].includes(String(input.allocation)))throw Error('기존 수강권의 횟수 반영 상태를 선택해주세요.');
+      linked=passInvoice(invoice,allocated||input.allocation==='already',now());
+      if(!allocated&&input.allocation==='activate'){const result=allocatedPass(account,linked,lessonDate,now());linked=result.invoice;tx.update(accountRef,{...result.account});audit(tx,db,actor,'allocate-pass',invoice.studentId,{passId:linked.passId,day:lessonDate,units:invoice.units,remaining:result.account.remaining});}
+    }
     const updatedAt = new Date(Math.max(Date.now(), Date.parse(invoice.updatedAt || '') + 1 || 0)).toISOString();
     // Link billing metadata only: never reset lesson chronology or alter financial credit/review state.
-    tx.update(ref, { lessonDate, updatedAt });
+    tx.update(ref, { ...linked,lessonDate,linkReview:false,updatedAt });
     audit(tx, db, actor, 'invoice-lesson-date', invoice.studentId, { invoiceId: id, before: invoice.lessonDate || invoice.cycleStart || '', after: lessonDate });
-    return { invoices: [{ ...invoice, lessonDate, updatedAt }] };
+    return {invoices:[{...linked,lessonDate,linkReview:false,updatedAt}],accounts:[{...account,...(!invoice.passId&&invoice.status!=='paid'&&invoice.creditUnits!==0&&input.allocation==='activate'?allocatedPass(account,passInvoice(invoice,false,updatedAt),lessonDate,updatedAt).account:{})}]};
   });
 }
 export async function invoiceAction(input: Record<string, unknown>, actor: string) {
@@ -536,21 +557,28 @@ export async function recordAttendance(input: Record<string, unknown>, actor: st
       if (values.status === 'makeup' && original.charged) values.units = 0;
     }
     const stamp=now();
+    const passRows=(await tx.get(db.collection('opsInvoices').where('studentId','==',studentId))).docs.map(d=>({...d.data(),id:d.id}) as Invoice);
+    const passRecords=(await tx.get(db.collection('opsAttendance').where('studentId','==',studentId))).docs.map(d=>d.data() as Attendance);
+    const latest=passRecords.map(r=>r.day).sort().at(-1)||'';
+    const cycle=nextRecordedCycle(account,passRecords,{...values,id,studentId} as Attendance);
     const activation=nextPassDue(account,values.day,values.status,old?.status || (old?'present':undefined))?await tx.get(db.doc(`opsInvoices/${account.nextPass!.invoiceId}`)):null;
-    if(activation){account=activateNextPass(account,activation.data() as Invoice,values.day,stamp);tx.update(activation.ref,{reservedPass:false,cycleStart:values.day,lessonDate:values.day,updatedAt:stamp});audit(tx,db,actor,'activate-next-pass',studentId,{invoiceId:activation.id,day:values.day,units:account.planUnits});}
+    if(activation){account=activateNextPass(account,activation.data() as Invoice,values.day,stamp);tx.update(activation.ref,{...passInvoice(activation.data() as Invoice,true,stamp),reservedPass:false,cycleStart:values.day,lessonDate:values.day,updatedAt:stamp});audit(tx,db,actor,'activate-next-pass',studentId,{invoiceId:activation.id,day:values.day,units:account.planUnits});}
+    const pass=activation?{account,passId:account.currentPassId}:lessonPass({...account,lastPassLessonDay:account.lastPassLessonDay||latest},passRows,values.day,values.relatedDay?0:values.units,old,stamp,invoiceId,cycle);
+    account=pass.account;
+    if(pass.invoice){if(pass.created)tx.create(db.doc(`opsInvoices/${pass.invoice.id}`),pass.invoice);else tx.update(db.doc(`opsInvoices/${pass.invoice.id}`),{...pass.invoice});audit(tx,db,actor,'allocate-pass',studentId,{passId:pass.passId,day:values.day,units:pass.invoice.units,remaining:account.remaining});}
     const remaining = adjustBalance(account.remaining, old?.units || 0, values.units);
-    const openInvoiceId = remaining <= 0 && values.units > (old?.units || 0) && !account.openInvoiceId ? newInvoice(tx, db, account, invoiceId, '수동 출결 기록 후 소진', stamp) : account.openInvoiceId;
+    const openInvoiceId = remaining <= 0 && values.units > (old?.units || 0) && !account.openInvoiceId && !passRows.some(i=>i.allocationState==='pending'&&i.status!=='cancelled') && !unresolvedReceipts(passRows).length ? newInvoice(tx, db, account, invoiceId, '수동 출결 기록 후 소진', stamp) : account.openInvoiceId;
     const review = remaining > 0 && values.units < (old?.units || 0);
     if (review && currentInvoice?.exists && !currentInvoice.data()?.reservedPass) tx.update(currentInvoice.ref, { needsReview: true });
-    const attendance:Attendance={ ...old, ...values, id, studentId, name: account.name, source: old?.source || 'manual', at: old?.at || stamp, updatedAt: stamp };
+    const attendance:Attendance={ ...old, ...values,...(pass.passId?{passId:pass.passId}:{}), id, studentId, name: account.name, source: old?.source || 'manual', at: old?.at || stamp, updatedAt: stamp };
     delete attendance.range;
     const updatedAccount={...account,remaining,openInvoiceId,updatedAt:stamp};
     tx.set(ref, attendance);
     tx.update(accountRef, { ...account, remaining, openInvoiceId, updatedAt: stamp });
     audit(tx, db, actor, 'record-attendance', studentId, { attendanceId: id, before: old?.units || 0, ...values, remaining, ...(activation?{passCreditUnits:account.planUnits}:{}) });
     if(account.nextPass)return;
-    const invoices:Invoice[]=openInvoiceId && openInvoiceId!==account.openInvoiceId ? [{id:openInvoiceId,studentId:account.id,name:account.name,units:account.planUnits,amount:account.planAmount,paid:0,status:'open',needsReview:false,createdAt:stamp}] : currentInvoice?.exists ? [{...currentInvoice.data(),id:currentInvoice.id,...(review?{needsReview:true}:{})} as Invoice] : [];
-    if(activation)return; // Full refresh also loads the new cycle boundary and invoice date.
+    const invoices:Invoice[]=openInvoiceId && openInvoiceId!==account.openInvoiceId ? [passInvoice({id:openInvoiceId,studentId:account.id,name:account.name,units:account.planUnits,amount:account.planAmount,paid:0,status:'open',needsReview:false,createdAt:stamp},false,stamp)] : currentInvoice?.exists ? [{...currentInvoice.data(),id:currentInvoice.id,...(review?{needsReview:true}:{})} as Invoice] : [];
+    if(activation||pass.invoice)return; // Full refresh also loads the new cycle boundary and invoice date.
     return { attendance:[attendance], accounts:[updatedAccount], invoices };
   });
 }
@@ -587,7 +615,8 @@ export async function correctRemaining(input: Record<string, unknown>, actor: st
     const at=new Date(Math.max(Date.now(),Date.parse(account.updatedAt)+1)).toISOString();
     let invoice=invoiceSnap?.data() as Invoice|undefined;
     let openInvoiceId=account.openInvoiceId;
-    if(remaining<=0 && !openInvoiceId){
+    const passes=(await tx.get(db.collection('opsInvoices').where('studentId','==',studentId))).docs.map(d=>d.data() as Invoice);
+    if(remaining<=0 && !openInvoiceId&&!passes.some(i=>i.allocationState==='pending'&&i.status!=='cancelled')){
       openInvoiceId=newInvoice(tx,db,{...account,autoBilling:false},randomUUID(),'잔여 횟수 정정 후 소진',at);
       invoice={id:openInvoiceId,studentId,name:account.name,units:account.planUnits,amount:account.planAmount,paid:0,status:'open',needsReview:false,createdAt:at};
     }else if(remaining!==account.remaining && invoice?.status==='open' && !invoice.reservedPass){
@@ -612,10 +641,11 @@ export async function createCurrentCycleInvoice(input:Record<string,unknown>,act
   if(!account?.active)throw Error('수강 설정을 먼저 저장해주세요.');
   if(old.exists)throw Error('이 재등록일의 청구가 이미 있습니다. 기존 청구를 확인해주세요.');
   const cycles=await tx.get(db.collection('opsInvoices').where('studentId','==',id));
-  if(cycles.docs.some(d=>d.data().status!=='cancelled' && d.data().cycleStart===cycleStart))throw Error('이 재등록일의 청구가 이미 있습니다. 기존 청구를 확인해주세요.');
+  if(cycles.docs.some(d=>d.data().status!=='cancelled' && (d.data().lessonDate||d.data().cycleStart)===cycleStart))throw Error('이 재등록일의 청구가 이미 있습니다. 기존 청구를 확인해주세요.');
   if(account.openInvoiceId)throw Error('진행 중인 청구가 있습니다. 기존 청구를 확인해주세요.');
   if(account.updatedAt!==input.expectedUpdatedAt)throw Error('수강 정보가 변경됐습니다. 창을 닫고 다시 확인해주세요.');
-  const at=now();const invoice:Invoice={id:invoiceId,studentId:id,name:account.name,units:account.planUnits,amount:account.planAmount,paid:0,status:'open',needsReview:false,createdAt:at,creditUnits:0,...(cycleStart?{cycleStart}:{})};
+  requireClearPassLinks(cycles.docs.map(d=>({...d.data(),id:d.id}) as Invoice));
+  const at=now();const invoice:Invoice=passInvoice({id:invoiceId,studentId:id,name:account.name,units:account.planUnits,amount:account.planAmount,paid:0,status:'open',needsReview:false,createdAt:at,creditUnits:0,...(cycleStart?{cycleStart}:{})},true,at);
   tx.create(invoiceRef,invoice);tx.update(ref,{openInvoiceId:invoiceId,updatedAt:at});
   audit(tx,db,actor,'current-cycle-invoice',id,{invoiceId,cycleStart,amount:invoice.amount,remaining:account.remaining,creditUnits:0});
   return {accounts:[{...account,openInvoiceId:invoiceId,updatedAt:at}],invoices:[invoice]};
@@ -809,8 +839,12 @@ export async function saveNextPass(input:Record<string,unknown>,actor:string){
   const previous=account.nextPass;
   const cycles=await tx.get(db.collection('opsInvoices').where('studentId','==',id));
   if(input.cancel!==true&&input.mode==='date'&&cycles.docs.some(d=>d.id!==previous?.invoiceId&&d.data().status!=='cancelled'&&(d.data().lessonDate||d.data().cycleStart)===input.start))throw Error('해당 날짜에 다른 수강권 청구가 있습니다. 1회차 날짜를 확인해주세요.');
-  const invoiceRef=db.doc(`opsInvoices/${previous?.invoiceId||newId}`);
-  const old=previous?(await tx.get(invoiceRef)).data() as Invoice:undefined;
+  if(input.cancel!==true)requireClearPassLinks(cycles.docs.map(d=>({...d.data(),id:d.id}) as Invoice));
+  const pending=cycles.docs.filter(d=>d.id!==previous?.invoiceId&&d.data().allocationState==='pending'&&d.data().status!=='cancelled');
+  if(!previous&&pending.length>1)throw Error('다음 수강권이 여러 건 있습니다. 청구·수납에서 먼저 확인해주세요.');
+  const reusable=!previous?pending[0]:undefined;
+  const invoiceRef=db.doc(`opsInvoices/${previous?.invoiceId||reusable?.id||newId}`);
+  const old=previous?(await tx.get(invoiceRef)).data() as Invoice:reusable?.data() as Invoice|undefined;
   const noticeRef=db.doc(`opsNotices/billing_${invoiceRef.id}`),notice=previous?await tx.get(noticeRef):null;
   if(old?.paid)throw Error('예약 수강권에 수납 내역이 있습니다. 수납 내역을 확인한 뒤 변경해주세요.');
   if(notice?.exists&&!['cancelled','failed','blocked'].includes(notice.data()?.status))throw Error('결제 안내가 발송 요청된 예약입니다. 안내 상태를 먼저 확인해주세요.');
@@ -821,7 +855,7 @@ export async function saveNextPass(input:Record<string,unknown>,actor:string){
    tx.update(ref,{nextPass:null,openInvoiceId:account.openInvoiceId===previous.invoiceId?null:account.openInvoiceId,updatedAt:stamp});
   }else{
    const nextPass=nextPassInput(input,invoiceRef.id);
-   const invoice:Invoice={id:invoiceRef.id,studentId:id,name:account.name,units:nextPass.units,amount:nextPass.amount,paid:0,status:'open',needsReview:false,createdAt:old?.createdAt||stamp,updatedAt:stamp,creditUnits:0,reservedPass:true,lessonDate:nextPass.start};
+   const invoice:Invoice={passId:invoiceRef.id,allocationState:'pending',allocatedUnits:0,id:invoiceRef.id,studentId:id,name:account.name,units:nextPass.units,amount:nextPass.amount,paid:0,status:'open',needsReview:false,createdAt:old?.createdAt||stamp,updatedAt:stamp,creditUnits:0,reservedPass:true,lessonDate:nextPass.start};
    const records=nextPass.mode==='date'&&nextPass.start<=seoulDay()
     ? (await tx.get(db.collection('opsAttendance').where('studentId','==',id))).docs.map(d=>({...d.data(),id:d.id}) as Attendance) : [];
    const first=recordedPassStart(account,nextPass,records,cycles.docs.map(d=>({...d.data(),id:d.id}) as Invoice));
@@ -829,7 +863,7 @@ export async function saveNextPass(input:Record<string,unknown>,actor:string){
     const updated=activateNextPass({...account,nextPass},invoice,first,stamp);
     // The operator's dated change supersedes spreadsheet ordinal anchors from this cycle onward.
     updated.referenceResetFrom=account.referenceResetFrom&&account.referenceResetFrom<first?account.referenceResetFrom:first;
-    tx.set(invoiceRef,{...invoice,reservedPass:false,cycleStart:first,lessonDate:first});
+    tx.set(invoiceRef,{...passInvoice(invoice,true,stamp),reservedPass:false,cycleStart:first,lessonDate:first});
     tx.update(ref,{...updated});
     audit(tx,db,actor,'apply-past-pass',id,{invoiceId:invoice.id,requestedStart:nextPass.start,day:first,passCreditUnits:nextPass.units,remaining:updated.remaining});
    }else{
@@ -852,12 +886,15 @@ export async function prepareUpcomingInvoice(input:Record<string,unknown>,actor:
   if(enrollmentState(courseLifecycle(owner.data()||{},id),today)!=='active')throw Error('휴원·퇴원 중인 과목입니다.');
   const linked=all.docs.find(d=>d.data().status!=='cancelled'&&(d.data().lessonDate||d.data().cycleStart)===day);
   if(linked)return {...linked.data(),id:linked.id} as Invoice;
+  const lesson=(await tx.get(db.doc(`opsAttendance/${id}_${day}`))).data();
+  if(lesson?.passId){const existing=all.docs.find(d=>(d.data().passId||d.id)===lesson.passId);if(existing)return {...existing.data(),id:existing.id} as Invoice;throw Error('출석에 연결된 수강권을 먼저 확인해주세요.');}
   if(all.docs.some(d=>d.id===invoiceId))throw Error('취소한 청구가 있는 날짜입니다. 기존 청구 내역을 확인해주세요.');
   if(account.updatedAt!==input.expectedUpdatedAt||(account.schedule?.updatedAt||'')!==(input.expectedScheduleUpdatedAt||''))throw Error('출결 또는 수강 정보가 변경됐습니다. 다시 확인해주세요.');
   if(account.nextPass)throw Error('다음 수강권의 예약 청구를 확인해주세요.');
   if(day>today&&!plannedLesson(account.schedule,day))throw Error('수업 예정일이 변경됐습니다. 출석표를 확인해주세요.');
+  requireClearPassLinks(all.docs.map(d=>({...d.data(),id:d.id}) as Invoice));
   if(all.docs.some(d=>d.data().status==='open'&&!d.data().lessonDate&&!d.data().cycleStart))throw Error('날짜 미확인 청구를 먼저 확인해주세요.');
-  const stamp=now();const invoice:Invoice={id:invoiceId,studentId:id,name:account.name,units:account.planUnits,amount:account.planAmount,paid:0,status:'open',needsReview:false,createdAt:stamp,lessonDate:day};
+  const stamp=now();const invoice:Invoice=passInvoice({id:invoiceId,studentId:id,name:account.name,units:account.planUnits,amount:account.planAmount,paid:0,status:'open',needsReview:false,createdAt:stamp,lessonDate:day},false,stamp);
   tx.create(invoiceRef,invoice);tx.update(ref,{openInvoiceId:account.openInvoiceId||invoiceId,updatedAt:stamp});
   audit(tx,db,actor,'invoice',id,{invoiceId,lessonDate:day,reason:'출석표 1회차 청구 확정'});return invoice;
  });
@@ -876,6 +913,8 @@ export async function monthlyPayment(input:Record<string,unknown>,actor:string){
   const [accountSnap,invoiceSnap,receipt,all]=await Promise.all([tx.get(accountRef),tx.get(ref),tx.get(paymentRef),tx.get(db.collection('opsInvoices').where('studentId','==',studentId))]);
   if(receipt.exists){const previous=receipt.data()!;if(previous.cancelledAt)throw Error('취소된 수납 요청입니다. 창을 닫고 새로 수납해주세요.');if(previous.invoiceId!==invoiceId||previous.studentId!==studentId||previous.amount!==input.amount||previous.method!==method||previous.paymentDate!==paymentDate||previous.lessonDate!==day)throw Error('중복 요청 내용이 다릅니다.');return;}
   const account=accountSnap.data() as Account|undefined,old=invoiceSnap.data() as Invoice|undefined;
+  const lesson=(await tx.get(db.doc(`opsAttendance/${studentId}_${day}`))).data();
+  if(lesson?.passId&&lesson.passId!==(old?.passId||invoiceId))throw Error('이 출석에 연결된 기존 수강권을 선택해주세요.');
   if(!account)throw Error('수강 정보를 찾을 수 없습니다.');
   if(old&&old.studentId!==studentId)throw Error('다른 과목의 청구입니다.');
   if(selectedId&&!old)throw Error('청구를 찾을 수 없습니다.');
@@ -885,17 +924,22 @@ export async function monthlyPayment(input:Record<string,unknown>,actor:string){
    if(!old||old.status!=='paid'||old.paid<old.amount||old.needsReview)throw Error('수납 완료된 내역을 확인해주세요.');
    if(old.lessonDate===day)return;
    if((old.updatedAt||'')!==(input.expectedInvoiceUpdatedAt||''))throw Error('청구가 변경됐습니다. 다시 확인해주세요.');
-   tx.update(ref,{lessonDate:day,updatedAt:now()});audit(tx,db,actor,'invoice-lesson-date',studentId,{invoiceId,after:day,linkedExistingPayment:true});return;
+   tx.update(ref,{...passInvoice(old,true,now()),lessonDate:day,linkReview:false,updatedAt:now()});audit(tx,db,actor,'invoice-lesson-date',studentId,{invoiceId,after:day,linkedExistingPayment:true});return;
   }
   if(account.updatedAt!==input.expectedUpdatedAt)throw Error('수강 정보가 변경됐습니다. 창을 닫고 다시 확인해주세요.');
   if(old&&(!selectedId||(old.updatedAt||'')!==(input.expectedInvoiceUpdatedAt||'')))throw Error('청구가 변경됐습니다. 창을 닫고 다시 확인해주세요.');
-  const stamp=now(),invoice=old||monthlyInvoice(account,invoiceId,day,input,stamp);
+  if(!old)requireClearPassLinks(all.docs.map(d=>({...d.data(),id:d.id}) as Invoice));
+  const stamp=new Date(Math.max(Date.now(),(Date.parse(old?.updatedAt||'')||0)+1)).toISOString();let invoice=old||monthlyInvoice(account,invoiceId,day,input,stamp);
+  let remaining=account.remaining;
+  if(!old||!invoice.passId){invoice=passInvoice(invoice,input.passAllocation==='already'||(!!old&&old.creditUnits===0),stamp);if(input.passAllocation==='activate'){const activated=allocatedPass(account,invoice,day,stamp);invoice=activated.invoice;remaining=activated.account.remaining;}else if(invoice.allocationState!=='allocated'&&!['already','pending'].includes(String(input.passAllocation)))throw Error('수강권 시작 또는 기존 횟수 연결을 선택해주세요.');}
+  invoice=paymentPass(invoice,day,all.docs.map(d=>({...d.data(),id:d.id}) as Invoice),stamp);
   if(invoice.reservedPass&&!invoice.lessonDate)throw Error('예약 수강권의 시작일을 먼저 확인해주세요.');
   const {paid,complete}=settle(invoice,input.amount as number);
   const saved={...invoice,lessonDate:day,paid,status:complete?'paid':'open',updatedAt:stamp};
   if(old)tx.update(ref,saved);else tx.create(ref,saved);
-  tx.create(paymentRef,{id:requestId,invoiceId,studentId,amount:input.amount,method,paymentDate,lessonDate:day,at:stamp,note:text(input.note),actor});
-  tx.update(accountRef,{remaining:account.remaining+(complete?(invoice.creditUnits??invoice.units):0),openInvoiceId:complete?(account.openInvoiceId===invoiceId?null:account.openInvoiceId):(account.openInvoiceId||invoiceId),updatedAt:stamp});
-  audit(tx,db,actor,'payment',studentId,{invoiceId,amount:input.amount,method,paymentDate,complete,source:'monthly',lessonDate:day});
+  if(remaining!==account.remaining)audit(tx,db,actor,'allocate-pass',studentId,{passId:invoice.passId,day,units:remaining-account.remaining,remaining});
+  tx.create(paymentRef,{id:requestId,invoiceId,passId:invoice.passId,studentId,amount:input.amount,method,paymentDate,lessonDate:day,at:stamp,note:text(input.note),actor});
+  tx.update(accountRef,{remaining,...((!old||!old.passId)&&invoice.allocationState==='allocated'?{currentPassId:invoice.passId,currentPassStart:day}:{}),openInvoiceId:complete?(account.openInvoiceId===invoiceId?null:account.openInvoiceId):(account.openInvoiceId||invoiceId),updatedAt:stamp});
+  audit(tx,db,actor,'payment',studentId,{invoiceId,amount:input.amount,method,paymentDate,complete,creditedUnits:0,source:'monthly',lessonDate:day});
  });
 }

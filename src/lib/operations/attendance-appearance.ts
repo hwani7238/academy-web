@@ -113,3 +113,10 @@ export function monthlyPaymentDue({ key, row, original, account, invoice, sequen
   if (original) return importedAttendanceAppearance(original, account, invoice, confirmedFirst.has(key)).tone === 'payment-due';
   return unpaidForecastFirst.has(key);
 }
+
+// A moved first lesson remains attached to its pass even when its display date changes.
+export function confirmedPassLessons(invoices: Invoice[], records: Attendance[], cycles: Record<string,string[]>, times: Record<string,string>, labels: Map<string,string>) {
+ const result=confirmedFirstLessons(invoices,cycles,times);
+ for(const row of records){if(!row.passId)continue;const linked=invoices.filter(i=>i.passId===row.passId&&i.studentId===row.studentId&&i.status!=='cancelled');if(linked.length&&linked.every(i=>i.status==='paid'&&i.paid>=i.amount&&!i.needsReview&&!i.linkReview)){const key=row.studentId+'_'+row.day;if(isFirstLesson(labels.get(key),row.status))result.add(key);if(row.unpaidCycleStart)result.add(row.studentId+'_'+row.unpaidCycleStart);}}
+ return result;
+}
