@@ -166,10 +166,11 @@ export async function configure(input: Record<string, unknown>, actor: string) {
     const old = existing.data();
     if (Object.hasOwn(input, 'expectedUpdatedAt') && (old?.updatedAt || '') !== input.expectedUpdatedAt) throw Error('수강 정보가 다른 화면에서 변경됐습니다. 창을 닫고 다시 확인해주세요.');
     if (Object.hasOwn(input, 'expectedOpenInvoiceId') && (old?.openInvoiceId || '') !== input.expectedOpenInvoiceId) throw Error('연결된 청구가 변경됐습니다. 창을 닫고 다시 확인해주세요.');
+    if (old && old.planUnits !== planUnits) throw Error('등록 횟수 변경은 수강권 관리에서 적용 시작일 또는 잔여 소진 후를 선택해주세요.');
     const overrideGroup=student.data()?.operationsCourseGroups?.[subject] as string|undefined;
     const overrideSubject=overrideGroup?(overrideGroup.includes('피아노')?'피아노':overrideGroup):undefined;
     const remaining = old ? old.remaining : integer(input.remaining, -1000, 1000, '현재 남은 횟수');
-    const saved = { id, ...(old?.currentPassId?{currentPassId:old.currentPassId,currentPassStart:old.currentPassStart || ""}:{}),...(old?.lastPassLessonDay?{lastPassLessonDay:old.lastPassLessonDay}:{}), ...(old?.nextPass?{nextPass:old.nextPass}:{}), ...(old?.initialPlanUnits?{initialPlanUnits:old.initialPlanUnits}:{}), ...(old?.passHistory ? {passHistory:old.passHistory} : {}), ...(old?.schedule ? {schedule:old.schedule} : {}), ...(old?.importId ? { importId: old.importId, openingAsOf: old.openingAsOf } : {}), ...(old?.attendanceGroup ? { attendanceGroup: old.attendanceGroup } : {}), ...(old?.displaySubject ? { displaySubject: old.displaySubject } : {}), ...(subject ? { sourceStudentId, subject } : {}), name: subject ? `${student.data()?.name || '학생'} · ${subject}` : student.data()?.name || '학생', phone, checkinSuffixes: codes, planUnits, planAmount, remaining, openInvoiceId: old?.openInvoiceId || null, active: input.active !== false, autoBilling: input.autoBilling === true, updatedAt: now(), ...(overrideGroup?{attendanceGroup:overrideGroup,displaySubject:overrideSubject,name:`${student.data()?.name} · ${overrideSubject}`}:{}) };
+    const saved = { id, ...(old?.referenceResetFrom ? {referenceResetFrom:old.referenceResetFrom} : {}), ...(old?.currentPassId?{currentPassId:old.currentPassId,currentPassStart:old.currentPassStart || ""}:{}),...(old?.lastPassLessonDay?{lastPassLessonDay:old.lastPassLessonDay}:{}), ...(old?.nextPass?{nextPass:old.nextPass}:{}), ...(old?.initialPlanUnits?{initialPlanUnits:old.initialPlanUnits}:{}), ...(old?.passHistory ? {passHistory:old.passHistory} : {}), ...(old?.schedule ? {schedule:old.schedule} : {}), ...(old?.importId ? { importId: old.importId, openingAsOf: old.openingAsOf } : {}), ...(old?.attendanceGroup ? { attendanceGroup: old.attendanceGroup } : {}), ...(old?.displaySubject ? { displaySubject: old.displaySubject } : {}), ...(subject ? { sourceStudentId, subject } : {}), name: subject ? `${student.data()?.name || '학생'} · ${subject}` : student.data()?.name || '학생', phone, checkinSuffixes: codes, planUnits, planAmount, remaining, openInvoiceId: old?.openInvoiceId || null, active: input.active !== false, autoBilling: input.autoBilling === true, updatedAt: now(), ...(overrideGroup?{attendanceGroup:overrideGroup,displaySubject:overrideSubject,name:`${student.data()?.name} · ${overrideSubject}`}:{}) };
     const firstInvoice = !old && input.firstBilling === true ? firstEnrollmentInvoice(saved as Account, validDay(input.firstLessonDate), saved.updatedAt) : null;
     let revisedInvoice: Invoice | undefined, invoiceBefore: Invoice | undefined;
     let billingNotice: FirebaseFirestore.DocumentSnapshot | undefined;
@@ -195,9 +196,8 @@ export async function configure(input: Record<string, unknown>, actor: string) {
       audit(tx, db, actor, 'configure-invoice', id, { invoiceId: revisedInvoice.id, before: { units: invoiceBefore!.units, amount: invoiceBefore!.amount, creditUnits: invoiceBefore!.creditUnits ?? invoiceBefore!.units }, after: { units: revisedInvoice.units, amount: revisedInvoice.amount, creditUnits: revisedInvoice.creditUnits }, paid: revisedInvoice.paid });
     }
     audit(tx, db, actor, 'configure', id, { planUnits, planAmount, remaining, active: input.active !== false, autoBilling: input.autoBilling === true, ...(firstInvoice ? { invoiceId: firstInvoice.id, firstLessonDate: firstInvoice.cycleStart } : {}) });
-    // A changed plan length also changes historical sequence positions.
-    // Let that case rebuild the chronology; fee/contact edits need only this row.
-    return old && old.planUnits === planUnits ? { accounts: [saved as Account], ...(revisedInvoice ? { invoices: [revisedInvoice] } : {}) } : undefined;
+    // Existing pass lengths change only through the dated pass workflow.
+    return old ? { accounts: [saved as Account], ...(revisedInvoice ? { invoices: [revisedInvoice] } : {}) } : undefined;
   });
 }
 // Read the missed lesson and all bookings inside the transaction so two screens

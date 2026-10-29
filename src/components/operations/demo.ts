@@ -196,6 +196,7 @@ export function demoAction(current: Snapshot, input: Record<string, unknown>): {
     if(!data.notices.some(n=>n.id===`attendance_${id}`))enqueue(account, `attendance_${id}`, 'attendance'); if (account.remaining <= 0 && units>0) invoice(account);
     result = { name: checkInName(account, {}), duplicate: false };
   } else if (input.action === 'configure') {
+    if(account && account.planUnits!==Number(input.planUnits))throw Error('등록 횟수 변경은 수강권 관리에서 적용 시작일 또는 잔여 소진 후를 선택해주세요.');
     if(Object.hasOwn(input,'expectedUpdatedAt')&&(account?.updatedAt||'')!==input.expectedUpdatedAt)throw Error('수강 정보가 변경됐습니다. 창을 닫고 다시 확인해주세요.');
     if(Object.hasOwn(input,'expectedOpenInvoiceId')&&(account?.openInvoiceId||'')!==input.expectedOpenInvoiceId)throw Error('연결된 청구가 변경됐습니다. 창을 닫고 다시 확인해주세요.');
     const linked=data.invoices.find(i=>i.id===account?.openInvoiceId);

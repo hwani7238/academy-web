@@ -19,3 +19,12 @@ export function passUnitsOn(account:Pick<Account,'planUnits'|'passHistory'|'init
 export function passCycleStarts(accounts:Pick<Account,'id'|'passHistory'>[]){
  return accounts.flatMap(a=>(a.passHistory||[]).map(r=>({studentId:a.id,day:r.start})));
 }
+
+// Explicit plan transitions supersede spreadsheet anchors from the old plan.
+// Keep anchors before the transition: they may be the only imported history.
+export function passPlanResetFrom(account:Pick<Account,'planUnits'|'passHistory'|'initialPlanUnits'>){
+ const rows=[...(account.passHistory||[])].sort((a,b)=>a.start.localeCompare(b.start));
+ let units=account.initialPlanUnits||rows[0]?.units||account.planUnits;
+ for(const row of rows){if(row.units!==units)return row.start;units=row.units;}
+ return undefined;
+}

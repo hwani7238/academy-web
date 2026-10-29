@@ -1,5 +1,5 @@
 import { referenceOrdinal, type LessonReference } from './lesson-reference';
-import {passUnitsOn,passCycleStarts} from './pass-history';
+import {passUnitsOn,passCycleStarts,passPlanResetFrom} from './pass-history';
 import type { Account, Attendance, Snapshot } from './model';
 import { legacyAttendanceAppearance } from './attendance-appearance';
 import { plannedLesson } from './schedule';
@@ -18,8 +18,9 @@ type Legacy = NonNullable<Snapshot['legacyAttendance']>[number];
 
 // Display-only chronology: neither payments nor current balances rewrite old lessons.
 // Imported numbers anchor the sequence; modern records take precedence on the same day.
-export function attendanceSequence(accounts: Pick<Account, 'id' | 'planUnits' | 'schedule' | 'passHistory' | 'referenceResetFrom'>[], records: RecordRow[], legacy: Legacy[], context?: SequenceContext) {
+export function attendanceSequence(accounts: Pick<Account, 'id' | 'planUnits' | 'schedule' | 'passHistory' | 'initialPlanUnits' | 'referenceResetFrom'>[], records: RecordRow[], legacy: Legacy[], context?: SequenceContext) {
   const plans = new Map(accounts.map(a => [a.id, a]));
+  const planResets = new Map(accounts.map(a => [a.id, passPlanResetFrom(a)]));
   const schedules = new Map(accounts.map(a => [a.id, a.schedule]));
   const positions = { ...context?.positions };
   const missedLessons = { ...context?.missedLessons };
@@ -58,7 +59,8 @@ export function attendanceSequence(accounts: Pick<Account, 'id' | 'planUnits' | 
       }
       return numbers.join('·');
     }
-    const reset = account?.referenceResetFrom && e.day >= account.referenceResetFrom;
+    const planReset = planResets.get(id);
+    const reset = Boolean((account?.referenceResetFrom && e.day >= account.referenceResetFrom) || (planReset && e.day >= planReset));
     const reference = !reset && e.reference ? referenceOrdinal(e.reference.value) : null;
     if (status === 'makeup' || status === 'makeup_reserved') {
       makeupLinks.push({ key, studentId: id, day: e.day, relatedDay: e.record?.relatedDay, fallback: reference?.label });
