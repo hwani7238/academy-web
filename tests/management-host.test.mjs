@@ -13,3 +13,7 @@ test('existing owner APIs, authenticated kiosks and public website remain availa
   for (const path of ['/login', '/operations', '/api/teacher/attendance', '/api/operations', '/api/operations/access', '/api/operations/payments', '/api/check-in', '/check-in', '/api/cron/send-notifications', '/_next/static/file.js', '/favicon.ico']) assert.equal(managementRoute('manage.wheemusic.com', path), 'allow');
   for (const host of ['wheemusic.com', 'www.wheemusic.com', 'localhost']) for (const path of ['/admin', '/teacher/attendance', '/api/feedback/student/log']) assert.equal(managementRoute(host, path), 'allow');
 });
+test('the exact public kiosk logo is allowed without opening other assets or pages',()=>{
+ assert.equal(managementRoute('manage.wheemusic.com','/logo.png'),'allow');
+ for(const path of ['/logo.png/other','/logo192.png','/private.png','/admin'])assert.equal(managementRoute('manage.wheemusic.com',path),'redirect');
+});
