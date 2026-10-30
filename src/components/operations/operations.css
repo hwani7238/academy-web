@@ -204,3 +204,5 @@
 @media (hover:hover) and (pointer:fine){.kiosk button:hover:not(:disabled){color:#244ce6;background:white;border-color:var(--blue)}}
 .whee-ops.kiosk button{-webkit-tap-highlight-color:transparent;touch-action:manipulation}
 .whee-ops.kiosk .keypad button:active:not(:disabled){color:#244ce6;background:white;border-color:var(--blue)}
+
+.whee-ops .monthly-table .attendance-cell .makeup-caption{font-size:9px;line-height:11px;word-break:keep-all;overflow-wrap:normal}.whee-ops .monthly-table .attendance-cell .makeup-date{display:inline-block;white-space:nowrap}
