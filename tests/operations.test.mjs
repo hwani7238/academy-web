@@ -2789,3 +2789,50 @@ test('unified receipt does not replace a later current pass when linking and set
  await s.service.monthlyPayment(unifiedReceipt(s,invoice,{passAllocation:'already'}),'owner');
  const account=s.records.get('opsAccounts/drum');assert.equal(account.currentPassId,'newer');assert.equal(account.currentPassStart,'2026-10-29');assert.equal(account.remaining,3);
 });
+
+test('billing dates use the unpaid first attendance before a late-created invoice, without changing money',()=>{
+ const s=setup(),{attendanceInvoiceDates}=s.load('billing-attendance');
+ const invoice={id:'late-bill',studentId:'p',name:'학생',status:'open',units:12,amount:170000,paid:0,needsReview:false,createdAt:'2026-10-28T04:00:00Z'};
+ const data={day:'2026-10-30',students:[{id:'p'}],accounts:[{id:'p',planUnits:12,active:true,remaining:-2}],invoices:[invoice],settledInvoices:[],legacyAttendance:[],attendance:[
+  {studentId:'p',day:'2026-10-27',status:'present',units:1,unpaidCycleStart:'2026-10-27',at:'2026-10-27T03:00:00Z'},
+  {studentId:'p',day:'2026-10-28',status:'present',units:1,unpaidCycleStart:'2026-10-27',at:'2026-10-28T03:00:00Z'},
+ ],sequenceContext:{positions:{p:12},cycleStarts:[]}};
+ const before=structuredClone(data);
+ assert.equal(attendanceInvoiceDates(data,'2026-10-30')[invoice.id],'2026-10-27');
+ const projection=s.load('upcoming-billing').billingProjection(data,'2026-10-30');
+ assert.equal(projection.invoiceDates[invoice.id],'2026-10-27');
+ assert.equal(projection.upcoming.length,0);
+ assert.deepEqual(data,before);
+ // The date also makes the bill collectible when a reconciled balance is positive.
+ assert.equal(s.load('upcoming-billing').finalLessonInvoices({...data,accounts:[{...data.accounts[0],remaining:10}]},[invoice],'2026-10-30').length,1);
+ // Explicit owner links remain authoritative.
+ assert.equal(attendanceInvoiceDates({...data,invoices:[{...invoice,lessonDate:'2026-10-26'}]},'2026-10-30')[invoice.id],'2026-10-26');
+ for(const patch of [{status:'paid',paid:170000},{status:'cancelled'},{reservedPass:true}]){
+  assert.equal(attendanceInvoiceDates({...data,invoices:[{...invoice,...patch}]},'2026-10-30')[invoice.id],undefined);
+ }
+ // A corrected/cancelled first lesson must not survive as a stale unpaid marker.
+ assert.equal(attendanceInvoiceDates({...data,attendance:data.attendance.map(r=>({...r,status:'cancelled',units:0}))},'2026-10-30')[invoice.id],undefined);
+});
+
+test('attendance billing links stay course scoped and reject paid, duplicate and ambiguous legacy cycles',()=>{
+ const {attendanceInvoiceDates}=setup().load('billing-attendance');
+ const bill={id:'bill',studentId:'p',status:'open',createdAt:'2026-10-30T00:00:00Z',paid:0,amount:100};
+ const row={studentId:'p',day:'2026-10-27',status:'present',units:1,unpaidCycleStart:'2026-10-27'};
+ const data={day:'2026-10-30',students:[{id:'p'}],accounts:[{id:'p',planUnits:1}],invoices:[bill],settledInvoices:[],attendance:[row]};
+ const dates=patch=>attendanceInvoiceDates({...data,...patch},'2026-10-30');
+ assert.equal(dates({})[bill.id],'2026-10-27');
+ assert.equal(dates({invoices:[bill,{...bill,id:'another'}]})[bill.id],undefined);
+ assert.equal(dates({settledInvoices:[{...bill,id:'paid',status:'paid',paid:100,lessonDate:'2026-10-27'}]})[bill.id],undefined);
+ assert.equal(dates({settledInvoices:[{...bill,id:'unknown-paid',status:'paid',paid:100}]})[bill.id],'2026-10-27');
+ assert.equal(dates({settledInvoices:[{...bill,id:'unknown-paid',status:'paid',paid:100}]})['unknown-paid'],undefined);
+ assert.equal(dates({attendance:[{...row,unpaidCycleStart:undefined}],settledInvoices:[{...bill,id:'unknown-paid',status:'paid',paid:100}]})[bill.id],undefined);
+ assert.equal(dates({cancelledInvoiceKeys:['p_2026-10-27']})[bill.id],undefined);
+ assert.equal(dates({attendance:[{...row,studentId:'drums'}],accounts:[{id:'p',planUnits:1},{id:'drums',planUnits:1}]})[bill.id],undefined);
+ assert.equal(dates({attendance:[row,{...row,day:'2026-10-29',unpaidCycleStart:'2026-10-29'}]})[bill.id],undefined);
+ assert.equal(dates({attendance:[],unpaidCycleKeys:['p_2026-09-27'],sequenceContext:{positions:{},cycleStarts:[],cycleFirstDays:{p:['2026-09-27']}}})[bill.id],'2026-09-27');
+ // An ordinary unpaid first lesson, same-day cancellation, or imported first
+ // lesson is also usable when it is the sole unambiguous candidate.
+ assert.equal(dates({attendance:[{...row,unpaidCycleStart:undefined,status:'late_cancel',units:0}]})[bill.id],'2026-10-27');
+ assert.equal(dates({attendance:[],legacyAttendance:[{studentId:'p',day:'2026-10-27',value:'1',color:'#FF00FF'}]})[bill.id],'2026-10-27');
+ assert.equal(dates({attendance:[],sequenceContext:{positions:{},cycleStarts:[],references:[{studentId:'p',day:'2026-10-27',value:'1',color:''}]}})[bill.id],'2026-10-27');
+});
