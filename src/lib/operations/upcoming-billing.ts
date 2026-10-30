@@ -1,3 +1,4 @@
+import {attendanceInvoiceDates} from './billing-attendance';
 import {unresolvedReceipts} from './pass-link';
 import {attendanceForecast} from './attendance-forecast';
 import {attendanceSequence} from './attendance-sequence';
@@ -30,9 +31,11 @@ export function billingProjection(data:Snapshot,today=seoulDay()){
   if(isFirstLesson(sequence.labels.get(key)||row.value,'present'))candidateKeys.add(key);
  }
  const invoiceRows=[...data.invoices,...(data.settledInvoices||[])];
- const covered=new Set(invoiceRows.filter(i=>i.status!=='cancelled').flatMap(i=>{const day=invoiceCycleStart(i,cycles,times);return day?[`${i.studentId}_${day}`]:[];}));
+ const invoiceDates=attendanceInvoiceDates(data,today);
+ for(const i of invoiceRows)if(!invoiceDates[i.id]){const day=invoiceCycleStart(i,cycles,times);if(day)invoiceDates[i.id]=day;}
+ const covered=new Set(invoiceRows.filter(i=>i.status!=='cancelled').flatMap(i=>{const day=invoiceDates[i.id];return day?[`${i.studentId}_${day}`]:[];}));
  const upcoming:Invoice[]=[],seen=new Set<string>();
- if(data.day.slice(0,7)!==today.slice(0,7))return {upcoming,cycleFirstDays:cycles,firstLessonTimes:times};
+ if(data.day.slice(0,7)!==today.slice(0,7))return {upcoming,invoiceDates,cycleFirstDays:cycles,firstLessonTimes:times};
  for(const key of [...candidateKeys].sort((a,b)=>a.slice(-10).localeCompare(b.slice(-10)))){
   const id=key.slice(0,-11),day=key.slice(-10),a=data.accounts.find(a=>a.id===id),s=data.students.find(s=>s.id===id);
   if(seen.has(id)||!a?.active||a.nextPass||!s||enrollmentState(s.lifecycle,today)!=='active'||enrollmentState(s.lifecycle,day)!=='active')continue;
@@ -42,7 +45,7 @@ export function billingProjection(data:Snapshot,today=seoulDay()){
   if(data.invoices.some(i=>i.studentId===id&&i.status==='open'&&!invoiceCycleStart(i,cycles,times)))continue;
   seen.add(id);upcoming.push({id:`upcoming_${id}_${day}`,studentId:id,name:a.name,units:a.planUnits,amount:a.planAmount,paid:0,status:'open',needsReview:false,createdAt:`${today}T00:00:00.000Z`,lessonDate:day,projected:true});
  }
- return {upcoming,cycleFirstDays:cycles,firstLessonTimes:times};
+ return {upcoming,invoiceDates,cycleFirstDays:cycles,firstLessonTimes:times};
 }
 
 /** Also collect a pass whose first lesson has arrived, even if the balance
@@ -50,11 +53,11 @@ export function billingProjection(data:Snapshot,today=seoulDay()){
 export function finalLessonInvoices(data: Snapshot, invoices: Invoice[], today = seoulDay()) {
  const eligible = new Map(data.accounts.filter(a => a.active &&
   data.students.some(s => s.id === a.id && enrollmentState(s.lifecycle, today) === 'active')).map(a => [a.id,a]));
- const sequence = attendanceSequence(data.accounts,[...data.attendance,...(data.forecastAttendance||[])],data.legacyAttendance||[],data.sequenceContext);
+ const invoiceDates = attendanceInvoiceDates({...data,invoices:data.invoices||invoices},today);
  return invoices.filter(i => {
   const account=eligible.get(i.studentId);
   if(i.status!=='open'||!account)return false;
-  const first=invoiceCycleStart(i,sequence.cycleFirstDays,sequence.firstLessonTimes);
+  const first=i.lessonDate||i.cycleStart||invoiceDates[i.id];
   return i.needsReview||Boolean(i.receiptCancelledAt)||account.remaining<=1||Boolean(first&&first<=today);
  });
 }
