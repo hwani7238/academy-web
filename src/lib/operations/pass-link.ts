@@ -13,7 +13,8 @@ export function unresolvedReceipts(invoices: Invoice[]) {
   return invoices.filter(i => i.status !== 'cancelled' && !i.reservedPass && i.paid > 0 && (!passDay(i) || i.linkReview));
 }
 export function requireClearPassLinks(invoices: Invoice[], except = '') {
-  if (unresolvedReceipts(invoices).some(i => i.id !== except)) throw Error('연결 확인이 필요한 기존 수납이 있습니다. 청구·수납의 연결 확인에서 먼저 수강권을 연결해주세요.');
+  const unresolved=unresolvedReceipts(invoices).filter(i=>i.id!==except);
+  if (unresolved.length) throw Error(`다른 수납 ${unresolved.length}건의 수강권 연결 확인이 필요합니다: ${unresolved.slice(0,3).map(i=>`${i.name} · ${i.units}회권 · 수납 ${i.paid.toLocaleString('ko-KR')}원`).join(', ')}. 청구·수납의 ‘1회차 날짜·횟수 확인’에서 해당 수납의 첫 수업일을 지정해주세요.`);
 }
 export function requireUniquePass(invoices: Invoice[], invoice: Invoice, day: string) {
   validDay(day);
@@ -50,7 +51,7 @@ export function lessonPass(account: Account, invoices: Invoice[], day: string, u
 }
 export function paymentPass(invoice: Invoice, day: string, invoices: Invoice[], stamp: string) {
   requireClearPassLinks(invoices, invoice.id);
-  if (invoice.linkReview) throw Error('연결 확인이 필요한 수강권입니다. 기존 수납을 먼저 확인해주세요.');
+  if (invoice.linkReview) throw Error('이 청구의 첫 수업일과 횟수 반영 상태를 확인해야 합니다. 청구·수납의 ‘연결·수납’에서 1회차 날짜와 횟수 반영 방법을 선택하면 함께 저장됩니다.');
   if (!day && !invoice.reservedPass) throw Error('이 수강권의 1회차 날짜를 먼저 연결해주세요.');
   if (day) requireUniquePass(invoices, invoice, day);
   if (!invoice.passId) throw Error('기존 수강권의 횟수 반영 상태를 먼저 확인해주세요. 청구·수납의 연결 확인을 이용해주세요.');
@@ -62,3 +63,4 @@ export function nextRecordedCycle(account:Account, records:Attendance[], next:At
  const sequence=attendanceSequence([account],[...records.filter(r=>r.day>=account.currentPassStart!&&r.day<=next.day&&r.day!==next.day),next],[],{positions:{},cycleStarts:[{studentId:account.id,day:account.currentPassStart}]});
  return (sequence.cycleFirstDays[account.id]||[]).filter(day=>day>account.currentPassStart!&&day<=next.day).sort().at(-1)||'';
 }
+

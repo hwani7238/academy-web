@@ -1,5 +1,5 @@
 import { invoiceReviewPatch, invoiceReviewRevision } from './invoice-review';
-import { passInvoice, passDay, allocatedPass, lessonPass, nextRecordedCycle, paymentPass, unresolvedReceipts, requireClearPassLinks } from './pass-link';
+import { passInvoice, passDay, allocatedPass, lessonPass, nextRecordedCycle, paymentPass, unresolvedReceipts, requireClearPassLinks, requireUniquePass } from './pass-link';
 import {monthlyInvoice} from './monthly-payment';
 import {paymentCancellation} from './payment-cancellation';
 import {nextPassInput,nextPassDue,activateNextPass,recordedPassStart} from './next-pass';
@@ -926,24 +926,36 @@ export async function monthlyPayment(input:Record<string,unknown>,actor:string){
   if(old&&(old.lessonDate||old.cycleStart)&&(old.lessonDate||old.cycleStart)!==day)throw Error('다른 수강권 날짜에 연결된 청구입니다.');
   if(linkOnly){
    if(!old||old.status!=='paid'||old.paid<old.amount||old.needsReview)throw Error('수납 완료된 내역을 확인해주세요.');
-   if(old.lessonDate===day)return;
+   if(old.lessonDate===day&&old.passId&&!old.linkReview)return;
    if((old.updatedAt||'')!==(input.expectedInvoiceUpdatedAt||''))throw Error('청구가 변경됐습니다. 다시 확인해주세요.');
-   tx.update(ref,{...passInvoice(old,true,now()),lessonDate:day,linkReview:false,updatedAt:now()});audit(tx,db,actor,'invoice-lesson-date',studentId,{invoiceId,after:day,linkedExistingPayment:true});return;
+   requireUniquePass(all.docs.map(d=>({...d.data(),id:d.id}) as Invoice),old,day);
+   tx.update(ref,{...(old.passId?old:passInvoice(old,true,now())),lessonDate:day,linkReview:false,updatedAt:now()});audit(tx,db,actor,'invoice-lesson-date',studentId,{invoiceId,before:passDay(old),after:day,linkedExistingPayment:true});return;
   }
   if(account.updatedAt!==input.expectedUpdatedAt)throw Error('수강 정보가 변경됐습니다. 창을 닫고 다시 확인해주세요.');
   if(old&&(!selectedId||(old.updatedAt||'')!==(input.expectedInvoiceUpdatedAt||'')))throw Error('청구가 변경됐습니다. 창을 닫고 다시 확인해주세요.');
   if(!old)requireClearPassLinks(all.docs.map(d=>({...d.data(),id:d.id}) as Invoice));
   const stamp=new Date(Math.max(Date.now(),(Date.parse(old?.updatedAt||'')||0)+1)).toISOString();let invoice=old||monthlyInvoice(account,invoiceId,day,input,stamp);
   let remaining=account.remaining;
-  if(!old||!invoice.passId){invoice=passInvoice(invoice,input.passAllocation==='already'||(!!old&&old.creditUnits===0),stamp);if(input.passAllocation==='activate'){const activated=allocatedPass(account,invoice,day,stamp);invoice=activated.invoice;remaining=activated.account.remaining;}else if(invoice.allocationState!=='allocated'&&!['already','pending'].includes(String(input.passAllocation)))throw Error('수강권 시작 또는 기존 횟수 연결을 선택해주세요.');}
+  if(!old||!invoice.passId){invoice=passInvoice(invoice,input.passAllocation==='already'||(!!old&&old.creditUnits===0),stamp);if(invoice.allocationState!=='allocated'&&!['activate','already','pending'].includes(String(input.passAllocation)))throw Error('이 수강권의 횟수가 잔여에 포함됐는지 선택해주세요. 포함됐다면 횟수 유지, 아직 포함되지 않았다면 횟수 추가를 선택하세요.');}
+  // Explicitly resolving this invoice and collecting its receipt is one transaction.
+  // Allocation state is authoritative even when a stale client asks to activate again.
+  if(invoice.allocationState!=='allocated'&&!invoice.reservedPass){
+   if(input.passAllocation==='activate'){const activated=allocatedPass(account,invoice,day,stamp);invoice=activated.invoice;remaining=activated.account.remaining;}
+   else if(input.passAllocation==='already')invoice=passInvoice(invoice,true,stamp);
+   else if(invoice.linkReview&&input.passAllocation!=='pending')throw Error('이 수강권의 횟수 반영 상태를 선택해주세요.');
+  }
+  const linked=!!old&&(!old.passId||!old.lessonDate||old.linkReview===true);
+  if(selectedId)invoice={...invoice,linkReview:false};
   invoice=paymentPass(invoice,day,all.docs.map(d=>({...d.data(),id:d.id}) as Invoice),stamp);
   if(invoice.reservedPass&&!invoice.lessonDate)throw Error('예약 수강권의 시작일을 먼저 확인해주세요.');
   const {paid,complete}=settle(invoice,input.amount as number);
   const saved={...invoice,lessonDate:day,paid,status:complete?'paid':'open',updatedAt:stamp};
   if(old)tx.update(ref,saved);else tx.create(ref,saved);
+  if(linked)audit(tx,db,actor,'invoice-lesson-date',studentId,{invoiceId,before:passDay(old!),after:day,withPayment:true,passId:invoice.passId});
   if(remaining!==account.remaining)audit(tx,db,actor,'allocate-pass',studentId,{passId:invoice.passId,day,units:remaining-account.remaining,remaining});
   tx.create(paymentRef,{id:requestId,invoiceId,passId:invoice.passId,studentId,amount:input.amount,method,paymentDate,lessonDate:day,at:stamp,note:text(input.note),actor});
-  tx.update(accountRef,{remaining,...((!old||!old.passId)&&invoice.allocationState==='allocated'?{currentPassId:invoice.passId,currentPassStart:day}:{}),openInvoiceId:complete?(account.openInvoiceId===invoiceId?null:account.openInvoiceId):(account.openInvoiceId||invoiceId),updatedAt:stamp});
+  tx.update(accountRef,{remaining,...((!old||!old.passId||old.allocationState!=='allocated')&&invoice.allocationState==='allocated'&&(!account.currentPassStart||account.currentPassStart<=day)?{currentPassId:invoice.passId,currentPassStart:day}:{}),openInvoiceId:complete?(account.openInvoiceId===invoiceId?null:account.openInvoiceId):(account.openInvoiceId||invoiceId),updatedAt:stamp});
   audit(tx,db,actor,'payment',studentId,{invoiceId,amount:input.amount,method,paymentDate,complete,creditedUnits:0,source:'monthly',lessonDate:day});
  });
 }
+

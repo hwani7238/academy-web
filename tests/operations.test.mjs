@@ -2705,3 +2705,87 @@ test('note-only attendance edits do not create a misleading invoice review',asyn
  await s.service.adjust({attendanceId:`p_${day}`,units:1,note:'비고만 수정'},'owner');
  assert.equal(s.records.get(`opsInvoices/${id}`).needsReview,false);assert.equal(s.records.get(`opsInvoices/${id}`).reviewReason,undefined);
 });
+
+function unifiedReceipt(s, invoice, extra={}) {
+ return {studentId:invoice.studentId,invoiceId:invoice.id,lessonDate:'2026-10-24',requestId:'unified',expectedUpdatedAt:s.records.get('opsAccounts/'+invoice.studentId).updatedAt,expectedInvoiceUpdatedAt:invoice.updatedAt||'',amount:invoice.amount-invoice.paid,method:'카드',paymentDate:'2026-10-29',passAllocation:'activate',...extra};
+}
+async function unlinkedDrum(s, remaining=-1, extra={}) {
+ await s.seed('drum',remaining);
+ const invoice={id:'drum-pass',studentId:'drum',name:'테스트 · 드럼',units:4,amount:180000,paid:0,status:'open',needsReview:false,linkReview:true,createdAt:'2026-10-24T00:00:00Z',...extra};
+ s.records.set('opsInvoices/'+invoice.id,invoice);
+ return invoice;
+}
+test('unified receipt links a reviewed legacy pass and allocates exactly once across concurrent retries, split payments and cancellation',async()=>{
+ const s=setup(),invoice=await unlinkedDrum(s);await s.seed('other',7);
+ const other=structuredClone(s.records.get('opsAccounts/other'));
+ s.records.set('opsAttendance/drum_2026-10-24',{studentId:'drum',day:'2026-10-24',status:'present',units:1});
+ const attendance=structuredClone(s.records.get('opsAttendance/drum_2026-10-24'));
+ const first=unifiedReceipt(s,invoice,{amount:60000});
+ await Promise.all([s.service.monthlyPayment(first,'owner'),s.service.monthlyPayment(first,'owner')]);
+ let saved=s.records.get('opsInvoices/drum-pass');
+ assert.equal(saved.lessonDate,'2026-10-24');assert.equal(saved.linkReview,false);assert.equal(saved.passId,invoice.id);assert.equal(saved.allocationState,'allocated');assert.equal(saved.allocatedUnits,4);
+ assert.equal(s.records.get('opsAccounts/drum').remaining,3);
+ assert.equal(s.records.get('opsPayments/unified').paymentDate,'2026-10-29');assert.equal(s.records.get('opsPayments/unified').method,'카드');
+ await assert.rejects(s.service.monthlyPayment({...first,requestId:'stale-screen'},'owner'),/변경/);
+ await s.service.monthlyPayment(unifiedReceipt(s,saved,{requestId:'remaining'}),'owner');
+ saved=s.records.get('opsInvoices/drum-pass');
+ assert.equal(saved.status,'paid');assert.equal(s.records.get('opsAccounts/drum').remaining,3);
+ await s.service.cancelPayment({paymentId:'unified',expectedPaid:saved.paid,expectedInvoiceUpdatedAt:saved.updatedAt,expectedAccountUpdatedAt:s.records.get('opsAccounts/drum').updatedAt},'owner');
+ saved=s.records.get('opsInvoices/drum-pass');
+ await s.service.monthlyPayment(unifiedReceipt(s,saved,{requestId:'repay'}),'owner');
+ assert.equal(s.records.get('opsAccounts/drum').remaining,3);
+ assert.equal([...s.records.values()].filter(r=>r.action==='allocate-pass').length,1);
+ assert.equal([...s.records.values()].filter(r=>r.action==='invoice-lesson-date').length,1);
+ assert.equal([...s.records.keys()].filter(k=>k.startsWith('opsInvoices/')).length,1);
+ assert.equal([...s.records.keys()].filter(k=>k.startsWith('opsPayments/')).length,3);
+ assert.deepEqual(s.records.get('opsAccounts/other'),other);assert.deepEqual(s.records.get('opsAttendance/drum_2026-10-24'),attendance);
+ assert.equal([...s.records.keys()].some(k=>k.startsWith('opsNotices/')),false);
+});
+test('unified receipt never regrants an allocated pass even if activate is requested',async()=>{
+ for(const extra of [{passId:'stable-pass',allocationState:'allocated',allocatedUnits:4,allocationAt:'2026-10-24T00:00:00Z'},{creditUnits:0}]){
+  const s=setup(),invoice=await unlinkedDrum(s,3,extra);
+  await s.service.monthlyPayment(unifiedReceipt(s,invoice),'owner');
+  assert.equal(s.records.get('opsAccounts/drum').remaining,3);assert.equal(s.records.get('opsInvoices/drum-pass').linkReview,false);
+  assert.equal([...s.records.values()].filter(r=>r.action==='allocate-pass').length,0);
+ }
+});
+test('unified receipt lets an owner keep imported units or activate an identified pending pass once',async()=>{
+ for(const [allocation,remaining,extra] of [['already',2,{}],['pending',-2,{}],['activate',2,{passId:'drum-pass',allocationState:'pending',allocatedUnits:0}]]){
+  const s=setup(),invoice=await unlinkedDrum(s,allocation==='already'?2:-2,extra);
+  const input=unifiedReceipt(s,invoice,{passAllocation:allocation});await s.service.monthlyPayment(input,'owner');await s.service.monthlyPayment(input,'owner');
+  assert.equal(s.records.get('opsAccounts/drum').remaining,remaining);
+  assert.equal(s.records.get('opsInvoices/drum-pass').allocationState,allocation==='pending'?'pending':'allocated');
+ }
+});
+test('unified receipt rolls back the link, allocation and audit when payment validation fails',async()=>{
+ for(const extra of [{amount:180001},{amount:0},{expectedInvoiceUpdatedAt:'stale'},{passAllocation:null}]){
+  const s=setup(),invoice=await unlinkedDrum(s);const before=structuredClone(s.records);
+  await assert.rejects(s.service.monthlyPayment(unifiedReceipt(s,invoice,extra),'owner'));
+  assert.deepEqual(s.records,before);
+ }
+});
+test('unified receipt rejects another linked invoice, another unresolved receipt and a conflicting attendance pass',async()=>{
+ for(const conflict of ['date','identity','receipt','attendance','wrong-date']){
+  const s=setup(),invoice=await unlinkedDrum(s,-1,conflict==='identity'?{passId:'same',allocationState:'allocated'}:conflict==='wrong-date'?{lessonDate:'2026-09-01'}:{});
+  if(conflict==='date')s.records.set('opsInvoices/other',{...invoice,id:'other',lessonDate:'2026-10-24',linkReview:false});
+  if(conflict==='identity')s.records.set('opsInvoices/other',{...invoice,id:'other',lessonDate:'2026-09-01',linkReview:false});
+  if(conflict==='receipt')s.records.set('opsInvoices/other',{...invoice,id:'other',paid:180000,status:'paid'});
+  if(conflict==='attendance')s.records.set('opsAttendance/drum_2026-10-24',{passId:'other-pass'});
+  const before=structuredClone(s.records);await assert.rejects(s.service.monthlyPayment(unifiedReceipt(s,invoice),'owner'));assert.deepEqual(s.records,before);
+ }
+});
+test('unified receipt resolves a paid same-day review without another receipt or changing pending allocation',async()=>{
+ const s=setup(),invoice=await unlinkedDrum(s,3,{passId:'drum-pass',allocationState:'pending',lessonDate:'2026-10-24',paid:180000,status:'paid'});
+ const account=structuredClone(s.records.get('opsAccounts/drum'));
+ const input=unifiedReceipt(s,invoice,{linkOnly:true});
+ await s.service.monthlyPayment(input,'owner');await s.service.monthlyPayment(input,'owner');
+ assert.equal(s.records.get('opsInvoices/drum-pass').linkReview,false);assert.equal(s.records.get('opsInvoices/drum-pass').allocationState,'pending');
+ assert.deepEqual(s.records.get('opsAccounts/drum'),account);assert.equal([...s.records.keys()].filter(k=>k.startsWith('opsPayments/')).length,0);
+ assert.equal([...s.records.values()].filter(r=>r.action==='invoice-lesson-date').length,1);
+});
+test('unified receipt does not replace a later current pass when linking and settling an older pass',async()=>{
+ const s=setup(),invoice=await unlinkedDrum(s,3);
+ Object.assign(s.records.get('opsAccounts/drum'),{currentPassId:'newer',currentPassStart:'2026-10-29'});
+ await s.service.monthlyPayment(unifiedReceipt(s,invoice,{passAllocation:'already'}),'owner');
+ const account=s.records.get('opsAccounts/drum');assert.equal(account.currentPassId,'newer');assert.equal(account.currentPassStart,'2026-10-29');assert.equal(account.remaining,3);
+});

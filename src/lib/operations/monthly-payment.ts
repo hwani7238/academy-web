@@ -7,7 +7,8 @@ export function monthlyPaymentOptions(data:Snapshot,studentId:string,day:string)
  const rows=[...data.invoices,...(data.settledInvoices||[])].filter(i=>i.studentId===studentId&&i.status!=='cancelled');
  const passId=data.attendance.find(r=>r.studentId===studentId&&r.day===day)?.passId;
  const match=rows.filter(i=>(passId&&i.passId===passId)||invoiceCycleStart(i,sequence.cycleFirstDays,sequence.firstLessonTimes)===day);
- const unresolved=rows.filter(i=>!match.includes(i)&&!invoiceCycleStart(i,sequence.cycleFirstDays,sequence.firstLessonTimes));
+ // A forecast is not a saved link: keep undated invoices available for explicit selection.
+ const unresolved=rows.filter(i=>!match.includes(i)&&!i.reservedPass&&!i.lessonDate&&!i.cycleStart);
  return {match,unresolved};
 }
 export function monthlyInvoice(account:Account,id:string,day:string,input:Record<string,unknown>,stamp:string):Invoice{
@@ -15,3 +16,4 @@ export function monthlyInvoice(account:Account,id:string,day:string,input:Record
  if(typeof input.addUnits!=='boolean')throw Error('수납 후 횟수 반영 방식을 확인해주세요.');
  return {id,studentId:account.id,name:account.name,units,amount,creditUnits:input.addUnits?units:0,lessonDate:day,paid:0,status:'open',needsReview:false,createdAt:stamp};
 }
+
