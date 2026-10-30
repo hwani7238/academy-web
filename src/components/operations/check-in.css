@@ -34,5 +34,15 @@ body:has(> .kiosk-light:not(.embedded)){min-height:100dvh}
 @media(hover:hover) and (pointer:fine){.whee-ops.kiosk.kiosk-light .keypad button:hover:not(:disabled){background:#f0edfa;border-color:#d6cbed;color:#5f4ab5}.whee-ops.kiosk-light .matches button:hover:not(:disabled){background:#f7f4fe;border-color:#c3b5e3;color:#5f4ab5}}
 @media(max-width:520px){.whee-ops.kiosk.kiosk-light:not(.embedded){padding:0;align-items:stretch}.kiosk-light:not(.embedded) .kiosk-shell{max-width:none;height:100%;min-height:0;max-height:none;border:0;border-radius:0;box-shadow:none}.kiosk-light:not(.embedded) .kiosk-inner{padding-top:max(40px,env(safe-area-inset-top));padding-bottom:max(32px,env(safe-area-inset-bottom))}.kiosk-light:not(.embedded) .kiosk-footer{padding-bottom:max(16px,env(safe-area-inset-bottom))}}
 @media(max-height:740px){.kiosk-light .kiosk-inner,.kiosk-light:not(.embedded) .kiosk-inner{padding-top:max(28px,env(safe-area-inset-top));padding-bottom:24px}.whee-ops.kiosk-light form{gap:16px}.whee-ops.kiosk.kiosk-light .keypad button{min-height:56px}.whee-ops.kiosk-light .digit-display{height:68px}.kiosk-light .kiosk-success{padding:24px 0}}
+/* Share spare mobile height above and below the content; spacers collapse when scrolling is needed. */
+@media(max-width:520px){
+  .kiosk-light:not(.embedded) .kiosk-inner{display:flex;flex-direction:column;padding-top:max(32px,env(safe-area-inset-top));padding-bottom:max(32px,env(safe-area-inset-bottom))}
+  .kiosk-light:not(.embedded) .kiosk-inner::before,.kiosk-light:not(.embedded) .kiosk-inner::after{content:"";flex:1 0 0}
+  .kiosk-light:not(.embedded) .kiosk-inner>*{flex-shrink:0}
+  .kiosk-light:not(.embedded) .kiosk-heading{margin-bottom:32px}
+  .kiosk-light:not(.embedded) .kiosk-eyebrow{margin-bottom:16px}
+  .whee-ops.kiosk-light:not(.embedded) form{gap:24px}
+  .kiosk-light:not(.embedded) .keypad{row-gap:14px}
+}
 .whee-ops.kiosk.kiosk-light.embedded{padding:0;height:auto;min-height:0;border-radius:20px;background:#fff}.kiosk-light.embedded .kiosk-shell{height:auto;min-height:0;max-height:none;border-radius:20px;box-shadow:none}.kiosk-light.embedded .kiosk-inner{padding:22px 18px}.whee-ops.kiosk-light.embedded h1{font-size:23px}.whee-ops.kiosk.kiosk-light.embedded .keypad button{min-height:52px}
 @media(prefers-reduced-motion:reduce){.whee-ops.kiosk.kiosk-light .keypad button{transition:none}}
