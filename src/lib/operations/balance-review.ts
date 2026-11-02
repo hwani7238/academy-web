@@ -37,6 +37,8 @@ export function reviewBalance(account:Account,source:BalanceSource|undefined,aud
    if(!Number.isSafeInteger(d.revertedUnits)||Number(d.revertedUnits)<0)return stop('수납 취소의 횟수 반영 근거를 확인해주세요.');
    ledger-=Number(d.revertedUnits);
    if(d.wasComplete)credited.delete(String(d.invoiceId));
+  }else if(event.action==='repair-historical-pass'){
+   if(d.creditedUnits!==0||d.remainingBefore!==ledger||d.remainingAfter!==ledger)return stop('과거 수납 연결 복구 전후 잔여가 일치하지 않습니다.');
   }else if(event.action==='correct-legacy-attendance')return stop('이전 출결을 정정했습니다. 현재 잔여 횟수도 맞는지 확인해주세요.');
   else if(event.action==='configure' || event.action==='payment' || ignored.has(event.action)){
    // Configuration and billing requests do not reset a balance.
@@ -78,3 +80,4 @@ export function reviewBalance(account:Account,source:BalanceSource|undefined,aud
  result.reason=result.missingDays.length?`장부 갱신분 ${result.missingDays.length}회가 잔여에 미반영: ${result.missingDays.join(', ')}`:'이관 이후 장부·출석·수납이 일치합니다.';
  return result;
 }
+

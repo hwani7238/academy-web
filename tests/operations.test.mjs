@@ -2924,3 +2924,11 @@ test('imported opening balances and later pass starts prevent old pending receip
   assert.equal(result.invoice.id,'fresh');assert.equal(result.invoice.paid,0);assert.equal(result.invoice.lessonDate,'2026-11-02');assert.equal(old.lessonDate,'2026-08-31');
  }
 });
+
+test('balance review verifies a historical-pass repair as zero credit while rejecting any unexplained balance change',()=>{
+ const s=setup(),{reviewBalance}=s.load('balance-review');
+ const account={id:'p',name:'Test',planUnits:8,remaining:4,updatedAt:'2026-11-02T01:39:00Z'};
+ const events=[{id:'base',studentId:'p',action:'configure',at:'2026-08-01T00:00:00Z',detail:{remaining:0}},{id:'allocate',studentId:'p',action:'allocate-pass',at:'2026-11-02T01:37:00Z',detail:{units:8,remaining:8}},{id:'lesson',studentId:'p',action:'record-attendance',at:'2026-11-02T01:38:00Z',detail:{units:4,before:0,remaining:4}},{id:'repair',studentId:'p',action:'repair-historical-pass',at:'2026-11-02T01:39:00Z',detail:{creditedUnits:0,remainingBefore:4,remainingAfter:4}}];
+ const result=reviewBalance(account,undefined,events,[],[]);assert.equal(result.status,'verified');assert.equal(result.expected,4);assert.equal(result.evidence.events.at(-1).action,'repair-historical-pass');
+ for(const detail of [{creditedUnits:8},{remainingBefore:5},{remainingAfter:8}]){const changed=structuredClone(events);Object.assign(changed.at(-1).detail,detail);assert.equal(reviewBalance(account,undefined,changed,[],[]).status,'review');}
+});
