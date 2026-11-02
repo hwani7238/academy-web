@@ -1,4 +1,5 @@
 import { invoiceReviewPatch, invoiceReviewRevision } from './invoice-review';
+export { repairHistoricalPass } from './historical-pass-repair';
 import { passInvoice, passDay, allocatedPass, lessonPass, nextRecordedCycle, paymentPass, unresolvedReceipts, requireClearPassLinks, requireUniquePass } from './pass-link';
 import {monthlyInvoice} from './monthly-payment';
 import {paymentCancellation} from './payment-cancellation';
@@ -279,7 +280,7 @@ async function registerArrival(studentId: string, digits: string, actor: string,
     const cycle=nextRecordedCycle(account,passRecords,{id:attendanceId,studentId:id,day,units,status:reservation?'makeup':'present'} as Attendance);
     const activation=nextPassDue(account,day,reservation?'makeup':'present')?await tx.get(db.doc(`opsInvoices/${account.nextPass!.invoiceId}`)):null;
     if(activation){account=activateNextPass(account,activation.data() as Invoice,day,now());tx.update(activation.ref,{...passInvoice(activation.data() as Invoice,true,now()),reservedPass:false,cycleStart:day,lessonDate:day,updatedAt:now()});audit(tx,db,actor,'activate-next-pass',id,{invoiceId:activation.id,day,units:account.planUnits});}
-    const pass=activation?{account,passId:account.currentPassId}:lessonPass(account,passRows,day,reservation?0:units,attended.data() as Attendance|undefined,now(),invoiceId,cycle);
+    const pass=activation?{account,passId:account.currentPassId}:lessonPass(account,passRows,day,reservation?0:units,attended.data() as Attendance|undefined,now(),invoiceId,cycle,passRecords);
     account=pass.account;
     if(pass.invoice){if(pass.created)tx.create(db.doc(`opsInvoices/${pass.invoice.id}`),pass.invoice);else tx.update(db.doc(`opsInvoices/${pass.invoice.id}`),{...pass.invoice});audit(tx,db,actor,'allocate-pass',id,{passId:pass.passId,day,units:pass.invoice.units,remaining:account.remaining});}
     const remaining = adjustBalance(account.remaining, 0, units);
@@ -565,7 +566,7 @@ export async function recordAttendance(input: Record<string, unknown>, actor: st
     const cycle=nextRecordedCycle(account,passRecords,{...values,id,studentId} as Attendance);
     const activation=nextPassDue(account,values.day,values.status,old?.status || (old?'present':undefined))?await tx.get(db.doc(`opsInvoices/${account.nextPass!.invoiceId}`)):null;
     if(activation){account=activateNextPass(account,activation.data() as Invoice,values.day,stamp);tx.update(activation.ref,{...passInvoice(activation.data() as Invoice,true,stamp),reservedPass:false,cycleStart:values.day,lessonDate:values.day,updatedAt:stamp});audit(tx,db,actor,'activate-next-pass',studentId,{invoiceId:activation.id,day:values.day,units:account.planUnits});}
-    const pass=activation?{account,passId:account.currentPassId}:lessonPass({...account,lastPassLessonDay:account.lastPassLessonDay||latest},passRows,values.day,values.relatedDay?0:values.units,old,stamp,invoiceId,cycle);
+    const pass=activation?{account,passId:account.currentPassId}:lessonPass({...account,lastPassLessonDay:account.lastPassLessonDay||latest},passRows,values.day,values.relatedDay?0:values.units,old,stamp,invoiceId,cycle,passRecords);
     account=pass.account;
     if(pass.invoice){if(pass.created)tx.create(db.doc(`opsInvoices/${pass.invoice.id}`),pass.invoice);else tx.update(db.doc(`opsInvoices/${pass.invoice.id}`),{...pass.invoice});audit(tx,db,actor,'allocate-pass',studentId,{passId:pass.passId,day:values.day,units:pass.invoice.units,remaining:account.remaining});}
     const remaining = adjustBalance(account.remaining, old?.units || 0, values.units);
@@ -940,6 +941,8 @@ export async function monthlyPayment(input:Record<string,unknown>,actor:string){
   // Explicitly resolving this invoice and collecting its receipt is one transaction.
   // Allocation state is authoritative even when a stale client asks to activate again.
   if(invoice.allocationState!=='allocated'&&!invoice.reservedPass){
+   const history=(await tx.get(db.collection('opsAttendance').where('studentId','==',studentId))).docs.map(d=>d.data() as Attendance);
+   if(!['activate','already'].includes(String(input.passAllocation))&&history.some(r=>r.day>=day&&r.day<=seoulDay()&&r.units>0&&['present','late_cancel'].includes(r.status||'present')))throw Error('이미 수업 기록이 있는 수강권입니다. 횟수가 잔여에 반영됐다면 ‘이미 포함됨’, 아직 반영하지 않았다면 ‘아직 포함 안 됨’을 선택해주세요. 과거 수납을 선납으로 처리할 수 없습니다.');
    if(input.passAllocation==='activate'){const activated=allocatedPass(account,invoice,day,stamp);invoice=activated.invoice;remaining=activated.account.remaining;}
    else if(input.passAllocation==='already')invoice=passInvoice(invoice,true,stamp);
    else if(invoice.linkReview&&input.passAllocation!=='pending')throw Error('이 수강권의 횟수 반영 상태를 선택해주세요.');
@@ -958,4 +961,5 @@ export async function monthlyPayment(input:Record<string,unknown>,actor:string){
   audit(tx,db,actor,'payment',studentId,{invoiceId,amount:input.amount,method,paymentDate,complete,creditedUnits:0,source:'monthly',lessonDate:day});
  });
 }
+
 

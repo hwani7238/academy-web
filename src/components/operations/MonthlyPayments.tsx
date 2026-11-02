@@ -3,6 +3,8 @@ import {useEffect,useId,useMemo,useState} from 'react';
 import {seoulDay,type Payment,type Snapshot} from '@/lib/operations/model';
 import {paymentDay,courseInitial} from '@/lib/operations/billing-display';
 import {monthlyPayments,paymentMonthBounds,receiptMethodGroup} from '@/lib/operations/payment-month';
+import {historicalPaymentConflict} from '@/lib/operations/historical-payment';
+import {RestorePaymentPassDialog} from './RestorePaymentPassDialog';
 import {CancelPaymentDialog} from './CancelPaymentDialog';
 import {groupName} from '@/lib/operations/student-order';
 
@@ -11,6 +13,9 @@ export function MonthlyPayments({data,demo,busy,save}:{data:Snapshot;demo:boolea
  const currentMonth=seoulDay().slice(0,7),tabsId=useId();
  const [month,setMonth]=useState(currentMonth),[method,setMethod]=useState('');
  const [result,setResult]=useState<{month:string;payments:Payment[]}|null>(null);
+ const [restoring,setRestoring]=useState<Payment|null>(null);
+ const restoreInvoice=restoring?[...data.invoices,...(data.settledInvoices||[])].find(i=>i.id===restoring.invoiceId):undefined;
+ const restoreAccount=restoring?data.accounts.find(a=>a.id===restoring.studentId):undefined;
  const [cancelling,setCancelling]=useState<Payment|null>(null),[showCancelled,setShowCancelled]=useState(false);
  const [error,setError]=useState(''),[reload,setReload]=useState(0);
  useEffect(()=>{
@@ -62,9 +67,11 @@ export function MonthlyPayments({data,demo,busy,save}:{data:Snapshot;demo:boolea
    <div className="payment-tab-panel" role="tabpanel" id={`${tabsId}-panel`} aria-labelledby={`${tabsId}-tab-${selectedTab}`} tabIndex={0}>
    <p className="payment-filter-total" role="status">{method||'전체 수단'} · {active.length}건 · {won(active.reduce((sum,p)=>sum+p.amount,0))}</p>
    {summary.cancelledRows.length>0&&<label className="check receipt-cancelled-toggle"><input type="checkbox" checked={showCancelled} onChange={e=>setShowCancelled(e.target.checked)}/>취소 내역 보기 ({summary.cancelledRows.length})</label>}
-   {visible.length?<div className="table-wrap"><table className="billing-table payment-table"><caption className="sr-only">{month} {method||'전체 수단'} 수납 기록</caption><thead><tr><th>결제일</th><th>과목</th><th>학생</th><th className="money">수납 금액</th><th>수단</th><th>비고</th><th>관리</th></tr></thead><tbody>{visible.map(p=>{const who=identity(p.studentId);return <tr key={p.id} className={p.cancelledAt?'receipt-cancelled':undefined}><td><time dateTime={paymentDay(p)} title={paymentDay(p)}>{Number(paymentDay(p).slice(5,7))}/{Number(paymentDay(p).slice(8))}</time></td><td><abbr title={who.subject}>{courseInitial(who.subject)}</abbr></td><td><strong>{who.name}</strong></td><td className="money">{won(p.amount)}</td><td>{p.method}</td><td className="billing-note">{p.note||'—'}{p.cancelledAt&&<small>{seoulDay(new Date(p.cancelledAt))} 취소{p.cancelReason?` · ${p.cancelReason}`:''}</small>}</td><td>{p.cancelledAt?<span className="receipt-cancelled-label">취소됨</span>:<button type="button" className="receipt-cancel-button" disabled={busy} aria-label={`${who.name} ${paymentDay(p)} ${p.amount.toLocaleString()}원 수납 취소`} onClick={()=>setCancelling(p)}>수납 취소</button>}</td></tr>;})}</tbody></table></div>:<p className="empty billing-empty">선택한 월과 결제수단의 수납 기록이 없습니다.</p>}
+   {visible.length?<div className="table-wrap"><table className="billing-table payment-table"><caption className="sr-only">{month} {method||'전체 수단'} 수납 기록</caption><thead><tr><th>결제일</th><th>과목</th><th>학생</th><th className="money">수납 금액</th><th>수단</th><th>비고</th><th>관리</th></tr></thead><tbody>{visible.map(p=>{const who=identity(p.studentId);return <tr key={p.id} className={p.cancelledAt?'receipt-cancelled':undefined}><td><time dateTime={paymentDay(p)} title={paymentDay(p)}>{Number(paymentDay(p).slice(5,7))}/{Number(paymentDay(p).slice(8))}</time></td><td><abbr title={who.subject}>{courseInitial(who.subject)}</abbr></td><td><strong>{who.name}</strong></td><td className="money">{won(p.amount)}</td><td>{p.method}</td><td className="billing-note">{p.note||'—'}{p.cancelledAt&&<small>{seoulDay(new Date(p.cancelledAt))} 취소{p.cancelReason?` · ${p.cancelReason}`:''}</small>}</td><td>{!demo&&historicalPaymentConflict([...data.invoices,...(data.settledInvoices||[])].find(i=>i.id===p.invoiceId),p)&&<button type="button" disabled={busy} aria-label={`${who.name} ${paymentDay(p)} 과거 수납 연결 복구`} onClick={()=>setRestoring(p)}>과거 수납 연결 복구</button>}{p.cancelledAt?<span className="receipt-cancelled-label">취소됨</span>:<button type="button" className="receipt-cancel-button" disabled={busy} aria-label={`${who.name} ${paymentDay(p)} ${p.amount.toLocaleString()}원 수납 취소`} onClick={()=>setCancelling(p)}>수납 취소</button>}</td></tr>;})}</tbody></table></div>:<p className="empty billing-empty">선택한 월과 결제수단의 수납 기록이 없습니다.</p>}
    </div>
   </>}
+ {restoring&&restoreInvoice&&restoreAccount&&<RestorePaymentPassDialog invoice={restoreInvoice} payment={restoring} account={restoreAccount} save={async input=>{await save(input);setReload(n=>n+1);}} close={()=>setRestoring(null)}/>}
  {cancelling&&<CancelPaymentDialog payment={cancelling} data={data} label={`${identity(cancelling.studentId).name} · ${identity(cancelling.studentId).subject}`} save={async input=>{await save(input);setReload(n=>n+1);}} close={()=>setCancelling(null)}/>}
  </section>;
 }
+

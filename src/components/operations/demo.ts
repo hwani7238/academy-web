@@ -61,7 +61,7 @@ export function demoAction(current: Snapshot, input: Record<string, unknown>): {
   const allocate=(a:Account,day:string,units:number,old:Snapshot['attendance'][number]|undefined,status:string)=>{
     const rows=[...data.invoices,...(data.settledInvoices||[])].filter(i=>i.studentId===a.id);
     const next={studentId:a.id,day,units,status} as Snapshot['attendance'][number];
-    const change=lessonPass(a,rows,day,status==='makeup'?0:units,old,at,crypto.randomUUID(),nextRecordedCycle(a,data.attendance.filter(r=>r.studentId===a.id),next));
+    const change=lessonPass(a,rows,day,status==='makeup'?0:units,old,at,crypto.randomUUID(),nextRecordedCycle(a,data.attendance.filter(r=>r.studentId===a.id),next),data.attendance);
     Object.assign(a,change.account);if(change.invoice){const existing=rows.find(i=>i.id===change.invoice!.id);if(existing)Object.assign(existing,change.invoice);else data.invoices.push(change.invoice);}return change.passId;
   };
   let result: Record<string, unknown> = { ok: true };
@@ -286,3 +286,4 @@ export function demoAction(current: Snapshot, input: Record<string, unknown>): {
   data.invoices = data.invoices.filter(i => i.status === 'open');
   return { data, result };
 }
+

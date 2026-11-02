@@ -24,7 +24,7 @@ export function MonthlyPaymentDialog({data,studentId,day:initialDay,initialInvoi
  <form onSubmit={async e=>{e.preventDefault();if(lock.current)return;if(choice!=='new'&&!invoice){setError('선택한 청구가 변경됐습니다. 창을 닫고 다시 열어주세요.');return;}lock.current=true;setBusy(true);setError('');const form=new FormData(e.currentTarget);try{await save({action:'monthlyPayment',studentId,lessonDate:day,invoiceId:invoice?.id||'',linkOnly,requestId:requestId.current,expectedUpdatedAt:account.updatedAt,expectedInvoiceUpdatedAt:invoice?.updatedAt||'',amount:Number(String(form.get('amount')||'0').replace(/,/g,'')),invoiceAmount:Number(String(form.get('invoiceAmount')||'0').replace(/,/g,'')),addUnits:false,passAllocation:form.get('passAllocation'),paymentDate:form.get('paymentDate'),method:form.get('method'),note:form.get('note')||''});close();}catch(err){setError(err instanceof Error?err.message:'저장하지 못했습니다.');}finally{lock.current=false;setBusy(false);}}}>
  {initialInvoiceId&&<label>이 수강권의 1회차 날짜<input type="date" required value={day} disabled={busy} onChange={e=>{setDay(e.target.value);setError('');}}/><small>결제받은 날짜와 별개인 첫 수업일입니다. 과거 날짜도 입력할 수 있습니다.</small></label>}
  {candidates.length>0&&<label>연결할 청구·수납<select aria-label="연결할 청구·수납" value={choice} required disabled={busy} onChange={e=>{setChoice(e.target.value);setError('');requestId.current=crypto.randomUUID();}}>{!choice&&<option value="">이 수강권에 해당하는 내역 선택</option>}{candidates.map(i=><option key={i.id} value={i.id}>{i.lessonDate||i.cycleStart||'1회차 날짜 미등록'} · {i.units}회권 · 청구 {i.amount.toLocaleString()}원 / 수납 {i.paid.toLocaleString()}원 · 등록 {i.createdAt.slice(0,10)}</option>)}</select></label>}
- {choice!=='new'&&!invoice&&<p className="error" role="alert">선택한 청구가 변경됐습니다. 창을 닫고 다시 열어주세요.</p>}
+ {choice&&choice!=='new'&&!invoice&&<p className="error" role="alert">선택한 청구가 변경됐습니다. 창을 닫고 다시 열어주세요.</p>}
  {choice&&day&&!linkOnly&&<p className="notice">선택한 내역을 {day} 1회차에 연결하고 수납을 함께 저장합니다. 내역이 여러 개라면 회차·금액·등록일을 확인해 선택해주세요.</p>}
  {choice&&!invoice?.needsReview&&<div key={choice}>{linkOnly?<p className="notice">이미 수납 완료된 {invoice!.amount.toLocaleString()}원 내역을 이 1회차에 연결합니다. 수납 금액과 남은 횟수를 다시 추가하지 않습니다.</p>:<>
  {!invoice&&<label>이 수강권의 원비 (원)<input name="invoiceAmount" inputMode="numeric" defaultValue={account.planAmount.toLocaleString()} required pattern="[0-9]+(,[0-9]{3})*"/></label>}
@@ -32,7 +32,7 @@ export function MonthlyPaymentDialog({data,studentId,day:initialDay,initialInvoi
  <label>이번 수납 금액 (원)<PaymentAmountInput amount={invoice?invoice.amount-invoice.paid:account.planAmount}/></label>
  <label>결제받은 날짜<input name="paymentDate" type="date" defaultValue={seoulDay()} max={seoulDay()} required/></label>
  <label>결제 수단<select name="method">{METHODS.map(m=><option key={m}>{m}</option>)}</select></label>
- {chooseAllocation&&<label>이 수강권의 횟수 반영 방법<select name="passAllocation" required defaultValue={day>seoulDay()||!!invoice?.passId&&!invoice.linkReview?'pending':''}><option value="" disabled>현재 잔여에 포함됐는지 선택해주세요</option><option value="already">이미 포함됨 · {account.remaining}회 유지</option><option value="activate">아직 포함 안 됨 · {units}회 추가 ({account.remaining}회 → {account.remaining+units}회)</option><option value="pending">선납 · 지금은 유지, 첫 출석 때 {units}회 추가</option></select><small>예전에 받은 수강권 횟수가 현재 잔여에 포함돼 있다면 ‘이미 포함됨’을 선택하세요. 한 번 반영한 횟수는 재저장·분할 수납·수납 취소 시 다시 추가하지 않습니다.</small></label>}
+ {chooseAllocation&&<label>이 수강권의 횟수 반영 방법<select name="passAllocation" required defaultValue={day>=seoulDay()&&!!invoice?.passId&&!invoice.linkReview?'pending':''}><option value="" disabled>현재 잔여에 포함됐는지 선택해주세요</option><option value="already">이미 포함됨 · {account.remaining}회 유지</option><option value="activate">아직 포함 안 됨 · {units}회 추가 ({account.remaining}회 → {account.remaining+units}회)</option><option value="pending">선납 · 지금은 유지, 첫 출석 때 {units}회 추가</option></select><small>예전에 받은 수강권 횟수가 현재 잔여에 포함돼 있다면 ‘이미 포함됨’을 선택하세요. 한 번 반영한 횟수는 재저장·분할 수납·수납 취소 시 다시 추가하지 않습니다.</small></label>}
  {!chooseAllocation&&(invoice?.passId?<PassPaymentSummary invoice={invoice} account={account}/>:<p className="notice">이미 반영된 수강권입니다. 수납 후에도 잔여 {account.remaining}회를 유지합니다.</p>)}
  <label>비고 (선택)<input name="note" maxLength={500} placeholder="입금자명 등"/></label>
  </>}</div>}
@@ -40,4 +40,5 @@ export function MonthlyPaymentDialog({data,studentId,day:initialDay,initialInvoi
  {error&&<p className="error" role="alert">{error}</p>}{!invoice?.needsReview&&<button className="primary" disabled={busy||!choice||!day||(choice!=='new'&&!invoice)}>{busy?'저장 중…':linkOnly?'기존 수납 연결 · 금액·횟수 유지':'수강권 연결·수납 저장'}</button>}
  </form></dialog>;
 }
+
 

@@ -2836,3 +2836,91 @@ test('attendance billing links stay course scoped and reject paid, duplicate and
  assert.equal(dates({attendance:[],legacyAttendance:[{studentId:'p',day:'2026-10-27',value:'1',color:'#FF00FF'}]})[bill.id],'2026-10-27');
  assert.equal(dates({attendance:[],sequenceContext:{positions:{},cycleStarts:[],references:[{studentId:'p',day:'2026-10-27',value:'1',color:''}]}})[bill.id],'2026-10-27');
 });
+
+test('late historical receipts cannot pay or grant the next pass on either manual or kiosk attendance',async()=>{
+ for(const entry of ['manual','kiosk']){
+  const s=setup();await s.seed('p',0);const day=s.load('model').seoulDay();
+  const old=s.load('pass-link').passInvoice({id:'historical',studentId:'p',name:'Test',units:8,amount:160000,paid:160000,status:'paid',lessonDate:'2026-08-31',needsReview:false,createdAt:'2026-11-02T01:36:00Z'},false,'2026-11-02T01:36:00Z');
+  s.records.set('opsInvoices/historical',old);
+  for(const d of ['2026-09-28','2026-10-12','2026-10-19','2026-10-26'])s.records.set(`opsAttendance/p_${d}`,{id:`p_${d}`,studentId:'p',day:d,status:'present',units:1,at:d+'T00:00:00Z'});
+  const receipt={id:'late',studentId:'p',invoiceId:old.id,passId:old.passId,lessonDate:'2026-08-31',paymentDate:'2026-09-04',amount:160000,method:'지역화폐',at:'2026-11-02T01:36:00Z'};
+  s.records.set('opsPayments/late',receipt);
+  if(entry==='manual')await s.service.recordAttendance({studentId:'p',day,status:'present',units:1},'owner');else await s.service.checkIn('p','1234','device');
+  const a=s.records.get('opsAccounts/p'),row=s.records.get(`opsAttendance/p_${day}`),fresh=s.records.get('opsInvoices/'+a.currentPassId);
+  assert.notEqual(fresh.id,old.id);assert.equal(fresh.status,'open');assert.equal(fresh.paid,0);assert.equal(fresh.lessonDate,day);assert.equal(a.remaining,7);
+  assert.deepEqual(s.records.get('opsInvoices/historical'),old);assert.deepEqual(s.records.get('opsPayments/late'),receipt);
+  assert.equal(row.passId,fresh.id);
+  const paid=s.load('attendance-appearance').confirmedPassLessons([old,fresh],[row],{p:[day]},{},new Map([['p_'+day,'1']]));assert.equal(paid.has('p_'+day),false);
+  if(entry==='manual')await s.service.recordAttendance({studentId:'p',day,status:'present',units:1,expectedUpdatedAt:row.updatedAt},'owner');else await s.service.checkIn('p','1234','device');
+  assert.equal(s.records.get('opsAccounts/p').remaining,7);assert.equal([...s.records.values()].filter(r=>r.action==='allocate-pass').length,1);
+ }
+});
+test('a delayed genuine prepayment retains its explicit first day when first charged attendance arrives',async()=>{
+ const s=setup(),{lessonPass,passInvoice}=s.load('pass-link');
+ const a={id:'p',name:'p',planUnits:4,planAmount:180000,remaining:0};
+ const paid=passInvoice({id:'advance',studentId:'p',units:4,amount:180000,paid:180000,status:'paid',lessonDate:'2026-10-01'},false,'stamp');
+ const leave={studentId:'p',day:'2026-10-01',status:'travel',units:0};
+ const change=lessonPass(a,[paid],'2026-10-08',1,undefined,'later','new','',[leave]);
+ assert.equal(change.invoice.id,'advance');assert.equal(change.invoice.lessonDate,'2026-10-01');assert.equal(change.account.currentPassStart,'2026-10-01');assert.equal(change.account.remaining,4);
+ const laterCycle=lessonPass(a,[paid],'2026-10-08',1,undefined,'later','new','2026-10-08',[]);
+ assert.equal(laterCycle.invoice.id,'new');assert.equal(laterCycle.invoice.paid,0);
+});
+test('historical monthly payment cannot silently remain pending after its lessons have been recorded',async()=>{
+ const s=setup();await s.seed('p',3);await s.service.createInvoice('p','owner');const id=s.records.get('opsAccounts/p').openInvoiceId;
+ s.records.set('opsAttendance/p_2026-09-12',{studentId:'p',day:'2026-09-12',status:'present',units:1});
+ const input={studentId:'p',invoiceId:id,lessonDate:'2026-09-12',requestId:'late-payment',expectedUpdatedAt:s.records.get('opsAccounts/p').updatedAt,expectedInvoiceUpdatedAt:'',amount:160000,method:'카드',paymentDate:'2026-09-12'};
+ for(const passAllocation of [undefined,'pending']){const before=structuredClone(s.records);await assert.rejects(s.service.monthlyPayment({...input,passAllocation},'owner'),/과거 수납/);assert.deepEqual(s.records,before);}
+ await s.service.monthlyPayment({...input,passAllocation:'already'},'owner');
+ assert.equal(s.records.get('opsAccounts/p').remaining,3);assert.equal(s.records.get('opsInvoices/'+id).allocationState,'allocated');
+});
+async function corruptedHistoricalPass(){
+ const s=setup();await s.seed('p',4);await s.seed('other',2);
+ const invoice={id:'moved-old',studentId:'p',name:'Test',units:8,amount:160000,paid:160000,status:'paid',needsReview:false,passId:'moved-old',creditUnits:0,allocationState:'allocated',allocatedUnits:8,allocationAt:'2026-11-02T01:37:00Z',lessonDate:'2026-11-02',createdAt:'2026-11-02T01:36:00Z',updatedAt:'2026-11-02T01:37:00Z'};
+ s.records.set('opsInvoices/moved-old',invoice);
+ Object.assign(s.records.get('opsAccounts/p'),{currentPassId:invoice.passId,currentPassStart:'2026-11-02',openInvoiceId:null});
+ s.records.set('opsPayments/sep',{id:'sep',studentId:'p',invoiceId:invoice.id,passId:invoice.passId,lessonDate:'2026-08-31',paymentDate:'2026-09-04',amount:160000,method:'지역화폐',at:'2026-11-02T01:36:00Z'});
+ s.records.set('opsAudit/activation',{studentId:'p',action:'allocate-pass',at:'2026-11-02T01:37:00Z',detail:{passId:invoice.passId,day:'2026-11-02',units:8,remaining:4}});
+ s.records.set('opsAttendance/p_2026-11-02',{id:'p_2026-11-02',studentId:'p',day:'2026-11-02',status:'absent',units:0,passId:invoice.passId,at:'2026-11-02T01:38:00Z',updatedAt:'2026-11-02T01:38:00Z',note:'keep',relatedDay:'',unpaidCycleStart:''});
+ s.records.set('opsAttendance/p_2026-09-07',{id:'p_2026-09-07',studentId:'p',day:'2026-09-07',status:'present',units:1,passId:invoice.passId});
+ const input={invoiceId:invoice.id,originalStart:'2026-08-31',currentStart:'2026-11-02',expectedInvoiceUpdatedAt:invoice.updatedAt,expectedAccountUpdatedAt:s.records.get('opsAccounts/p').updatedAt};
+ return {s,input,invoice};
+}
+test('explicit historical-pass repair splits unpaid pass atomically, preserves all money and lesson counts and is idempotent',async()=>{
+ const {s,input,invoice}=await corruptedHistoricalPass(),before=structuredClone(s.records);
+ await Promise.all([s.service.repairHistoricalPass(input,'owner'),s.service.repairHistoricalPass(input,'owner')]);
+ const old=s.records.get('opsInvoices/moved-old'),account=s.records.get('opsAccounts/p'),fresh=s.records.get('opsInvoices/'+account.currentPassId),row=s.records.get('opsAttendance/p_2026-11-02');
+ assert.equal(old.lessonDate,'2026-08-31');assert.equal(old.paid,160000);assert.equal(old.status,'paid');assert.equal(old.passId,invoice.passId);
+ assert.equal(fresh.lessonDate,'2026-11-02');assert.equal(fresh.status,'open');assert.equal(fresh.paid,0);assert.equal(fresh.allocationState,'allocated');assert.equal(fresh.allocatedUnits,8);assert.equal(account.openInvoiceId,fresh.id);assert.equal(account.remaining,4);
+ assert.equal(row.passId,fresh.id);for(const key of ['day','status','units','at','note','relatedDay','unpaidCycleStart'])assert.deepEqual(row[key],before.get('opsAttendance/p_2026-11-02')[key]);
+ for(const key of ['opsPayments/sep','opsAttendance/p_2026-09-07','opsAccounts/other'])assert.deepEqual(s.records.get(key),before.get(key));
+ assert.equal([...s.records.values()].filter(r=>r.action==='allocate-pass').length,1);assert.equal([...s.records.values()].filter(r=>r.action==='repair-historical-pass').length,1);
+ assert.equal([...s.records.keys()].filter(k=>k.startsWith('opsPayments/')).length,1);assert.equal([...s.records.keys()].filter(k=>k.startsWith('opsInvoices/')).length,2);assert.equal([...s.records.keys()].some(k=>k.startsWith('opsNotices/')),false);
+ const confirmed=s.load('attendance-appearance').confirmedPassLessons([old,fresh],[{...row,status:'present'}],{p:['2026-08-31','2026-11-02']},{},new Map([['p_2026-11-02','1']]));assert.equal(confirmed.has('p_2026-11-02'),false);
+ // Changing absence to attendance uses the replacement's existing allocation.
+ await s.service.recordAttendance({studentId:'p',day:row.day,status:'present',units:1,expectedUpdatedAt:row.updatedAt},'owner');assert.equal(s.records.get('opsAccounts/p').remaining,3);assert.equal([...s.records.values()].filter(r=>r.action==='allocate-pass').length,1);
+});
+test('historical-pass repair fails without any writes for ambiguous money, stale state, duplicate claims or missing allocation evidence',async()=>{
+ for(const scenario of ['stale','other-date','cancelled','partial','other-course','newer-pass','other-claim','no-audit','twice-allocated']){
+  const {s,input}=await corruptedHistoricalPass();
+  if(scenario==='stale')input.expectedAccountUpdatedAt='stale';
+  if(scenario==='other-date')s.records.get('opsPayments/sep').lessonDate='2026-09-01';
+  if(scenario==='cancelled')s.records.get('opsPayments/sep').cancelledAt='cancelled';
+  if(scenario==='partial')s.records.get('opsPayments/sep').amount=100000;
+  if(scenario==='other-course')s.records.get('opsPayments/sep').studentId='other';
+  if(scenario==='newer-pass')s.records.get('opsAccounts/p').currentPassId='newer';
+  if(scenario==='other-claim')s.records.set('opsInvoices/conflict',{id:'conflict',studentId:'p',status:'open',lessonDate:input.currentStart});
+  if(scenario==='no-audit')s.records.delete('opsAudit/activation');
+  if(scenario==='twice-allocated')s.records.set('opsAudit/second',s.records.get('opsAudit/activation'));
+  const before=structuredClone(s.records);await assert.rejects(s.service.repairHistoricalPass(input,'owner'));assert.deepEqual(s.records,before,scenario);
+ }
+});
+
+test('imported opening balances and later pass starts prevent old pending receipts being recycled without modern attendance',()=>{
+ const s=setup(),{lessonPass,passInvoice}=s.load('pass-link');
+ const base={id:'p',name:'p',planUnits:4,planAmount:180000,remaining:0};
+ const old=passInvoice({id:'old',studentId:'p',units:4,amount:180000,paid:180000,status:'paid',lessonDate:'2026-08-31'},false,'stamp');
+ for(const a of [{...base,openingAsOf:'2026-09-21'},{...base,currentPassStart:'2026-09-28'}]){
+  const result=lessonPass(a,[old],'2026-11-02',1,undefined,'now','fresh');
+  assert.equal(result.invoice.id,'fresh');assert.equal(result.invoice.paid,0);assert.equal(result.invoice.lessonDate,'2026-11-02');assert.equal(old.lessonDate,'2026-08-31');
+ }
+});

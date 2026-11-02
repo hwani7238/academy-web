@@ -31,7 +31,7 @@ export function allocatedPass(account: Account, invoice: Invoice, day: string, s
 }
 // Old records keep their existing allocation until the audited migration marks them.
 // New passes activate on the first charged lesson, regardless of payment state.
-export function lessonPass(account: Account, invoices: Invoice[], day: string, units: number, previous: Attendance | undefined, stamp: string, newId: string, cycleStart = ''): { account:Account; passId?:string; invoice?:Invoice; created?:boolean } {
+export function lessonPass(account: Account, invoices: Invoice[], day: string, units: number, previous: Attendance | undefined, stamp: string, newId: string, cycleStart = '', records: Attendance[] = []): { account:Account; passId?:string; invoice?:Invoice; created?:boolean } {
   if (previous?.passId) return { account, passId: previous.passId };
   if (units <= (previous?.units || 0) || (account.lastPassLessonDay && day < account.lastPassLessonDay)) return { account };
   if (account.currentPassStart && day < account.currentPassStart) return { account };
@@ -40,10 +40,19 @@ export function lessonPass(account: Account, invoices: Invoice[], day: string, u
   if (account.remaining > 0 && !cycleStart) return { account: { ...account, lastPassLessonDay: day }, passId: account.currentPassId || historical[0]?.passId };
   // An uncertain legacy receipt must not block a child's attendance or manufacture another pass.
   if (account.nextPass || unresolvedReceipts(invoices).length || invoices.some(i=>i.status==='open'&&!i.passId)) return { account };
-  const candidates = invoices.filter(i => i.passId && i.allocationState === 'pending' && !i.reservedPass && i.status !== 'cancelled' && (!passDay(i) || passDay(i) <= day));
+  const candidates = invoices.filter(i => {
+    if(!i.passId||i.allocationState!=='pending'||i.reservedPass||i.status==='cancelled')return false;
+    const start=passDay(i);
+    if(!start)return true; // Undated advance payments can start on the next lesson.
+    if(start>day||(cycleStart&&start<cycleStart))return false;
+    if((account.currentPassStart&&start<account.currentPassStart)||(account.openingAsOf&&start<=account.openingAsOf&&account.openingAsOf<day))return false;
+    // A late-entered historical receipt is not an advance payment for a new pass.
+    // Check recorded lessons even when legacy accounts have no currentPassStart.
+    return !records.some(r=>r.studentId===account.id&&r.day>=start&&r.day<day&&r.units>0&&['present','late_cancel'].includes(r.status||'present'));
+  });
   if (candidates.length > 1) return { account }; // Owner resolves ambiguous legacy allocations.
   const invoice = candidates[0] || passInvoice({ id:newId,studentId:account.id,name:account.name,units:account.planUnits,amount:account.planAmount,paid:0,status:'open',needsReview:false,createdAt:stamp },false,stamp);
-  const start=cycleStart||day;
+  const start=passDay(invoice)||cycleStart||day; // Never move a receipt's explicit first day on activation.
   requireUniquePass(invoices, invoice, start);
   const activated = allocatedPass(account, invoice, start, stamp);
   return { account: { ...activated.account, lastPassLessonDay: day, openInvoiceId: invoice.status === 'open' ? invoice.id : account.openInvoiceId === invoice.id ? null : account.openInvoiceId },
@@ -63,4 +72,5 @@ export function nextRecordedCycle(account:Account, records:Attendance[], next:At
  const sequence=attendanceSequence([account],[...records.filter(r=>r.day>=account.currentPassStart!&&r.day<=next.day&&r.day!==next.day),next],[],{positions:{},cycleStarts:[{studentId:account.id,day:account.currentPassStart}]});
  return (sequence.cycleFirstDays[account.id]||[]).filter(day=>day>account.currentPassStart!&&day<=next.day).sort().at(-1)||'';
 }
+
 
