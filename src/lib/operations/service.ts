@@ -1,3 +1,4 @@
+import {reconcileAttendance} from './reconcile-attendance';
 import { invoiceReviewPatch, invoiceReviewRevision } from './invoice-review';
 export { repairHistoricalPass } from './historical-pass-repair';
 import { passInvoice, passDay, allocatedPass, lessonPass, nextRecordedCycle, paymentPass, unresolvedReceipts, requireClearPassLinks, requireUniquePass } from './pass-link';
@@ -279,7 +280,7 @@ async function registerArrival(studentId: string, digits: string, actor: string,
     const passRecords=(await tx.get(db.collection('opsAttendance').where('studentId','==',id))).docs.map(d=>d.data() as Attendance);
     const cycle=nextRecordedCycle(account,passRecords,{id:attendanceId,studentId:id,day,units,status:reservation?'makeup':'present'} as Attendance);
     const activation=nextPassDue(account,day,reservation?'makeup':'present')?await tx.get(db.doc(`opsInvoices/${account.nextPass!.invoiceId}`)):null;
-    if(activation){account=activateNextPass(account,activation.data() as Invoice,day,now());tx.update(activation.ref,{...passInvoice(activation.data() as Invoice,true,now()),reservedPass:false,cycleStart:day,lessonDate:day,updatedAt:now()});audit(tx,db,actor,'activate-next-pass',id,{invoiceId:activation.id,day,units:account.planUnits});}
+    if(activation){const renewalReservation=account.nextPass!;account=activateNextPass(account,activation.data() as Invoice,day,now());tx.update(activation.ref,{...passInvoice(activation.data() as Invoice,true,now()),renewalReservation,reservedPass:false,cycleStart:day,lessonDate:day,updatedAt:now()});audit(tx,db,actor,'activate-next-pass',id,{invoiceId:activation.id,day,units:account.planUnits});}
     const pass=activation?{account,passId:account.currentPassId}:lessonPass(account,passRows,day,reservation?0:units,attended.data() as Attendance|undefined,now(),invoiceId,cycle,passRecords);
     account=pass.account;
     if(pass.invoice){if(pass.created)tx.create(db.doc(`opsInvoices/${pass.invoice.id}`),pass.invoice);else tx.update(db.doc(`opsInvoices/${pass.invoice.id}`),{...pass.invoice});audit(tx,db,actor,'allocate-pass',id,{passId:pass.passId,day,units:pass.invoice.units,remaining:account.remaining});}
@@ -322,6 +323,19 @@ export async function adjust(input: Record<string, unknown>, actor: string) {
     const ref = db.doc(`opsAccounts/${attendance.studentId}`); const account = (await tx.get(ref)).data() as Account;
     const currentInvoice = account.openInvoiceId ? await tx.get(db.doc(`opsInvoices/${account.openInvoiceId}`)) : null;
     const passes=(await tx.get(db.collection('opsInvoices').where('studentId','==',account.id))).docs.map(d=>d.data() as Invoice);
+    const records=(await tx.get(db.collection('opsAttendance').where('studentId','==',account.id))).docs.map(d=>d.data() as Attendance);
+    const stamp=now(),edited={...attendance,units,note,updatedAt:stamp};
+    const reconciliation=reconcileAttendance(account,passes,records,edited,stamp,invoiceId);
+    if(reconciliation){
+      for(const row of reconciliation.attendance)tx.set(db.doc(`opsAttendance/${row.id}`),row);
+      for(const invoice of reconciliation.invoices){
+        if(passes.some(i=>i.id===invoice.id))tx.update(db.doc(`opsInvoices/${invoice.id}`),{...invoice});
+        else tx.create(db.doc(`opsInvoices/${invoice.id}`),invoice);
+      }
+      tx.update(ref,{...reconciliation.account});
+      audit(tx,db,actor,'reconcile-attendance',account.id,{attendanceId:id,before:attendance,after:edited,remainingBefore:account.remaining,remainingAfter:reconciliation.account.remaining,invoiceChanges:reconciliation.invoices.map(i=>({id:i.id,before:passes.find(p=>p.id===i.id)||null,after:i})),attendanceChanges:reconciliation.attendance.map(r=>({id:r.id,before:records.find(p=>p.id===r.id)||null,after:r}))});
+      return;
+    }
     const remaining = adjustBalance(account.remaining, attendance.units, units);
     const openInvoiceId = remaining <= 0 && !account.openInvoiceId && !passes.some(i=>i.allocationState==='pending'&&i.status!=='cancelled') ? newInvoice(tx, db, account, invoiceId, '횟수 수정 후 소진') : account.openInvoiceId;
     if (remaining > 0 && attendance.units !== units && currentInvoice?.data()?.status === 'open' && !currentInvoice.data()?.reservedPass) tx.update(currentInvoice.ref, invoiceReviewPatch({kind:'attendance_changed',day:attendance.day,beforeRemaining:account.remaining,afterRemaining:remaining},now()));
@@ -562,10 +576,23 @@ export async function recordAttendance(input: Record<string, unknown>, actor: st
     const stamp=now();
     const passRows=(await tx.get(db.collection('opsInvoices').where('studentId','==',studentId))).docs.map(d=>({...d.data(),id:d.id}) as Invoice);
     const passRecords=(await tx.get(db.collection('opsAttendance').where('studentId','==',studentId))).docs.map(d=>d.data() as Attendance);
+    const edited:Attendance={...old,...values,id,studentId,name:account.name,source:old?.source||'manual',at:old?.at||stamp,updatedAt:stamp};
+    delete edited.range;
+    const reconciliation=reconcileAttendance(account,passRows,passRecords,edited,stamp,invoiceId);
+    if(reconciliation){
+      for(const row of reconciliation.attendance)tx.set(db.doc(`opsAttendance/${row.id}`),row);
+      for(const invoice of reconciliation.invoices){
+        if(passRows.some(i=>i.id===invoice.id))tx.update(db.doc(`opsInvoices/${invoice.id}`),{...invoice});
+        else tx.create(db.doc(`opsInvoices/${invoice.id}`),invoice);
+      }
+      tx.update(accountRef,{...reconciliation.account});
+      audit(tx,db,actor,'reconcile-attendance',studentId,{attendanceId:id,before:old||null,after:edited,remainingBefore:account.remaining,remainingAfter:reconciliation.account.remaining,invoiceChanges:reconciliation.invoices.map(i=>({id:i.id,before:passRows.find(p=>p.id===i.id)||null,after:i})),attendanceChanges:reconciliation.attendance.map(r=>({id:r.id,before:passRecords.find(p=>p.id===r.id)||null,after:r}))});
+      return; // Reload sequence anchors, invoice dates and all affected attendance together.
+    }
     const latest=passRecords.map(r=>r.day).sort().at(-1)||'';
     const cycle=nextRecordedCycle(account,passRecords,{...values,id,studentId} as Attendance);
     const activation=nextPassDue(account,values.day,values.status,old?.status || (old?'present':undefined))?await tx.get(db.doc(`opsInvoices/${account.nextPass!.invoiceId}`)):null;
-    if(activation){account=activateNextPass(account,activation.data() as Invoice,values.day,stamp);tx.update(activation.ref,{...passInvoice(activation.data() as Invoice,true,stamp),reservedPass:false,cycleStart:values.day,lessonDate:values.day,updatedAt:stamp});audit(tx,db,actor,'activate-next-pass',studentId,{invoiceId:activation.id,day:values.day,units:account.planUnits});}
+    if(activation){const renewalReservation=account.nextPass!;account=activateNextPass(account,activation.data() as Invoice,values.day,stamp);tx.update(activation.ref,{...passInvoice(activation.data() as Invoice,true,stamp),renewalReservation,reservedPass:false,cycleStart:values.day,lessonDate:values.day,updatedAt:stamp});audit(tx,db,actor,'activate-next-pass',studentId,{invoiceId:activation.id,day:values.day,units:account.planUnits});}
     const pass=activation?{account,passId:account.currentPassId}:lessonPass({...account,lastPassLessonDay:account.lastPassLessonDay||latest},passRows,values.day,values.relatedDay?0:values.units,old,stamp,invoiceId,cycle,passRecords);
     account=pass.account;
     if(pass.invoice){if(pass.created)tx.create(db.doc(`opsInvoices/${pass.invoice.id}`),pass.invoice);else tx.update(db.doc(`opsInvoices/${pass.invoice.id}`),{...pass.invoice});audit(tx,db,actor,'allocate-pass',studentId,{passId:pass.passId,day:values.day,units:pass.invoice.units,remaining:account.remaining});}
@@ -868,7 +895,7 @@ export async function saveNextPass(input:Record<string,unknown>,actor:string){
     const updated=activateNextPass({...account,nextPass},invoice,first,stamp);
     // The operator's dated change supersedes spreadsheet ordinal anchors from this cycle onward.
     updated.referenceResetFrom=account.referenceResetFrom&&account.referenceResetFrom<first?account.referenceResetFrom:first;
-    tx.set(invoiceRef,{...passInvoice(invoice,true,stamp),reservedPass:false,cycleStart:first,lessonDate:first});
+    tx.set(invoiceRef,{...passInvoice(invoice,true,stamp),renewalReservation:nextPass,reservedPass:false,cycleStart:first,lessonDate:first});
     tx.update(ref,{...updated});
     audit(tx,db,actor,'apply-past-pass',id,{invoiceId:invoice.id,requestedStart:nextPass.start,day:first,passCreditUnits:nextPass.units,remaining:updated.remaining});
    }else{
