@@ -2,6 +2,7 @@
 import { useMemo, useRef, useState } from 'react';
 import { matchLessonSource, parseLessonSource } from '@/lib/operations/lesson-reference';
 import { seoulDay, type Snapshot } from '@/lib/operations/model';
+import {ReferenceCellsEditor} from './ReferenceCellsEditor';
 import { CloseButton } from './CloseButton';
 
 export function LessonReferenceDialog({ data, month, save, close }: { data: Snapshot; month: string; save: (input: Record<string, unknown>) => Promise<unknown>; close: () => void }) {
@@ -28,6 +29,7 @@ export function LessonReferenceDialog({ data, month, save, close }: { data: Snap
   return <div className="panel-backdrop"><section className="edit-panel" role="dialog" aria-modal="true" aria-labelledby="lesson-reference-title">
     <div className="section-head"><h2 id="lesson-reference-title">{month} 장부 회차 맞추기</h2><CloseButton disabled={busy} onClick={close}/></div>
     <p>이름과 과목이 한 명에게만 일치하는 회차를 반영합니다. 여행·보강·일시 정지와 차감·수납 기록은 유지합니다. 미기록 날짜는 장부 회차로 표시합니다.</p>
+    <ReferenceCellsEditor data={data} month={month} save={save} onBusy={setBusy}/>
     <label>출결 회차 자료<textarea rows={5} value={text} disabled={busy} onChange={e => { setText(e.target.value); setMessage(''); }} placeholder="원본 주소, 월, 학생별 이름·과목·날짜·회차 JSON"/></label>
     {preview?.error && <p className="error" role="alert">{preview.error}</p>}
     {preview?.ok && <>

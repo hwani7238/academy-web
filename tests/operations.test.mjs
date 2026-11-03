@@ -2988,3 +2988,33 @@ test('balance review verifies a historical-pass repair as zero credit while reje
  for(const detail of [{creditedUnits:8},{remainingBefore:5},{remainingAfter:8}]){const changed=structuredClone(events);Object.assign(changed.at(-1).detail,detail);assert.equal(reviewBalance(account,undefined,changed,[],[]).status,'review');}
 });
 
+
+test('targeted reference corrections fix shifted weekdays without changing attendance, balances or other students',async()=>{
+ const s=setup();await s.seed('p',11);await s.seed('other',3);
+ const refs=[{studentId:'p',day:'2026-10-15',value:'5',color:'#FFFFFF',row:9},{studentId:'p',day:'2026-10-16',value:'6',color:'',row:9},{studentId:'p',day:'2026-10-17',value:'7',color:'',row:9},{studentId:'p',day:'2026-10-21',value:'8',color:'',row:9},{studentId:'other',day:'2026-10-17',value:'2',color:'',row:10}];
+ s.records.set('opsLessonReferences/2026-10',{revision:'original',source:'sheet',references:refs,matched:[{studentId:'p',count:4}]});
+ for(const day of ['2026-10-14','2026-10-15','2026-10-16','2026-10-21'])s.records.set('opsAttendance/p_'+day,{studentId:'p',day,status:'present',units:1});
+ s.records.set('opsPayments/paid',{studentId:'p',amount:180000});
+ const before=structuredClone([...s.records].filter(([k])=>!k.startsWith('opsLessonReferences/')));
+ const input={studentId:'p',month:'2026-10',expectedRevision:'original',cells:[{day:'2026-10-14',value:'5'},{day:'2026-10-15',value:'6'},{day:'2026-10-16',value:'7'},{day:'2026-10-17',value:''}]};
+ await s.load('lesson-reference-service').correctLessonReferences(input,'owner');
+ const result=s.records.get('opsLessonReferences/2026-10');
+ assert.deepEqual(result.references.filter(r=>r.studentId==='other'),refs.filter(r=>r.studentId==='other'));
+ assert.deepEqual(result.references.find(r=>r.day==='2026-10-21'),refs[3]);
+ assert.equal(result.references.find(r=>r.day==='2026-10-15').color,'#FFFFFF');
+ assert.deepEqual([...s.records].filter(([k])=>!k.startsWith('opsLessonReferences/')&&!k.startsWith('opsAudit/')),before.filter(([k])=>!k.startsWith('opsAudit/')));
+ const seq=s.load('attendance-sequence').attendanceSequence([{id:'p',planUnits:12}],[...s.records].filter(([k])=>k.startsWith('opsAttendance/')).map(([,r])=>r),[],{positions:{p:4},cycleStarts:[],references:result.references});
+ for(const [day,n]of [['14','5'],['15','6'],['16','7'],['21','8']])assert.equal(seq.labels.get('p_2026-10-'+day),n);
+ assert.equal(seq.labels.has('p_2026-10-17'),false);
+ const audit=[...s.records.values()].find(r=>r.action==='correctLessonReferences');
+ assert.deepEqual(audit.before.references,refs);
+ await assert.rejects(s.load('lesson-reference-service').correctLessonReferences(input,'owner'),/변경/);
+});
+test('targeted reference corrections reject invalid dates, duplicates and unknown students without partial writes',async()=>{
+ const s=setup();await s.seed('p',11);s.records.set('opsLessonReferences/2026-10',{revision:'r',references:[],source:'sheet'});
+ const before=structuredClone([...s.records]);
+ const base={studentId:'p',month:'2026-10',expectedRevision:'r',cells:[{day:'2026-10-14',value:'5'}]};
+ for(const extra of [{cells:[{day:'2026-11-14',value:'5'}]},{cells:[{day:'2026-10-14',value:'bad'}]},{cells:[{day:'2026-10-14',value:'5'},{day:'2026-10-14',value:''}]},{studentId:'missing'},{expectedRevision:'old'}]){
+  await assert.rejects(s.load('lesson-reference-service').correctLessonReferences({...base,...extra},'owner'));assert.deepEqual([...s.records],before);
+ }
+});

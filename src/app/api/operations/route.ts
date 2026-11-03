@@ -1,4 +1,4 @@
-import { reconcileLessonReferences } from '@/lib/operations/lesson-reference-service';
+import { reconcileLessonReferences, correctLessonReferences } from '@/lib/operations/lesson-reference-service';
 import type { LessonReference } from '@/lib/operations/lesson-reference';
 import {billingHorizon} from '@/lib/operations/upcoming-billing';
 import {passCycleStarts} from '@/lib/operations/pass-history';
@@ -101,6 +101,7 @@ export async function POST(request: Request) {
   try {
     sameOrigin(request); const actor = await manager(request); const input = await request.json();
     switch (input.action) {
+      case 'correctLessonReferences': return Response.json(await correctLessonReferences(input,actor));
       case 'reconcileLessonReferences': {
         const url = new URL(request.url); url.search = '';
         url.searchParams.set('day', String(input.month) + '-01');
