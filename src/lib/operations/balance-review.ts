@@ -26,6 +26,14 @@ export function reviewBalance(account:Account,source:BalanceSource|undefined,aud
   const d=event.detail;
   if(event.action==='check-in'||event.action==='teacher-check-in')ledger+=Number(d.passCreditUnits||0)-Number(d.units);
   else if(event.action==='record-attendance')ledger+=Number(d.passCreditUnits||0)-Number(d.units)+Number(d.before);
+  else if(event.action==='reconcile-attendance'){
+   const changes=d.invoiceChanges as {before:Invoice|null;after:Invoice}[];
+   const before=d.before as Attendance|null,after=d.after as Attendance;
+   if(!Array.isArray(changes)||!after||d.remainingBefore!==ledger)return stop('출석 재계산의 시작 잔여를 확인해주세요.');
+   const credits=(i:Invoice|null)=>i?.allocationState==='allocated'?(i.allocatedUnits??i.units):0;
+   ledger+=changes.reduce((n,c)=>n+credits(c.after)-credits(c.before),0)+(before?.units||0)-after.units;
+   if(ledger!==d.remainingAfter)return stop('출석 재계산의 수강권 반영 횟수가 일치하지 않습니다.');
+  }
   else if(event.action==='allocate-pass')ledger+=Number(d.units);
   else if(event.action==='apply-past-pass')ledger+=Number(d.passCreditUnits);
   else if(event.action==='adjust')ledger-=Number(d.after)-Number(d.before);

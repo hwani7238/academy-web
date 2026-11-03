@@ -3018,3 +3018,60 @@ test('targeted reference corrections reject invalid dates, duplicates and unknow
   await assert.rejects(s.load('lesson-reference-service').correctLessonReferences({...base,...extra},'owner'));assert.deepEqual([...s.records],before);
  }
 });
+
+async function retroFixture(){
+ const s=setup();await s.seed('p',0);const a=s.records.get('opsAccounts/p');Object.assign(a,{planUnits:4,planAmount:100000,currentPassId:'old',currentPassStart:'2026-10-01',lastPassLessonDay:'2026-10-31',nextPass:{invoiceId:'next',units:3,amount:90000,mode:'depleted',start:'',reservedOn:'2026-10-30',note:''}});
+ s.records.set('opsInvoices/old',{id:'old',studentId:'p',name:'p',units:4,amount:100000,paid:100000,status:'paid',passId:'old',lessonDate:'2026-10-01',allocationState:'allocated',allocatedUnits:4,creditUnits:0,createdAt:'2026-10-01'});
+ s.records.set('opsInvoices/next',{id:'next',studentId:'p',name:'p',units:3,amount:90000,paid:0,status:'open',passId:'next',reservedPass:true,lessonDate:'',allocationState:'pending',allocatedUnits:0,creditUnits:0,createdAt:'2026-10-30'});
+ for(const day of ['2026-10-01','2026-10-20','2026-10-30','2026-10-31'])s.records.set('opsAttendance/p_'+day,{id:'p_'+day,studentId:'p',day,status:'present',units:1,passId:'old',updatedAt:'before'});
+ s.records.set('opsPayments/receipt',{id:'receipt',studentId:'p',invoiceId:'old',amount:100000,paymentDate:'2026-10-01',method:'카드'});return s;
+}
+test('backdated attendance activates the reserved changed-size pass on the already recorded lesson, atomically and once',async()=>{
+ const s=await retroFixture(),receipt=structuredClone(s.records.get('opsPayments/receipt'));
+ await s.service.recordAttendance({studentId:'p',day:'2026-10-17',status:'present',units:1},'owner');
+ assert.equal(s.records.get('opsAttendance/p_2026-10-31').passId,'next');assert.equal(s.records.get('opsAttendance/p_2026-10-30').passId,'old');
+ const a=s.records.get('opsAccounts/p'),i=s.records.get('opsInvoices/next');assert.equal(a.currentPassStart,'2026-10-31');assert.equal(a.remaining,2);assert.equal(a.planUnits,3);assert.equal(a.nextPass,null);assert.equal(i.lessonDate,'2026-10-31');assert.equal(i.paid,0);assert.equal(i.allocatedUnits,3);assert.deepEqual(s.records.get('opsPayments/receipt'),receipt);
+ const row=s.records.get('opsAttendance/p_2026-10-17');await s.service.recordAttendance({studentId:'p',day:row.day,status:'present',units:1,expectedUpdatedAt:row.updatedAt},'owner');assert.equal(s.records.get('opsAccounts/p').remaining,2);
+ // Cancel that historical lesson: move the later pass back to pending without deleting its invoice.
+ await s.service.recordAttendance({studentId:'p',day:row.day,status:'cancelled',units:0,expectedUpdatedAt:row.updatedAt},'owner');
+ assert.equal(s.records.get('opsAccounts/p').remaining,0);assert.equal(s.records.get('opsAttendance/p_2026-10-31').passId,'old');assert.equal(s.records.get('opsInvoices/next').allocatedUnits,0);assert.equal(s.records.get('opsInvoices/next').lessonDate,'');assert.deepEqual(s.records.get('opsPayments/receipt'),receipt);
+});
+test('historical makeup stays with its source pass and does not create a new first lesson',async()=>{
+ const s=await retroFixture();await s.service.recordAttendance({studentId:'p',day:'2026-10-17',status:'present',units:1},'owner');
+ const row=s.records.get('opsAttendance/p_2026-10-31');
+ s.records.set('opsAttendance/p_2026-10-08',{id:'p_2026-10-08',studentId:'p',day:'2026-10-08',status:'sick',units:0,passId:'old'});
+ await s.service.recordAttendance({studentId:'p',day:row.day,status:'makeup',units:1,relatedDay:'2026-10-08',expectedUpdatedAt:row.updatedAt},'owner');
+ assert.equal(s.records.get('opsAttendance/p_2026-10-31').passId,'old');assert.equal(s.records.get('opsInvoices/next').allocatedUnits,0);assert.equal(s.records.get('opsAccounts/p').remaining,-1);
+});
+test('dated reservation does not shift earlier when historical attendance is added',async()=>{
+ const s=await retroFixture();Object.assign(s.records.get('opsAccounts/p').nextPass,{mode:'date',start:'2026-11-03'});
+ await s.service.recordAttendance({studentId:'p',day:'2026-10-17',status:'present',units:1},'owner');
+ assert.equal(s.records.get('opsInvoices/next').allocationState,'pending');assert.equal(s.records.get('opsAccounts/p').nextPass.start,'2026-11-03');assert.equal(s.records.get('opsAttendance/p_2026-10-31').passId,'old');
+});
+test('unit adjustment replays subsequent passes and detects stale attendance revisions',async()=>{
+ const s=await retroFixture();await s.service.adjust({attendanceId:'p_2026-10-20',units:2,note:'two lessons'},'owner');
+ assert.equal(s.records.get('opsInvoices/next').lessonDate,'2026-10-31');assert.equal(s.records.get('opsAccounts/p').remaining,2);
+ const snapshot=structuredClone(s.records);await assert.rejects(s.service.recordAttendance({studentId:'p',day:'2026-10-31',status:'cancelled',units:0,expectedUpdatedAt:'stale'},'owner'),/변경/);assert.deepEqual(s.records,snapshot);
+});
+test('replay shifts an already paid later pass without changing receipt or money and refuses removal of its last lesson',async()=>{
+ const s=await retroFixture();await s.service.recordAttendance({studentId:'p',day:'2026-10-17',status:'present',units:1},'owner');
+ Object.assign(s.records.get('opsInvoices/next'),{paid:90000,status:'paid'});
+ const receipt={id:'second',studentId:'p',invoiceId:'next',amount:90000,paymentDate:'2026-11-01',method:'현금'};s.records.set('opsPayments/second',receipt);
+ // Add one earlier lesson: October 30, previously old, becomes the new first.
+ await s.service.recordAttendance({studentId:'p',day:'2026-10-15',status:'present',units:1},'owner');
+ assert.equal(s.records.get('opsInvoices/next').lessonDate,'2026-10-30');assert.equal(s.records.get('opsInvoices/next').paid,90000);assert.deepEqual(s.records.get('opsPayments/second'),receipt);
+ const r=s.records.get('opsAttendance/p_2026-10-15');await s.service.recordAttendance({studentId:'p',day:r.day,status:'cancelled',units:0,expectedUpdatedAt:r.updatedAt},'owner');
+ const r2=s.records.get('opsAttendance/p_2026-10-17'),before=structuredClone(s.records);await assert.rejects(s.service.recordAttendance({studentId:'p',day:r2.day,status:'cancelled',units:0,expectedUpdatedAt:r2.updatedAt},'owner'),/이미 납부/);assert.deepEqual(s.records,before);
+});
+test('reconciled plan history displays October31 as first and November3 as second',async()=>{
+ const s=await retroFixture();await s.service.recordAttendance({studentId:'p',day:'2026-10-17',status:'present',units:1},'owner');
+ const a={...s.records.get('opsAccounts/p'),schedule:{rules:[{start:'2026-10-01',weekdays:[2,4,5,6]}],moves:[]}},records=[...s.records.entries()].filter(([k])=>k.startsWith('opsAttendance/')).map(([,v])=>v);
+ const result=s.load('attendance-forecast').attendanceForecastSequence([a],records,[],{positions:{},cycleStarts:[{studentId:'p',day:'2026-10-31'}]},['2026-10-31','2026-11-03'],'2026-11-03');
+ assert.equal(result.sequence.labels.get('p_2026-10-31'),'1');assert.equal(result.forecast.get('p_2026-11-03'),'2');
+});
+test('advance makeup follows the source pass after retroactive boundaries move',async()=>{
+ const s=await retroFixture();await s.service.recordAttendance({studentId:'p',day:'2026-10-17',status:'present',units:1},'owner');
+ const a=s.records.get('opsAccounts/p');s.records.set('opsAttendance/p_2026-10-29',{id:'p_2026-10-29',studentId:'p',day:'2026-10-29',status:'makeup',relatedDay:'2026-10-31',units:0,passId:'old'});
+ const r=s.records.get('opsAttendance/p_2026-10-20');await s.service.recordAttendance({studentId:'p',day:r.day,status:'late_cancel',units:1,expectedUpdatedAt:r.updatedAt},'owner');
+ assert.equal(s.records.get('opsAttendance/p_2026-10-29').passId,'next');assert.equal(s.records.get('opsAccounts/p').remaining,a.remaining);
+});
