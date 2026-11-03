@@ -13,7 +13,7 @@ export type SequenceContext = {
   firstLessonTimes?: Record<string, string>;
   cycleStarts: { studentId: string; day: string }[];
 };
-type RecordRow = Pick<Attendance, 'studentId' | 'day' | 'units' | 'status' | 'relatedDay' | 'range'> & Partial<Pick<Attendance, 'at'>>;
+type RecordRow = Pick<Attendance, 'studentId' | 'day' | 'units' | 'status' | 'relatedDay' | 'range' | 'passAllocations'> & Partial<Pick<Attendance, 'at'>>;
 type Legacy = NonNullable<Snapshot['legacyAttendance']>[number];
 
 // Display-only chronology: neither payments nor current balances rewrite old lessons.
@@ -58,6 +58,14 @@ export function attendanceSequence(accounts: Pick<Account, 'id' | 'planUnits' | 
         if (positions[id] === 1) firstDay();
       }
       return numbers.join('·');
+    }
+    const split=e.record?.passAllocations;
+    if(split&&split.length>1&&['present','late_cancel'].includes(status)&&split.reduce((n,s)=>n+s.units,0)===e.record!.units){
+      const numbers=split.flatMap(s=>Array.from({length:s.units},(_,n)=>s.firstOrdinal+n));
+      labels.set(key,numbers.join('·'));positions[id]=numbers.at(-1)!;
+      if(numbers.includes(1))firstDay();
+      if(missed)missedLessons[key]=numbers.join('·');
+      continue;
     }
     const planReset = planResets.get(id);
     const reset = Boolean((account?.referenceResetFrom && e.day >= account.referenceResetFrom) || (planReset && e.day >= planReset));
