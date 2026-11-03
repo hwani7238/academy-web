@@ -9,7 +9,8 @@ export function IntegrityPanel({user,onRepaired,revision}:{user:User;onRepaired:
  const scan=useCallback(async()=>{if(running.current)return;running.current=true;setBusy(true);try{const response=await fetch('/api/operations/integrity',{method:'POST',headers:{Authorization:`Bearer ${await user.getIdToken()}`},signal:AbortSignal.timeout(55000)});const data=await response.json();if(!response.ok)throw Error(data.error||'점검에 실패했습니다.');setResult(data);setError('');if(data.repaired.length)changed.current();}catch(e){setError(e instanceof Error?e.message:'점검에 실패했습니다.');}finally{running.current=false;setBusy(false);}},[user]);
  useEffect(()=>{void scan();const timer=setInterval(()=>void scan(),60000);return()=>clearInterval(timer);},[scan]);
  useEffect(()=>{const timer=setTimeout(()=>void scan(),1000);return()=>clearTimeout(timer);},[revision,scan]);
- const visible=result?.issues.filter(i=>!search||i.name.includes(search))||[];
+ const priority:Record<string,number>={'scan-failed':0,'missing-invoice':1,'duplicate-invoice':1,'wrong-pass':1,'missing-student':2,'unlinked-invoice':3,'receipt-link':3,'no-pass-start':4,'balance-review':5};
+ const visible=[...(result?.issues||[])].filter(i=>!search||i.name.includes(search)).sort((a,b)=>(priority[a.kind]??4)-(priority[b.kind]??4)||a.name.localeCompare(b.name,'ko')||a.day.localeCompare(b.day));
  return <section className="surface" aria-label="출석·청구 자동 점검" style={{margin:'12px 0',padding:16}}>
   <div className="section-head"><div><h2>출석·청구 자동 점검</h2><p>{result?`${result.checked}개 수강 설정 점검 · 확인 필요 ${new Set(result.issues.map(i=>i.studentId)).size}개 수강 설정`:'출석과 청구 연결을 확인하고 있습니다.'} · {busy?'점검 중':'1분마다 자동 확인'}</p></div><button disabled={busy} onClick={()=>void scan()}>지금 다시 점검</button></div>
   {error&&<p role="alert">자동 점검 실패: {error} 기존 경고는 유지됩니다.</p>}

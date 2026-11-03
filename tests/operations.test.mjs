@@ -3114,3 +3114,7 @@ test('integrity warnings expose unlinked receipts and balance differences withou
 test('legacy exhaustion bill is reused only when complete attendance and debt prove no credit was granted',async()=>{
  for(const remaining of [-2,5]){const s=await integrityFixture();s.records.get('opsAccounts/p').remaining=remaining;s.records.set('opsInvoices/legacy',{id:'legacy',studentId:'p',units:8,amount:160000,paid:0,status:'open',linkReview:true,reason:'수동 출결 기록 후 소진'});const result=await s.load('integrity-service').scanBillingIntegrity('owner');assert.equal(result.repaired.length,remaining===-2?1:0);if(remaining===-2){assert.equal(s.records.get('opsAccounts/p').remaining,6);assert.equal(s.records.get('opsInvoices/legacy').linkReview,false);assert.equal(s.records.get('opsInvoices/legacy').paid,0);}}
 });
+
+test('integrity scan shows paused and orphaned account issues but never auto repairs them',async()=>{
+ for(const orphan of [true,false]){const s=await integrityFixture();if(orphan)s.records.delete('students/p');else s.records.get('students/p').lifecycle={status:'paused',until:'2099-01-01'};const before=structuredClone(s.records),r=await s.load('integrity-service').scanBillingIntegrity('owner');assert.equal(r.checked,1);assert.equal(r.repaired.length,0);assert(r.issues.length);assert.deepEqual(s.records,before);if(orphan)assert(r.issues.some(i=>i.kind==='missing-student'));}
+});

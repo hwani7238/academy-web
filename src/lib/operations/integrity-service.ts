@@ -19,9 +19,15 @@ export async function scanBillingIntegrity(actor:string,onlyStudent?:string){
  const issues:IntegrityIssue[]=[],repaired:{studentId:string;name:string;day:string}[]=[],failed:string[]=[];let checked=0;
  for(const doc of accounts.docs){
   const a={...doc.data(),id:doc.id} as Account,owner=students.docs.find(d=>d.id===(a.sourceStudentId||a.id));
-  if(!a.active||!owner||enrollmentState(courseLifecycle(owner.data(),a.id),today)!=='active')continue;
+  if(!a.active)continue;
   checked++;
+  const eligible=!!owner&&enrollmentState(courseLifecycle(owner.data(),a.id),today)==='active';
   const legacy=integrityLegacy(a,imports,cc),check=inspectBilling(a,ii,rr,references,legacy,today,stamp);
+  if(!eligible){
+   issues.push(...check.issues.map(i=>({...i,automatic:false,reason:i.reason+' (등록 상태 확인 후 처리)'})));
+   if(!owner)issues.push({studentId:a.id,name:a.name,day:'',kind:'missing-student',automatic:false,reason:'이 수강 설정에 연결된 학생 등록 정보가 없습니다. 과거 또는 중복 수강 설정인지 확인해주세요.'});
+   continue;
+  }
   if(!check.plans.length){issues.push(...check.issues);continue;}
   try{
    const result=await db.runTransaction(async tx=>{
