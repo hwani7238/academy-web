@@ -3075,3 +3075,17 @@ test('advance makeup follows the source pass after retroactive boundaries move',
  const r=s.records.get('opsAttendance/p_2026-10-20');await s.service.recordAttendance({studentId:'p',day:r.day,status:'late_cancel',units:1,expectedUpdatedAt:r.updatedAt},'owner');
  assert.equal(s.records.get('opsAttendance/p_2026-10-29').passId,'next');assert.equal(s.records.get('opsAccounts/p').remaining,a.remaining);
 });
+test('one day can finish the previous pass and start the next pass without charging twice',async()=>{
+ const s=await retroFixture();await s.service.adjust({attendanceId:'p_2026-10-20',units:2,note:''},'owner');
+ // With one extra unit on October30, its first unit finishes old and second starts next.
+ await s.service.adjust({attendanceId:'p_2026-10-30',units:2,note:''},'owner');
+ const row=s.records.get('opsAttendance/p_2026-10-30'),a=s.records.get('opsAccounts/p');
+ assert.deepEqual(row.passAllocations,[{passId:'old',units:1,firstOrdinal:4,passUnits:4},{passId:'next',units:1,firstOrdinal:1,passUnits:3}]);
+ assert.equal(a.remaining,1);assert.equal(s.records.get('opsInvoices/next').lessonDate,'2026-10-30');
+ const records=[...s.records.entries()].filter(([k])=>k.startsWith('opsAttendance/')).map(([,v])=>v);
+ const seq=s.load('attendance-sequence').attendanceSequence([a],records,[],{positions:{},cycleStarts:[{studentId:'p',day:'2026-10-30'}]});
+ assert.equal(seq.labels.get('p_2026-10-30'),'4·1');assert.equal(seq.labels.get('p_2026-10-31'),'2');
+ // A subsequent edit starts its replay from the split date; the old segment must not be charged to the new pass.
+ await s.service.adjust({attendanceId:'p_2026-10-31',units:2,note:''},'owner');
+ assert.equal(s.records.get('opsAccounts/p').remaining,0);assert.deepEqual(s.records.get('opsAttendance/p_2026-10-30').passAllocations,row.passAllocations);
+});
