@@ -27,7 +27,7 @@ export async function scanBillingIntegrity(actor:string,onlyStudent?:string){
    const result=await db.runTransaction(async tx=>{
     const [as,ins,ats,rs,cs,source,ownerNow]=await Promise.all([tx.get(db.doc(`opsAccounts/${a.id}`)),tx.get(db.collection('opsInvoices').where('studentId','==',a.id)),tx.get(db.collection('opsAttendance').where('studentId','==',a.id)),tx.get(db.collection('opsLessonReferences')),tx.get(db.collection('opsLegacyCorrections').where('studentId','==',a.id)),a.importId?tx.get(db.doc(`opsImports/${a.importId}`)):Promise.resolve(null),tx.get(db.doc(`students/${a.sourceStudentId||a.id}`))]);
     const current={...as.data(),id:a.id} as Account,now=new Date().toISOString(),bills=ins.docs.map(d=>({...d.data(),id:d.id}) as Invoice),records=ats.docs.map(d=>({...d.data(),id:d.id}) as Attendance);
-    if(!current.active||!ownerNow.exists||enrollmentState(courseLifecycle(ownerNow.data(),a.id),today)!=='active'||current.updatedAt!==a.updatedAt)throw Error('점검 중 수강 정보가 변경됐습니다. 다음 점검에서 다시 확인합니다.');
+    if(!current.active||!ownerNow.exists||enrollmentState(courseLifecycle(ownerNow.data()!,a.id),today)!=='active'||current.updatedAt!==a.updatedAt)throw Error('점검 중 수강 정보가 변경됐습니다. 다음 점검에서 다시 확인합니다.');
     const verified=inspectBilling(current,bills,records,rs.docs.flatMap(d=>d.data().references||[]),integrityLegacy(current,source?.exists?[{...source.data(),id:source.id} as IntegritySource]:[],cs.docs.map(d=>d.data() as LegacyCorrection)),today,now);
     if(verified.plans.length!==1)return {issues:verified.issues,repaired:null};
     const p=verified.plans[0];
