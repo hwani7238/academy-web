@@ -25,7 +25,7 @@ function setup() {
     if (modules.has(file)) return modules.get(file);
     const exports = {}; modules.set(file, exports);
     const code = ts.transpileModule(fs.readFileSync(file, 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
-    new Function('require', 'exports', code)(id => id === '@/lib/operations/service' ? {teacherCheckIn:async(input,actor)=>{writes.push({input,actor});return {duplicate:false};},correctTeacherAttendanceTime:async(input,actor)=>{writes.push({input,actor});}} : id === '@/lib/firebase-admin' ? { adminDb: db, adminAuth: { verifyIdToken: async (token, revoked) => { assert.equal(revoked, true); if (token === 'invalid') throw Error('invalid'); return { uid: token }; } } } : id.startsWith('@/') ? load(path.join('src', id.slice(2) + '.ts')) : id.startsWith('./') ? load(path.join(path.dirname(file), id + '.ts')) : require(id), exports);
+    new Function('require', 'exports', code)(id => id === 'next/server' ? {after:()=>{}} : id === '@/lib/operations/integrity-service' ? {scanBillingIntegrity:async()=>({})} : id === '@/lib/operations/service' ? {teacherCheckIn:async(input,actor)=>{writes.push({input,actor});return {duplicate:false};},correctTeacherAttendanceTime:async(input,actor)=>{writes.push({input,actor});}} : id === '@/lib/firebase-admin' ? { adminDb: db, adminAuth: { verifyIdToken: async (token, revoked) => { assert.equal(revoked, true); if (token === 'invalid') throw Error('invalid'); return { uid: token }; } } } : id.startsWith('@/') ? load(path.join('src', id.slice(2) + '.ts')) : id.startsWith('./') ? load(path.join(path.dirname(file), id + '.ts')) : require(id), exports);
     return exports;
   }
   const policy = load('src/lib/teacher-attendance.ts');

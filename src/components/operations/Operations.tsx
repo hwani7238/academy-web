@@ -1,6 +1,7 @@
 'use client';
 import {billingProjection, finalLessonInvoices} from '@/lib/operations/upcoming-billing';
 import {PassPaymentSummary} from './PassPaymentSummary';
+import {IntegrityPanel} from './IntegrityPanel';
 import { BillingList } from './BillingList';
 import { CollapsibleOverview } from './CollapsibleOverview';
 import { Trash2 } from 'lucide-react';
@@ -174,6 +175,7 @@ export function Operations({ demo = false }: { demo?: boolean }) {
       <div><span>미납 합계</span><strong>{won(data.invoices.reduce((s, i) => s + i.amount - i.paid, 0))}</strong></div>
       <div><span>총 등록 현황</span><strong>{activeAccounts.length}<small>/ {activeStudents.length}건</small></strong>{unconfigured > 0 && <button className="text-button" onClick={() => setTab('students')}>{unconfigured}건 설정 필요 →</button>}</div>
     </div></CollapsibleOverview>
+    {!demo && user && <IntegrityPanel user={user} onRepaired={()=>void refresh(true)} revision={data.accounts.map(a=>a.updatedAt).join('|')}/> }
     <nav className="ops-tabs" aria-label="관리 메뉴">{tabs.map(([id, label]) => <button key={id} aria-current={tab === id ? 'page' : undefined} onClick={() => { setTab(id); if(id==='billing' && day.slice(0,7)!==seoulDay().slice(0,7))setDay(seoulDay()); setMessage(''); }}>{label}{id === 'billing' && open.length > 0 && <b>{open.length}</b>}{id === 'today' && <b>{presentCount}</b>}</button>)}</nav>
     {error && <p className="error" role="alert">{error} {!demo && loadedDay !== day && <button onClick={() => void refresh()}>다시 불러오기</button>}</p>}{message && <p className="success" role="status">{message}</p>}
     <div className={demo && tab === 'today' ? 'workspace-with-kiosk' : ''}><section className="surface">

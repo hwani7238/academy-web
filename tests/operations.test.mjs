@@ -3089,3 +3089,28 @@ test('one day can finish the previous pass and start the next pass without charg
  await s.service.adjust({attendanceId:'p_2026-10-31',units:2,note:''},'owner');
  assert.equal(s.records.get('opsAccounts/p').remaining,0);assert.deepEqual(s.records.get('opsAttendance/p_2026-10-30').passAllocations,row.passAllocations);
 });
+async function integrityFixture(){const s=setup();await s.seed('p',5);Object.assign(s.records.get('opsAccounts/p'),{planUnits:8,planAmount:160000,openInvoiceId:null});s.records.set('opsInvoices/old',{id:'old',studentId:'p',name:'Test',units:8,amount:160000,paid:160000,status:'paid',passId:'old',lessonDate:'2026-10-01',allocationState:'allocated',allocatedUnits:8,creditUnits:0});for(const day of ['2026-10-01','2026-10-06','2026-10-08','2026-10-13','2026-10-15','2026-10-20','2026-10-22','2026-10-27','2026-10-29','2026-11-03'])s.records.set('opsAttendance/p_'+day,{id:'p_'+day,studentId:'p',day,status:'present',units:1,passId:'old',...(day==='2026-10-29'?{unpaidCycleStart:day}:{}),updatedAt:'before'});s.records.set('opsPayments/receipt',{id:'receipt',studentId:'p',invoiceId:'old',amount:160000,method:'카드',paymentDate:'2026-10-02'});return s;}
+test('integrity scan recovers a prior-month missing bill despite positive balance and old paid pass links, once',async()=>{
+ const s=await integrityFixture(),money=structuredClone(s.records.get('opsPayments/receipt'));const run=()=>s.load('integrity-service').scanBillingIntegrity('owner');
+ const results=await Promise.all([run(),run()]);assert.equal(results.reduce((n,r)=>n+r.repaired.length,0),1);
+ const a=s.records.get('opsAccounts/p'),invoice=s.records.get('opsInvoices/'+a.currentPassId);assert.equal(invoice.lessonDate,'2026-10-29');assert.equal(invoice.paid,0);assert.equal(invoice.amount,160000);assert.equal(a.remaining,6);assert.equal(s.records.get('opsAttendance/p_2026-11-03').passId,invoice.id);assert.deepEqual(s.records.get('opsPayments/receipt'),money);
+ assert.equal((await run()).repaired.length,0);assert.equal([...s.records.keys()].filter(k=>k.startsWith('opsInvoices/')).length,2);
+});
+test('integrity scan reuses a unique unallocated bill and never overwrites a paid, cancelled, ambiguous or reserved pass',async()=>{
+ for(const scenario of ['pending','paid-unknown','cancelled','reservation','missing-evidence','multiple']){const s=await integrityFixture();if(scenario==='pending'||scenario==='multiple')s.records.set('opsInvoices/pending',{id:'pending',studentId:'p',name:'Test',units:8,amount:160000,paid:0,status:'open',passId:'pending',allocationState:'pending',allocatedUnits:0});
+ if(scenario==='multiple')s.records.set('opsInvoices/second',{...s.records.get('opsInvoices/pending'),id:'second',passId:'second'});
+ if(scenario==='paid-unknown')s.records.set('opsInvoices/unknown',{id:'unknown',studentId:'p',units:8,amount:160000,paid:160000,status:'paid'});
+ if(scenario==='cancelled')s.records.set('opsInvoices/cancelled',{id:'cancelled',studentId:'p',status:'cancelled',lessonDate:'2026-10-29'});
+ if(scenario==='reservation')s.records.get('opsAccounts/p').nextPass={invoiceId:'reserved',units:12};
+ if(scenario==='missing-evidence')s.records.delete('opsAttendance/p_2026-10-15');
+ const before=structuredClone(s.records),result=await s.load('integrity-service').scanBillingIntegrity('owner');
+ if(scenario==='pending'){assert.equal(result.repaired.length,1);assert.equal(s.records.get('opsAccounts/p').currentPassId,'pending');}else{assert.equal(result.repaired.length,0,scenario);assert(result.issues.length>0);assert.deepEqual(s.records,before,scenario);}
+ }
+});
+test('integrity warnings expose unlinked receipts and balance differences without guessing historical dates',async()=>{
+ const s=await integrityFixture();s.records.set('opsInvoices/new',{id:'new',studentId:'p',name:'p',units:8,amount:160000,paid:160000,status:'paid',passId:'new',lessonDate:'2026-10-29',allocationState:'allocated',allocatedUnits:8});const before=structuredClone(s.records),r=await s.load('integrity-service').scanBillingIntegrity('owner');assert.equal(r.repaired.length,0);assert(r.issues.some(i=>i.kind==='wrong-pass'));assert(r.issues.some(i=>i.kind==='balance-review'));assert.deepEqual(s.records,before);
+});
+
+test('legacy exhaustion bill is reused only when complete attendance and debt prove no credit was granted',async()=>{
+ for(const remaining of [-2,5]){const s=await integrityFixture();s.records.get('opsAccounts/p').remaining=remaining;s.records.set('opsInvoices/legacy',{id:'legacy',studentId:'p',units:8,amount:160000,paid:0,status:'open',linkReview:true,reason:'수동 출결 기록 후 소진'});const result=await s.load('integrity-service').scanBillingIntegrity('owner');assert.equal(result.repaired.length,remaining===-2?1:0);if(remaining===-2){assert.equal(s.records.get('opsAccounts/p').remaining,6);assert.equal(s.records.get('opsInvoices/legacy').linkReview,false);assert.equal(s.records.get('opsInvoices/legacy').paid,0);}}
+});
