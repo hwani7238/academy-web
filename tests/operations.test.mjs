@@ -6,6 +6,61 @@ import { createRequire } from 'node:module';
 import ts from 'typescript';
 const require = createRequire(import.meta.url);
 const root = path.resolve('src/lib/operations');
+test('reserved 20-lesson pass previews from its dated start without changing ledger, balance or payments',()=>{
+ const s=setup(),{attendanceForecastSequence:forecast}=s.load('attendance-forecast');
+ const a={id:'p',active:true,planUnits:16,planAmount:200000,remaining:0,
+  passHistory:[{start:'2026-10-01',units:16}],schedule:{rules:[{start:'2026-11-02',weekdays:[1,2,3,4,5]}],moves:[]},
+  nextPass:{units:20,amount:220000,mode:'date',start:'2026-11-03',reservedOn:'2026-11-03',invoiceId:'next',note:''}};
+ const records=[{studentId:'p',day:'2026-11-02',status:'late_cancel',units:1}];
+ const context={positions:{p:15},cycleStarts:[],references:[{studentId:'p',day:'2026-11-03',value:'2',color:'#000000'}]};
+ const dates=Array.from({length:30},(_,i)=>`2026-11-${String(i+1).padStart(2,'0')}`);
+ const before=structuredClone({a,records,context});
+ const result=forecast([a],records,[],context,dates,'2026-11-03');
+ assert.equal(result.sequence.labels.get('p_2026-11-02'),'16');
+ assert.equal(result.forecast.get('p_2026-11-03'),'1');
+ assert.equal(result.forecast.get('p_2026-11-24'),'16');
+ assert.equal(result.forecast.get('p_2026-11-25'),'17');
+ assert.equal(result.forecast.get('p_2026-11-30'),'20');
+ assert.deepEqual({a,records,context},before);
+ const december=forecast([a],records,[],context,['2026-12-01','2026-12-02'],'2026-11-03');
+ assert.equal(december.forecast.get('p_2026-12-01'),'1');
+ assert.equal(december.forecast.get('p_2026-12-02'),'2');
+ assert.equal(december.forecast.has('p_2026-11-03'),false);
+ const cancelled=forecast([{...a,nextPass:null}],records,[],context,dates,'2026-11-03');
+ assert.equal(cancelled.forecast.get('p_2026-11-03'),'2');
+ const invoice={id:'next',studentId:'p',units:20,amount:220000,paid:0,status:'open',reservedPass:true,lessonDate:'2026-11-03',passId:'next',createdAt:'2026-11-03T00:00:00Z'};
+ const billing=s.load('upcoming-billing').billingProjection({day:'2026-11-03',accounts:[a],students:[{id:'p'}],attendance:records,invoices:[invoice],sequenceContext:context},'2026-11-03');
+ assert.equal(billing.invoiceDates.next,'2026-11-03');assert.equal(billing.upcoming.length,0);assert.equal(invoice.paid,0);
+});
+test('reserved forecast waits through leave, pause, makeup and moved lessons before starting the new pass',()=>{
+ const {attendanceForecastSequence:forecast}=setup().load('attendance-forecast');
+ const a={id:'p',active:true,planUnits:16,remaining:0,schedule:{rules:[{start:'2026-11-02',weekdays:[1,2,3,4,5]}],moves:[{from:'2026-11-06',to:'2026-11-07'}]},
+  nextPass:{units:20,amount:220000,mode:'date',start:'2026-11-03',reservedOn:'2026-11-03'}};
+ const records=[{studentId:'p',day:'2026-11-03',status:'travel',units:0},{studentId:'p',day:'2026-11-04',status:'paused',units:0},
+ {studentId:'p',day:'2026-11-05',status:'makeup_reserved',units:0,relatedDay:'2026-11-03'},{studentId:'p',day:'2026-11-10',status:'travel',units:0}];
+ const dates=Array.from({length:12},(_,i)=>`2026-11-${String(i+1).padStart(2,'0')}`);
+ const result=forecast([a],records,[],{positions:{p:15},cycleStarts:[]},dates,'2026-11-03');
+ assert.equal(result.forecast.has('p_2026-11-06'),false);
+ assert.equal(result.forecast.get('p_2026-11-07'),'1');
+ assert.equal(result.forecast.get('p_2026-11-09'),'2');
+ assert.equal(result.sequence.labels.get('p_2026-11-10'),'3');
+ assert.equal(result.forecast.get('p_2026-11-11'),'4');
+ assert.equal(result.sequence.labels.get('p_2026-11-05'),'16');
+ assert.equal(result.sequence.labels.has('p_2026-11-04'),false);
+});
+test('depletion reservations preview after the remaining regular lessons and stay scoped to the course',()=>{
+ const {attendanceForecast:forecast}=setup().load('attendance-forecast');
+ const a={id:'p',active:true,planUnits:16,remaining:2,schedule:{rules:[{start:'2026-11-02',weekdays:[1,2,3,4,5]}],moves:[]},
+  nextPass:{units:20,amount:220000,mode:'depleted',start:'',reservedOn:'2026-11-03'}};
+ const other={...a,id:'d',nextPass:null};
+ const dates=['2026-11-03','2026-11-04','2026-11-05','2026-11-06'];
+ const result=forecast([a,other],[],[],{positions:{p:14,d:14},cycleStarts:[]},dates,'2026-11-03');
+ assert.equal(result.get('p_2026-11-03'),'15');assert.equal(result.get('p_2026-11-04'),'16');
+ assert.equal(result.get('p_2026-11-05'),'1');assert.equal(result.get('p_2026-11-06'),'2');
+ assert.equal(result.get('d_2026-11-04'),'16');assert.equal(a.remaining,2);
+ const same=forecast([{...a,nextPass:{...a.nextPass,units:16,mode:'date',start:'2026-11-03'}}],[],[],{positions:{p:14},cycleStarts:[],references:[{studentId:'p',day:'2026-11-03',value:'15',color:'#000000'}]},dates,'2026-11-03');
+ assert.equal(same.get('p_2026-11-03'),'1');
+});
 test('future leave ranges are atomic, idempotent, course-scoped and do not charge or send notices',async()=>{
  const s=setup();await s.seed('piano',8);await s.seed('drums',4);
  const input={studentId:'piano',start:'2998-12-30',end:'2999-01-02',status:'travel',rangeId:'trip-1',note:'가족 여행',revisions:{}};
@@ -2932,3 +2987,4 @@ test('balance review verifies a historical-pass repair as zero credit while reje
  const result=reviewBalance(account,undefined,events,[],[]);assert.equal(result.status,'verified');assert.equal(result.expected,4);assert.equal(result.evidence.events.at(-1).action,'repair-historical-pass');
  for(const detail of [{creditedUnits:8},{remainingBefore:5},{remainingAfter:8}]){const changed=structuredClone(events);Object.assign(changed.at(-1).detail,detail);assert.equal(reviewBalance(account,undefined,changed,[],[]).status,'review');}
 });
+
