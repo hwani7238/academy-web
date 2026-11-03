@@ -41,7 +41,7 @@ export async function GET(request: Request) {
       timing.measure('notices', () => db.collection('opsNotices').orderBy('createdAt', 'desc').limit(50).get()),
       timing.measure('devices', () => db.collection('opsDevices').get()),
       timing.measure('imports', importSources),
-      timing.measure('history', () => db.collection('opsAttendance').where('day', '<', `${month}-01`).select('studentId', 'day', 'units', 'status', 'relatedDay', 'range', 'unpaidCycleStart', 'at').get()),
+      timing.measure('history', () => db.collection('opsAttendance').where('day', '<', `${month}-01`).select('studentId', 'day', 'units', 'status', 'relatedDay', 'range', 'unpaidCycleStart', 'at', 'passAllocations').get()),
       timing.measure('cycles', () => db.collection('opsInvoices').where('creditUnits', '==', 0).select('studentId', 'cycleStart', 'status').get()),
       timing.measure('lessonReferences', () => db.collection('opsLessonReferences').get()),
       timing.measure('legacyCorrections', () => db.collection('opsLegacyCorrections').get()),
