@@ -3493,6 +3493,11 @@ test('daily review: mutation routes enqueue only after successful saves; report 
  fail=false;assert.equal((await operations.POST(request())).status,200);assert.equal(queued.length,1);await queued[0]();assert.equal(calls[0][0].studentId,'p');
  const reports=compile('src/app/api/operations/integrity/route.ts',id=>id.endsWith('/auth')?auth:review);
  assert.deepEqual(await (await reports.GET(new Request('https://test/api/operations/integrity'))).json(),{checked:165});
+ // Tabs opened before deployment still POST every minute. Serve only the saved
+ // result, retaining the old response shape, until the user reloads that tab.
+ for(let n=0;n<3;n++)assert.deepEqual(await (await reports.POST(new Request('https://test/api/operations/integrity',{method:'POST'}))).json(),{checked:165,repaired:[]});
+ let full=0;review.runIntegrityReview=async()=>{full++;return {checked:165};};
+ assert.equal((await reports.POST(new Request('https://test/api/operations/integrity',{method:'POST',headers:{'X-Integrity-Review':'manual'}}))).status,200);assert.equal(full,1);
 });
 test('daily review: scheduled endpoint requires authorization and preserves existing Vercel jobs',async()=>{
  const s=setup(),exports={},calls=[];let authorized=false;
