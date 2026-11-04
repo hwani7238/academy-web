@@ -20,14 +20,17 @@ export function buildCourseLedger(evidence:LedgerEvidence,today:string):CourseLe
  const payments=evidence.payments.filter(p=>p.studentId===id&&!p.cancelledAt);
  const refs=evidence.references.filter(r=>r.studentId===id),legacy=evidence.legacy.filter(r=>r.studentId===id);
  const seq=attendanceSequence([a],records,legacy,{positions:{},references:refs,cycleStarts:[...(a.passHistory||[]).map(h=>({studentId:id,day:h.start})),...bills.filter(i=>passStart(i)).map(i=>({studentId:id,day:passStart(i)}))]});
- const starts=[...new Set([...(seq.cycleFirstDays[id]||[]),...bills.map(passStart).filter(Boolean)])].sort();
+ const datedStarts=bills.map(passStart).filter(Boolean).sort();
+ // History before the first evidenced pass may begin mid-cycle. Never present
+ // the sequence adapter's initial counter as a newly purchased/unpaid pass.
+ const starts=[...new Set([...(seq.cycleFirstDays[id]||[]),...datedStarts])].filter(start=>!datedStarts.length||start>=datedStarts[0]).sort();
  const issues:string[]=[];
  const passes:CoursePass[]=starts.map(start=>{
   const matching=bills.filter(i=>passStart(i)===start),invoice=matching.length===1?matching[0]:undefined;
   const units=invoice?.units||passUnitsOn(a,start),receipts=invoice?payments.filter(p=>p.invoiceId===invoice.id):[];
   const uncertain=matching.length>1||!!invoice?.linkReview||!!invoice?.needsReview|| (!!invoice&&receipts.reduce((n,p)=>n+p.amount,0)!==invoice.paid);
   if(uncertain)issues.push(`${start}: 청구와 실제 수납 연결 확인 필요`);
-  return {id:invoice?.passId||invoice?.id||`cycle_${id}_${start}`,start,units,invoiceId:invoice?.id||'',amount:invoice?.amount||a.planAmount,paid:invoice?.paid||0,paymentStatus:uncertain?'review':invoice&&receiptComplete(invoice)?'paid':invoice?.paid?'partial':'unpaid',receiptIds:receipts.map(p=>p.id),slots:Array.from({length:units},(_,n)=>({ordinal:n+1,originDay:'',attendanceIds:[],makeupDays:[],state:'unused',charged:0,imported:false})),regularRemaining:units,makeupOutstanding:0};
+  return {id:invoice?.passId||invoice?.id||`cycle_${id}_${start}`,start,units,invoiceId:invoice?.id||'',amount:invoice?.amount||a.planAmount,paid:invoice?.paid||0,paymentStatus:uncertain||!invoice?'review':receiptComplete(invoice)?'paid':invoice.paid?'partial':'unpaid',receiptIds:receipts.map(p=>p.id),slots:Array.from({length:units},(_,n)=>({ordinal:n+1,originDay:'',attendanceIds:[],makeupDays:[],state:'unused',charged:0,imported:false})),regularRemaining:units,makeupOutstanding:0};
  });
  const bindings:SlotBinding[]=[];
  const byDay=new Map(records.map(r=>[r.day,r]));

@@ -3154,7 +3154,7 @@ function ledgerFixture(){
 }
 test('course ledger: twelve slots preserve old makeups and isolate an unpaid new cycle without using balance as receipt',()=>{
  const s=setup(),e=ledgerFixture(),before=structuredClone(e),r=s.load('course-ledger').buildCourseLedger(e,'2026-11-04');
- assert.deepEqual(e,before);assert.equal(r.passes.length,2);assert.equal(r.passes[0].paymentStatus,'paid');assert.equal(r.passes[1].paymentStatus,'unpaid');
+ assert.deepEqual(e,before);assert.equal(r.passes.length,2);assert.equal(r.passes[0].paymentStatus,'paid');assert.equal(r.passes[1].paymentStatus,'review');
  assert.equal(r.passes[0].slots[3].makeupDays[0],'2026-10-20');assert.equal(r.passes[0].slots[3].state,'completed');assert.equal(r.makeupOutstanding,1);
  assert.equal(r.passes[1].slots[0].originDay,'2026-10-31');assert.equal(r.repair.start,'2026-10-31');assert.equal(r.repair.expectedRemaining,11);
 });
@@ -3187,4 +3187,11 @@ test('course ledger: same date amount and method on another invoice requires exp
  const input={invoiceId:'new',requestId:'b',expectedInvoiceUpdatedAt:'v1',amount:160000,method:'카드',paymentDate:day};
  await assert.rejects(s.service.payment(input,'owner'),/중복 수납 확인/);assert.equal(s.records.has('opsPayments/b'),false);assert.equal(s.records.get('opsInvoices/new').paid,0);
  await s.service.payment({...input,duplicateReceiptIds:'a',duplicateReceiptReason:'새 수강권을 별도로 선납함'},'owner');assert.equal(s.records.get('opsAccounts/p').remaining,account.remaining);assert.equal(s.records.get('opsPayments/b').duplicateReceiptReason,'새 수강권을 별도로 선납함');
+});
+
+test('course ledger: partial pre-migration history does not manufacture an unpaid first pass',()=>{
+ const s=setup(),e=ledgerFixture();e.attendance.unshift({id:'p_2026-10-01',studentId:'p',day:'2026-10-01',status:'present',units:1});
+ const r=s.load('course-ledger').buildCourseLedger(e,'2026-11-04');
+ assert.deepEqual(r.passes.map(p=>p.start),['2026-10-02','2026-10-31']);assert.equal(r.repair.start,'2026-10-31');
+ assert.equal(e.attendance[0].day,'2026-10-01');
 });
