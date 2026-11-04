@@ -3427,3 +3427,90 @@ test('canonical migration guards against consuming a dated next pass before its 
  const s=setup(),f=canonicalFixture();f.invoices[1].lessonDate='2026-10-06';f.invoices[1].cycleStart='2026-10-06';f.seed.passes[1].start='2026-10-06';
  const p=s.load('lesson-ledger').projectLessonLedger(f.account,f.seed,['01','02','03','04','05'].map(d=>f.row('2026-10-'+d)),f.invoices,'2026-11-04');assert.ok(p.issues.some(v=>v.includes('첫 수업일 확인')));
 });
+
+test('daily review: Korean closing day, midnight delay, leap-year and month-end boundaries',()=>{
+ const s=setup(),v=s.load('integrity-review');
+ assert.equal(v.reviewDay(new Date('2026-11-30T14:30:00Z')),'2026-11-30');
+ assert.equal(v.reviewDay(new Date('2026-11-30T15:15:00Z')),'2026-11-30');
+ assert.equal(v.closedAttendanceDay(new Date('2026-11-04T05:00:00Z')),'2026-11-03');
+ assert.equal(v.closedAttendanceDay(new Date('2026-11-04T14:30:00Z')),'2026-11-04');
+ assert.equal(v.lastDayOfMonth('2028-02'),'2028-02-29');assert.equal(v.lastDayOfMonth('2026-02'),'2026-02-28');
+});
+test('daily review: scheduled omissions respect one-off moves, pause/travel, closures and future dates',async()=>{
+ const s=await canonicalServiceFixture(),svc=s.load('course-ledger-service'),v=s.load('integrity-review');
+ const e=await svc.readCourseLedgerEvidence('v2');e.account.schedule={rules:[{start:'2026-10-01',weekdays:[1,2,3,4,5]}],moves:[{from:'2026-11-02',to:'2026-11-07'}]};
+ const ctx={owner:{},seed:s.f.seed},before=structuredClone(e);
+ let r=v.reviewAccount(e,ctx,'2026-11-07',['2026-10-09','2026-11-02','2026-11-03','2026-11-07','2026-11-09'],'stamp');
+ assert.deepEqual(r.issues.filter(i=>i.kind==='attendance-missing').map(i=>i.day),['2026-11-03','2026-11-07']);assert.deepEqual(e,before);
+ for(const status of ['paused','travel','absent','cancelled']){e.attendance.push(s.f.row('2026-11-03',status,0));assert.equal(v.reviewAccount(e,ctx,'2026-11-03',['2026-11-03'],'stamp').issues.some(i=>i.kind==='attendance-missing'),false);e.attendance.pop();}
+ assert.equal(v.reviewAccount(e,{...ctx,owner:{lifecycle:{status:'paused',until:'2026-12-31'}}},'2026-11-03',['2026-11-03'],'stamp').issues.some(i=>i.kind==='attendance-missing'),false);
+});
+test('daily review: full and scoped checks persist only diagnostics, retain other warnings and are idempotent',async()=>{
+ const s=await integrityFixture();await s.seed('other',2);const svc=s.load('integrity-review-service');
+ const before=structuredClone([...s.records].filter(([k])=>!k.startsWith('opsIntegrity')));
+ const opts={scheduled:true,now:new Date('2026-11-04T14:30:00Z')};
+ const first=await svc.runIntegrityReview('cron',opts);assert.equal(first.checked,2);assert(first.issues.length);assert.equal(first.lastFullDay,'2026-11-04');
+ const reportCount=[...s.records.keys()].filter(k=>k.startsWith('opsIntegrityRuns/report_')).length;
+ await svc.runIntegrityReview('cron',opts);assert.equal([...s.records.keys()].filter(k=>k.startsWith('opsIntegrityRuns/report_')).length,reportCount);
+ await svc.runIntegrityReview('owner',{now:new Date('2026-11-04T14:30:30Z')});await svc.runIntegrityReview('cron',opts);assert.equal([...s.records.keys()].filter(k=>k.startsWith('opsIntegrityRuns/report_')).length,reportCount+1);
+ const originalWarnings=first.issues.filter(i=>i.studentId==='p');
+ await svc.runIntegrityReview('owner',{ids:['other'],now:new Date('2026-11-04T14:31:00Z')});
+ const next=await svc.getIntegrityStatus();assert.deepEqual(next.issues.filter(i=>i.studentId==='p'),originalWarnings);
+ assert.deepEqual([...s.records].filter(([k])=>!k.startsWith('opsIntegrity')),before);
+});
+test('daily review: receipt-only mutations resolve a single student and unknown IDs never trigger a full scan',async()=>{
+ const s=await integrityFixture(),svc=s.load('integrity-review-service');await s.seed('untouched',2);
+ await svc.reviewChangedOperation({action:'cancelPayment',paymentId:'receipt'},{ok:true},'owner');
+ const state=s.records.get('opsIntegrityStatus/latest');assert.deepEqual(Object.keys(state.entries),['p']);assert.equal(state.lastFullAt,undefined);
+ const before=structuredClone(s.records);await svc.reviewChangedOperation({action:'payment'},{ok:true},'owner');assert.deepEqual(s.records,before);
+});
+test('daily review: monthly totals retain inactive/orphan receipts, exclude soft cancellations and report ambiguous duplicates',()=>{
+ const s=setup(),v=s.load('integrity-review'),e=ledgerFixture();e.account.active=false;
+ const p={id:'one',studentId:'p',invoiceId:'old',amount:170000,method:'카드',paymentDate:'2026-10-02',at:'2026-10-03T00:00:00Z'};
+ e.payments=[p,{...p,id:'cancelled',cancelledAt:'2026-10-04'},{...p,id:'duplicate'}];
+ const orphan={...p,id:'orphan',studentId:'unknown',invoiceId:'missing',amount:50000,method:'현금'};
+ const before=structuredClone(e),r=v.monthlyReview([e],'2026-10','stamp',[orphan]);
+ assert.equal(r.amount,390000);assert.equal(r.receiptCount,3);assert.deepEqual(r.byMethod,{현금:50000,카드:340000});
+ assert(r.issues.some(i=>i.kind==='duplicate-receipt'));assert(r.issues.some(i=>i.kind==='receipt-link'));assert(r.issues.some(i=>i.kind==='missing-student'));assert.deepEqual(e,before);
+});
+test('daily review: month-end summary is retained and past modifications mark it for recheck',async()=>{
+ const s=await canonicalServiceFixture(),svc=s.load('integrity-review-service');
+ await svc.runIntegrityReview('cron',{scheduled:true,now:new Date('2026-10-31T14:30:00Z')});
+ assert.equal(s.records.get('opsIntegrityMonths/2026-10').amount,180000);
+ await svc.runIntegrityReview('owner',{ids:['v2'],changedMonths:['2026-10'],now:new Date('2026-11-04T05:00:00Z')});
+ assert.equal((await svc.getIntegrityStatus()).monthlyStale,true);
+ await svc.runIntegrityReview('cron',{scheduled:true,now:new Date('2026-11-04T14:30:00Z')});assert.equal((await svc.getIntegrityStatus()).monthlyStale,false);
+});
+test('daily review: mutation routes enqueue only after successful saves; report GET never scans',async()=>{
+ const s=setup(),queued=[],calls=[];
+ const compile=(file,resolve)=>{const exports={};new Function('require','exports',ts.transpileModule(fs.readFileSync(file,'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText)(resolve,exports);return exports;};
+ let fail=false;
+ const auth={manager:async()=> 'owner',sameOrigin:()=>{},failure:e=>Response.json({error:e.message},{status:400})};
+ const review={reviewChangedOperation:async(...args)=>calls.push(args),getIntegrityStatus:async()=>({checked:165}),runIntegrityReview:async()=>{throw Error('unexpected full scan');}};
+ const operations=compile('src/app/api/operations/route.ts',id=>id==='next/server'?{after:fn=>queued.push(fn)}:id.endsWith('/auth')?auth:id.endsWith('/integrity-review-service')?review:id.endsWith('/service')?{configure:async()=>{if(fail)throw Error('invalid');return {accounts:[]};}}:s.load(id.split('/').at(-1)));
+ const request=()=>new Request('https://test/api/operations',{method:'POST',body:JSON.stringify({action:'configure',studentId:'p'})});
+ fail=true;assert.equal((await operations.POST(request())).status,400);assert.equal(queued.length,0);
+ fail=false;assert.equal((await operations.POST(request())).status,200);assert.equal(queued.length,1);await queued[0]();assert.equal(calls[0][0].studentId,'p');
+ const reports=compile('src/app/api/operations/integrity/route.ts',id=>id.endsWith('/auth')?auth:review);
+ assert.deepEqual(await (await reports.GET(new Request('https://test/api/operations/integrity'))).json(),{checked:165});
+});
+test('daily review: scheduled endpoint requires authorization and preserves existing Vercel jobs',async()=>{
+ const s=setup(),exports={},calls=[];let authorized=false;
+ const code=ts.transpileModule(fs.readFileSync('src/app/api/cron/review-operations/route.ts','utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText;
+ new Function('require','exports',code)(id=>id.endsWith('/auth')?{cron:()=>{if(!authorized)throw Error('Unauthorized');},failure:()=>Response.json({error:'Unauthorized'},{status:401})}:{runIntegrityReview:async(...args)=>{calls.push(args);return {checked:165};}},exports);
+ assert.equal((await exports.GET(new Request('https://test/api/cron/review-operations'))).status,401);assert.equal(calls.length,0);
+ authorized=true;assert.equal((await exports.GET(new Request('https://test/api/cron/review-operations'))).status,200);assert.equal(calls[0][1].scheduled,true);
+ const config=JSON.parse(fs.readFileSync('vercel.json','utf8'));assert(config.crons.some(c=>c.path==='/api/cron/review-operations'&&c.schedule==='30 14 * * *'));assert(config.crons.some(c=>c.path==='/api/cron/delete-expired-videos'&&c.schedule==='0 15 * * *'));
+});
+test('daily review: undated receipts use Korean calendar month without being silently omitted',()=>{
+ const s=setup(),v=s.load('integrity-review'),e=ledgerFixture();e.payments=[{id:'late',studentId:'p',invoiceId:'old',amount:170000,method:'카드',at:'2026-10-31T16:00:00Z'}];
+ assert.equal(v.monthlyReview([e],'2026-10','stamp').amount,0);const r=v.monthlyReview([e],'2026-11','stamp');assert.equal(r.amount,170000);assert(r.issues.some(i=>i.kind==='payment-date'&&i.day==='2026-11-01'));
+});
+test('daily review: failure keeps the previous result and releases the lease for retry',async()=>{
+ const s=await canonicalServiceFixture(),svc=s.load('integrity-review-service');await svc.runIntegrityReview('owner',{now:new Date('2026-11-04T05:00:00Z')});
+ const prior=structuredClone(s.records.get('opsIntegrityStatus/latest'));
+ s.records.set('opsPayments/bad',{id:'bad',studentId:'v2',invoiceId:'a',amount:1,method:'카드',at:'invalid'});
+ await assert.rejects(svc.runIntegrityReview('cron',{scheduled:true,now:new Date('2026-11-30T14:30:00Z')}));
+ const after=s.records.get('opsIntegrityStatus/latest');assert.deepEqual(after.entries,prior.entries);assert(after.error);assert.equal(s.records.get('opsIntegrityRuns/full').leaseUntil,0);
+ s.records.delete('opsPayments/bad');await svc.runIntegrityReview('cron',{scheduled:true,now:new Date('2026-11-30T14:30:00Z')});assert.equal((await svc.getIntegrityStatus()).error,'');
+});

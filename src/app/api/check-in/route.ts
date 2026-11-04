@@ -1,4 +1,4 @@
-import {scanBillingIntegrity} from '@/lib/operations/integrity-service';
+import {reviewChangedOperation} from '@/lib/operations/integrity-review-service';
 import { enrollmentState, courseLifecycle } from '@/lib/operations/lifecycle';
 import { database, sameOrigin, device, failure } from '@/lib/operations/auth';
 import { pair, checkIn } from '@/lib/operations/service';
@@ -32,7 +32,7 @@ export async function POST(request: Request) {
     }
     if (input.action === 'checkIn') {
       const result = await checkIn(input.studentId, input.digits, `device:${actor}`);
-      after(async()=>{try{await scanBillingIntegrity(`device:${actor}`,String(input.studentId));}catch{console.error('Billing integrity check failed; administrator panel will retry.');}});
+      after(async()=>{try{await reviewChangedOperation({action:'recordAttendance',studentId:input.studentId},result,`device:${actor}`);}catch{console.error('Billing integrity check failed; administrator panel will retry.');}});
       if (result.noticeId) after(async () => { try { await processNotices(result.noticeId); } catch { console.error('Notification worker failed; pending records retained.'); } });
       return Response.json(result);
     }

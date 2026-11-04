@@ -1,11 +1,7 @@
 {
   "crons": [
-    {
-      "path": "/api/cron/delete-expired-videos",
-      "schedule": "0 15 * * *"
-    }
+    {"path": "/api/cron/delete-expired-videos", "schedule": "0 15 * * *"},
+    {"path": "/api/cron/review-operations", "schedule": "30 14 * * *"}
   ],
-  "regions": [
-    "icn1"
-  ]
+  "regions": ["icn1"]
 }

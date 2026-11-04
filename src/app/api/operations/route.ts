@@ -2,7 +2,7 @@ import {migrateLessonLedger,saveLedgerSheetSource} from '@/lib/operations/ledger
 import {projectLessonLedger} from '@/lib/operations/lesson-ledger';
 import { correctLedgerLink } from '@/lib/operations/ledger-correction';
 import { reconcileCourseLedger } from '@/lib/operations/course-ledger-service';
-import {scanBillingIntegrity} from '@/lib/operations/integrity-service';
+import {reviewChangedOperation} from '@/lib/operations/integrity-review-service';
 import { reconcileLessonReferences, correctLessonReferences } from '@/lib/operations/lesson-reference-service';
 import type { LessonReference } from '@/lib/operations/lesson-reference';
 import {billingHorizon} from '@/lib/operations/upcoming-billing';
@@ -109,7 +109,7 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   try {
     sameOrigin(request); const actor = await manager(request); const input = await request.json();
-    if(['recordAttendance','recordAttendanceRange','adjust','correctLegacyAttendance','correctLessonReferences','correctRemaining','savePassHistory','saveNextPass','linkInvoiceLesson','monthlyPayment','cancelPayment'].includes(input.action))after(async()=>{try{await scanBillingIntegrity(actor,typeof input.studentId==='string'?input.studentId:undefined);}catch{console.error('Billing integrity check failed; administrator panel will retry.');}});
+    const apply=async()=>{
     switch (input.action) {
       case 'saveLedgerSheetSource': return Response.json(await saveLedgerSheetSource(input,actor));
       case 'migrateLessonLedger': return Response.json(await migrateLessonLedger(input,actor));
@@ -163,5 +163,9 @@ export async function POST(request: Request) {
     }
     after(async () => { try { await processNotices(); } catch { console.error('Notification worker failed; pending records retained.'); } });
     return Response.json({ ok: true });
+    };
+    const response=await apply();
+    if(response.ok){const payload=await response.clone().json();after(async()=>{try{await reviewChangedOperation(input,payload,actor);}catch{console.error('Changed course integrity review failed; saved warning retained.');}});}
+    return response;
   } catch (error) { return failure(error); }
 }

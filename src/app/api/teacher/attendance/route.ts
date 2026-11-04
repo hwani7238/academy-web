@@ -1,5 +1,5 @@
 import {after} from 'next/server';
-import {scanBillingIntegrity} from '@/lib/operations/integrity-service';
+import {reviewChangedOperation} from '@/lib/operations/integrity-review-service';
 import { adminAuth, adminDb } from '@/lib/firebase-admin';
 import { canViewPianoAttendance, koreaDay, pianoArrival, type PianoArrival, type PianoStudent } from '@/lib/teacher-attendance';
 import { teacherCheckIn, correctTeacherAttendanceTime } from '@/lib/operations/service';
@@ -61,7 +61,7 @@ export async function POST(request: Request) {
     const uid = await authorize(request), input = await request.json();
     if (input.action === 'checkIn') {
       const result = await teacherCheckIn(input, `teacher:${uid}`);
-      after(async()=>{try{await scanBillingIntegrity(`teacher:${uid}`,String(input.studentId));}catch{console.error('Billing integrity check failed; administrator panel will retry.');}});
+      after(async()=>{try{await reviewChangedOperation({action:'recordAttendance',studentId:input.studentId},result,`teacher:${uid}`);}catch{console.error('Billing integrity check failed; administrator panel will retry.');}});
       return Response.json({ok:true,duplicate:result.duplicate},{headers});
     }
     if (input.action === 'correctTime') {
@@ -71,3 +71,4 @@ export async function POST(request: Request) {
     throw new HttpError(400,'지원하지 않는 작업입니다.');
   } catch (error) { return failed(error); }
 }
+
