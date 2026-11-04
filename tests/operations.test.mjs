@@ -3195,3 +3195,77 @@ test('course ledger: partial pre-migration history does not manufacture an unpai
  assert.deepEqual(r.passes.map(p=>p.start),['2026-10-02','2026-10-31']);assert.equal(r.repair.start,'2026-10-31');
  assert.equal(e.attendance[0].day,'2026-10-01');
 });
+
+function canonicalFixture(){
+ const account={id:'v2',name:'새 계산 검증',active:true,planUnits:4,planAmount:180000,remaining:999};
+ const bill=(id,start)=>({id,passId:id,studentId:'v2',name:account.name,lessonDate:start,cycleStart:start,units:4,amount:180000,paid:180000,status:'paid',allocationState:'allocated'});
+ const invoices=[bill('a','2026-10-01'),bill('b','2026-10-05')];
+ const seed={version:2,from:'2026-10-01',passes:invoices.map(i=>({id:i.id,invoiceId:i.id,start:i.lessonDate,units:i.units,amount:i.amount})),archived:[],adjustments:[],createdAt:'seed',sourceFingerprint:'original'};
+ const row=(day,status='present',units=1,relatedDay='')=>({id:'v2_'+day,studentId:'v2',day,status,units,relatedDay});
+ return {account,invoices,seed,row};
+}
+test('canonical ledger: current balance is derived from owned slots, never a mutable account counter',()=>{
+ const s=setup(),f=canonicalFixture(),p=s.load('lesson-ledger').projectLessonLedger;
+ const records=[f.row('2026-10-01'),f.row('2026-10-02','travel',0),f.row('2026-10-03'),f.row('2026-10-04'),f.row('2026-10-05'),f.row('2026-10-06','makeup',1,'2026-10-02')];
+ const before=structuredClone({account:f.account,seed:f.seed,invoices:f.invoices,records});
+ const r=p(f.account,f.seed,records,f.invoices,'2026-11-04');
+ assert.equal(r.currentRemaining,3);assert.equal(r.passes[0].remaining,0);assert.equal(r.labels.v2_2026,undefined);assert.equal(r.labels['v2_2026-10-06'],'2');assert.equal(r.assignments['v2_2026-10-06'][0].passId,'a');assert.equal(r.previousMakeups,0);assert.deepEqual(r.issues,[]);
+ assert.deepEqual(p({...f.account,remaining:-88},f.seed,records,f.invoices,'2026-11-04'),r);assert.deepEqual({account:f.account,seed:f.seed,invoices:f.invoices,records},before);
+});
+test('canonical ledger: advance makeup charges its future reserved slot once; pause and forecasts never charge',()=>{
+ const s=setup(),f=canonicalFixture(),p=s.load('lesson-ledger').projectLessonLedger;
+ f.invoices=f.invoices.slice(0,1);f.seed.passes=f.seed.passes.slice(0,1);
+ const records=[f.row('2026-10-01'),f.row('2026-10-02','makeup',1,'2026-10-04'),f.row('2026-10-03','paused',0),f.row('2026-10-04','travel',0),{...f.row('2026-10-05'),projected:true}];
+ const r=p(f.account,f.seed,records,f.invoices,'2026-10-02');assert.equal(r.currentRemaining,2);assert.equal(r.labels['v2_2026-10-02'],'2');assert.equal(r.labels['v2_2026-10-05'],'3');assert.equal(r.labels['v2_2026-10-03'],undefined);assert.deepEqual(r.issues,[]);
+ const doubled=p(f.account,f.seed,[...records,f.row('2026-10-06','makeup',1,'2026-10-04')],f.invoices,'2026-10-06');assert.match(doubled.issues.join(),/중복 차감/);
+});
+test('canonical ledger: retrospective replay moves stable paid passes without touching receipt facts',()=>{
+ const s=setup(),f=canonicalFixture(),p=s.load('lesson-ledger').projectLessonLedger;
+ const records=[f.row('2026-10-01'),f.row('2026-10-02','present',2),f.row('2026-10-03'),f.row('2026-10-04'),f.row('2026-10-05')];
+ const invoices=structuredClone(f.invoices),r=p(f.account,f.seed,records,f.invoices,'2026-11-04','2026-10-02');
+ assert.equal(r.passes[1].id,'b');assert.equal(r.passes[1].start,'2026-10-04');assert.equal(r.currentRemaining,2);assert.equal(r.labels['v2_2026-10-04'],'1');assert.deepEqual(f.invoices,invoices);
+ const cancelled=records.map(r=>r.day==='2026-10-02'?{...r,status:'paused',units:0}:r);
+ const back=p(f.account,f.seed,cancelled,f.invoices,'2026-11-04','2026-10-02');assert.equal(back.currentPassId,'a');assert.equal(back.currentRemaining,0);assert.equal(back.passes[1].actual,false);
+});
+test('canonical ledger: a double lesson can cross passes and archived makeup does not consume a current slot',()=>{
+ const s=setup(),f=canonicalFixture(),p=s.load('lesson-ledger').projectLessonLedger;
+ f.seed.passes=f.seed.passes.slice(0,1);f.invoices=f.invoices.slice(0,1);f.seed.archived=[{day:'2026-09-14',passId:'archived',ordinal:null,charged:0,makeupEligible:true}];
+ const rows=[f.row('2026-10-01'),f.row('2026-10-02'),f.row('2026-10-03'),f.row('2026-10-04','present',2),f.row('2026-10-06','makeup',1,'2026-09-14')];
+ const r=p(f.account,f.seed,rows,f.invoices,'2026-11-04');assert.equal(r.labels['v2_2026-10-04'],'4·1');assert.equal(r.currentRemaining,3);assert.equal(r.assignments['v2_2026-10-04'].length,2);assert.equal(r.previousMakeups,0);assert.deepEqual(r.issues,[]);
+});
+test('canonical correction: confirmed duplicate receipt preserves both receipts and attendance facts and is idempotent',async()=>{
+ const s=setup(),f=canonicalFixture();s.records.set('opsAccounts/v2',{...f.account,updatedAt:'v1',currentPassId:'a',currentPassStart:'2026-10-01',remaining:6});
+ for(const i of f.invoices)s.records.set('opsInvoices/'+i.id,{...i,updatedAt:'v1'});
+ const keep={id:'keep',invoiceId:'a',studentId:'v2',amount:180000,method:'지역화폐',paymentDate:'2026-10-14',at:'original'},drop={...keep,id:'drop',invoiceId:'b',paymentDate:'2026-10-15'};
+ s.records.set('opsPayments/keep',keep);s.records.set('opsPayments/drop',drop);s.records.set('opsAttendance/lesson',{...f.row('2026-10-05'),id:'lesson',passId:'a'});
+ const svc=s.load('course-ledger-service'),correction=s.load('ledger-correction'),e=await svc.readCourseLedgerEvidence('v2');
+ const input={studentId:'v2',requestId:'dedup',fingerprint:svc.ledgerFingerprint(e),kind:'duplicate-receipt',keepPaymentId:'keep',duplicatePaymentId:'drop',targetInvoiceId:'b',lessonDate:'2026-10-05',reason:'원장 확인: 10월 14일에 한 번 수납'};
+ await assert.rejects(correction.correctLedgerLink({...input,fingerprint:'stale'},'owner'),/변경/);
+ await correction.correctLedgerLink(input,'owner');assert.equal((await correction.correctLedgerLink(input,'owner')).duplicate,true);
+ for(const key of ['amount','method','paymentDate','at']){assert.equal(s.records.get('opsPayments/keep')[key],keep[key]);assert.equal(s.records.get('opsPayments/drop')[key],drop[key]);}
+ assert.equal(s.records.get('opsPayments/drop').duplicateOf,'keep');assert.ok(s.records.get('opsPayments/drop').cancelledAt);assert.equal(s.records.get('opsPayments/keep').invoiceId,'b');assert.equal(s.records.get('opsInvoices/a').status,'cancelled');assert.equal(s.records.get('opsInvoices/b').paid,180000);assert.equal(s.records.get('opsAttendance/lesson').units,1);assert.equal(s.records.get('opsAccounts/v2').remaining,6);
+});
+test('canonical correction: owner-confirmed original absence dates do not re-charge makeups or alter receipts',async()=>{
+ const s=setup(),f=canonicalFixture();s.records.set('opsAccounts/v2',{...f.account,updatedAt:'v1',remaining:1});
+ const rows=[f.row('2026-10-24','makeup',1,'2026-09-21'),f.row('2026-10-31','makeup',1,'2026-10-15')];for(const r of rows)s.records.set('opsAttendance/'+r.id,r);
+ const svc=s.load('course-ledger-service'),e=await svc.readCourseLedgerEvidence('v2');
+ await s.load('ledger-correction').correctLedgerLink({studentId:'v2',requestId:'makeups',fingerprint:svc.ledgerFingerprint(e),kind:'makeup-source',links:[{attendanceId:rows[0].id,sourceDay:'2026-09-14'},{attendanceId:rows[1].id,sourceDay:'2026-09-21'}],reason:'원장 확인: 9월 14일과 21일 결석의 보강'},'owner');
+ assert.equal(s.records.get('opsAttendance/'+rows[0].id).relatedDay,'2026-09-14');assert.equal(s.records.get('opsAttendance/'+rows[1].id).relatedDay,'2026-09-21');
+ for(const r of rows){assert.equal(s.records.get('opsAttendance/'+r.id).day,r.day);assert.equal(s.records.get('opsAttendance/'+r.id).units,1);}
+ assert.equal(s.records.get('opsAttendance/v2_2026-09-14').units,0);assert.equal(s.records.get('opsAccounts/v2').remaining,1);assert.equal([...s.records.keys()].some(k=>k.startsWith('opsNotices/')),false);
+});
+test('canonical ledger: Lee Dogyeom has one regular lesson left; September makeups never consume October slots',()=>{
+ const s=setup(),f=canonicalFixture();f.account.planUnits=8;f.account.planAmount=170000;f.invoices=[{...f.invoices[0],units:8,amount:170000,lessonDate:'2026-10-12',cycleStart:'2026-10-12'}];
+ f.seed.from='2026-10-12';f.seed.passes=[{id:'a',invoiceId:'a',start:'2026-10-12',units:8,amount:170000}];f.seed.archived=['2026-09-14','2026-09-21'].map(day=>({day,passId:'old',ordinal:null,charged:0,makeupEligible:true}));
+ const rows=['12','15','19','22','26','29'].map(d=>f.row('2026-10-'+d));rows.push(f.row('2026-10-24','makeup',1,'2026-09-14'),f.row('2026-10-31','makeup',1,'2026-09-21'),f.row('2026-11-02','absent',0));
+ const r=s.load('lesson-ledger').projectLessonLedger(f.account,f.seed,rows,f.invoices,'2026-11-04');assert.equal(r.currentRemaining,1);assert.equal(r.labels['v2_2026-11-02'],'7');assert.equal(r.previousMakeups,0);assert.equal(r.passes[0].charged,6);assert.deepEqual(r.issues,[]);
+ const preview=s.load('lesson-ledger').projectLessonLedger(f.account,f.seed,[...rows,{...f.row('2026-11-05'),projected:true}],f.invoices,'2026-11-04');assert.equal(preview.labels['v2_2026-11-05'],'8');assert.equal(preview.currentRemaining,1);
+});
+test('canonical correction: two confirmed receipt links swap atomically without changing money or balances',async()=>{
+ const s=setup(),f=canonicalFixture();s.records.set('opsAccounts/v2',{...f.account,updatedAt:'v1',remaining:3});
+ for(const i of f.invoices)s.records.set('opsInvoices/'+i.id,i);
+ const p1={id:'p1',invoiceId:'a',studentId:'v2',amount:180000,method:'현금',paymentDate:'2026-09-30'},p2={...p1,id:'p2',invoiceId:'b',paymentDate:'2026-10-22'};s.records.set('opsPayments/p1',p1);s.records.set('opsPayments/p2',p2);
+ const svc=s.load('course-ledger-service'),e=await svc.readCourseLedgerEvidence('v2');
+ await s.load('ledger-correction').correctLedgerLink({studentId:'v2',requestId:'swap',fingerprint:svc.ledgerFingerprint(e),kind:'receipt-links',links:[{paymentId:'p1',invoiceId:'b',lessonDate:'2026-09-30'},{paymentId:'p2',invoiceId:'a',lessonDate:'2026-10-28'}],reason:'원장 확인: 각 수강권 시작일에 맞게 연결'},'owner');
+ assert.equal(s.records.get('opsPayments/p1').invoiceId,'b');assert.equal(s.records.get('opsPayments/p2').invoiceId,'a');assert.equal(s.records.get('opsPayments/p1').paymentDate,'2026-09-30');assert.equal(s.records.get('opsInvoices/a').lessonDate,'2026-10-28');assert.equal(s.records.get('opsAccounts/v2').remaining,3);
+});

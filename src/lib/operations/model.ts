@@ -1,6 +1,7 @@
 import type { InvoiceReviewReason } from './invoice-review';
 import type { Lifecycle } from './lifecycle';
 export type Account = {
+  ledgerVersion?:2; ledgerRevision?:string; previousMakeups?:number;
   currentPassId?: string; currentPassStart?: string; lastPassLessonDay?: string;
   nextPass?: import('./next-pass').NextPass | null;
   initialPlanUnits?: number;
@@ -69,4 +70,3 @@ export function attendanceInput(input: Record<string, unknown>) {
 export function defaultAttendanceUnits(status: AttendanceStatus, subject = '') {
   return status === 'present' || status === 'makeup' || (status === 'late_cancel' && !subject.includes('피아노')) ? 1 : 0;
 }
-
