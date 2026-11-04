@@ -6,7 +6,7 @@ import { plannedLesson } from './schedule';
 export type LedgerPassSeed = { id:string; invoiceId:string; start:string; units:number; amount:number; openingUsed?:number; openingOrdinal?:number; fixedStart?:boolean; archived?:boolean };
 export type LedgerAdjustment = { id:string; passId:string; units:number; reason:string; at:string };
 export type ArchivedLesson = { day:string; passId:string; ordinal:number|null; charged:number; makeupEligible:boolean };
-export type LessonLedgerSeed = { version:2; from:string; passes:LedgerPassSeed[]; archived:ArchivedLesson[]; adjustments:LedgerAdjustment[]; createdAt:string; sourceFingerprint:string };
+export type LessonLedgerSeed = { version:2; history?:Attendance[]; from:string; passes:LedgerPassSeed[]; archived:ArchivedLesson[]; adjustments:LedgerAdjustment[]; createdAt:string; sourceFingerprint:string };
 export type AllocatedLesson = { id:string; passId:string; ordinal:number; day:string; attendanceIds:string[]; makeupDays:string[]; charged:number; reserved:boolean; projected:boolean };
 export type ProjectedPass = LedgerPassSeed & { slots:AllocatedLesson[]; charged:number; remaining:number; usedOrdinal:number; actual:boolean };
 export type LessonLedgerProjection = { version:2; passes:ProjectedPass[]; labels:Record<string,string>; assignments:Record<string,{passId:string;ordinal:number;sourceDay:string}[]>; currentPassId:string; currentRemaining:number; previousMakeups:number; currentMakeups:number; issues:string[] };
@@ -15,7 +15,9 @@ const regular = (r:LedgerAttendance) => !['makeup','makeup_reserved','paused','c
 const dayOf=(i:Invoice)=>i.lessonDate||i.cycleStart||'';
 
 export function projectLessonLedger(account:Account,seed:LessonLedgerSeed,attendance:LedgerAttendance[],invoices:Invoice[],today:string,reflowFrom?:string):LessonLedgerProjection {
- const rows=attendance.filter(r=>r.studentId===account.id).sort((a,b)=>a.day.localeCompare(b.day)||a.id.localeCompare(b.id));
+ const combined=new Map((seed.history||[]).map(r=>[r.day,r]));
+ for(const row of attendance.filter(r=>r.studentId===account.id))combined.set(row.day,row);
+ const rows=[...combined.values()].filter(r=>r.studentId===account.id).sort((a,b)=>a.day.localeCompare(b.day)||a.id.localeCompare(b.id));
  const bills=invoices.filter(i=>i.studentId===account.id&&i.status!=='cancelled');
  const issues:string[]=[],labels:Record<string,string>={},assignments:LessonLedgerProjection['assignments']={};
  const definitions=seed.passes.filter(p=>!p.invoiceId||bills.some(i=>i.id===p.invoiceId)).map(p=>{
@@ -63,7 +65,7 @@ export function projectLessonLedger(account:Account,seed:LessonLedgerSeed,attend
   }
   labels[`${account.id}_${row.day}`]=numbers.join('·');
  }
- for(const row of rows.filter(r=>['makeup','makeup_reserved'].includes(r.status||''))){
+ for(const row of rows.filter(r=>r.day>=seed.from&&['makeup','makeup_reserved'].includes(r.status||''))){
   if(!row.relatedDay){issues.push(`${row.day}: 보강 원수업 날짜 확인 필요`);continue;}
   const source=passes.flatMap(p=>p.slots.map(s=>({p,s}))).filter(({s})=>s.day===row.relatedDay);
   if(source.length){

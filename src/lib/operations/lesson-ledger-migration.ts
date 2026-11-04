@@ -8,7 +8,8 @@ export type LedgerMigrationPreview={seed:LessonLedgerSeed;projection:ReturnType<
 /** Preserve the imported opening history as an explicit baseline. Current and
  * subsequent passes are rebuilt from real attendance, not receipt side effects. */
 export function prepareLessonLedger(e:LedgerEvidence,today:string,fingerprint:string):LedgerMigrationPreview{
- const a=e.account,records=e.attendance.filter(r=>r.studentId===a.id).sort((x,y)=>x.day.localeCompare(y.day));
+ const a=e.account,combined=new Map((e.sheet?.history||[]).map(r=>[r.day,r]));for(const r of e.attendance)combined.set(r.day,r);
+ const records=[...combined.values()].filter(r=>r.studentId===a.id).sort((x,y)=>x.day.localeCompare(y.day));
  const dated=e.invoices.filter(i=>i.status!=='cancelled'&&i.allocationState==='allocated'&&passStart(i)&&passStart(i)<=today).sort((x,y)=>passStart(x).localeCompare(passStart(y)));
  const issues:string[]=[];
  const modernFirst=records[0]?.day||today;
@@ -22,14 +23,17 @@ export function prepareLessonLedger(e:LedgerEvidence,today:string,fingerprint:st
  if(!passSeeds.length){
   // An opening balance is evidence of rights, not a receipt. Preserve it without
   // manufacturing paid status; owner review resolves its historical linkage.
-  from=today;passSeeds.push({id:`opening_${a.id}`,invoiceId:'',start:today,units:a.planUnits,amount:a.planAmount,openingOrdinal:Math.max(0,a.planUnits-a.remaining),openingUsed:Math.max(0,a.planUnits-a.remaining),fixedStart:true});
-  issues.push('현재 수강권의 시작일·수납 연결 확인 필요');
+  const firstSource=records.filter(r=>!['makeup','makeup_reserved','paused','cancelled'].includes(r.status||'present'))[0];
+  const firstOrdinal=firstSource&&Number(e.sheet?.cells.find(c=>c.day===firstSource.day)?.value);
+  if(firstSource&&firstOrdinal&&Number.isInteger(firstOrdinal)&&firstOrdinal<=a.planUnits){from=firstSource.day;passSeeds.push({id:`opening_${a.id}`,invoiceId:'',start:from,units:a.planUnits,amount:a.planAmount,openingOrdinal:firstOrdinal-1,openingUsed:firstOrdinal-1,fixedStart:true});}
+  else{from=today;passSeeds.push({id:`opening_${a.id}`,invoiceId:'',start:today,units:a.planUnits,amount:a.planAmount,openingOrdinal:Math.max(0,a.planUnits-a.remaining),openingUsed:Math.max(0,a.planUnits-a.remaining),fixedStart:true});
+  issues.push('현재 수강권의 시작일·수납 연결 확인 필요');}
  }
  const references=e.references.filter(r=>records.some(v=>v.day===r.day));
  const sequence=attendanceSequence([a],records,e.legacy,{positions:{},references,cycleStarts:effectiveBills.map(i=>({studentId:a.id,day:passStart(i)}))});
  const firstRecord=records.find(r=>r.day>=from&&!['paused','cancelled','makeup','makeup_reserved'].includes(r.status||'present'));
  if(firstRecord&&firstRecord.day>from){
-  const ref=e.references.find(r=>r.day===firstRecord.day),legacy=e.legacy.filter(r=>r.day>=from&&r.day<firstRecord.day).sort((x,y)=>x.day.localeCompare(y.day));
+  const ref=e.sheet?.cells.find(r=>r.day===firstRecord.day)||e.references.find(r=>r.day===firstRecord.day),legacy=e.legacy.filter(r=>r.day>=from&&r.day<firstRecord.day).sort((x,y)=>x.day.localeCompare(y.day));
   const n=ref?Number(ref.value.split(/[·,+]/)[0]):legacy.length?Number(legacy.at(-1)!.value)+1:undefined;
   if(n&&Number.isInteger(n)&&n<=passSeeds[0].units){passSeeds[0].openingOrdinal=n-1;passSeeds[0].openingUsed=n-1;}
   else if(!legacy.length&&from!==firstRecord.day)issues.push(`${from}: 첫 수업일부터 ${firstRecord.day} 이전의 회차 확인 필요`);
@@ -38,7 +42,7 @@ export function prepareLessonLedger(e:LedgerEvidence,today:string,fingerprint:st
  const sources=new Set(records.filter(r=>['makeup','makeup_reserved'].includes(r.status||'')&&r.relatedDay&&r.relatedDay<from).map(r=>r.relatedDay!));
  for(const row of records.filter(r=>r.day<from&&['absent','travel','sick','late_cancel'].includes(r.status||'')))sources.add(row.day);
  for(const day of sources){
-  const row=records.find(r=>r.day===day),old=e.legacy.find(r=>r.day===day),ref=e.references.find(r=>r.day===day);
+  const row=records.find(r=>r.day===day),old=e.legacy.find(r=>r.day===day),ref=e.sheet?.cells.find(r=>r.day===day)||e.references.find(r=>r.day===day);
   const status=row?.status||(old?legacyAttendanceAppearance(old).tone:ref?legacyAttendanceAppearance(ref).tone:'');
   const ordinal=Number(sequence.labels.get(`${a.id}_${day}`)||ref?.value||old?.value);
   const eligible=['absent','travel','sick','late_cancel'].includes(status||'');
@@ -48,8 +52,10 @@ export function prepareLessonLedger(e:LedgerEvidence,today:string,fingerprint:st
  for(const i of e.invoices.filter(i=>i.status!=='cancelled'&&i.paid>0&&(!passStart(i)||i.linkReview)))issues.push(`수납 ${i.id}: 첫 수업일 연결 확인 필요`);
  // A spreadsheet-only date is not proof of an additional attendance. Keep its
  // original reference unchanged, and rely on the signed/manual source records.
- const seed:LessonLedgerSeed={version:2,from,passes:passSeeds,archived,adjustments:[],createdAt:today,sourceFingerprint:fingerprint};
+ const seed:LessonLedgerSeed={version:2,...(e.sheet?{history:e.sheet.history}:{}),from,passes:passSeeds,archived,adjustments:[],createdAt:today,sourceFingerprint:fingerprint};
  const projection=projectLessonLedger(a,seed,records,e.invoices,today);
+ for(const row of e.sheet?.history||[]){const expected=e.sheet?.cells.find(c=>c.day===row.day)?.value,actual=projection.labels[`${a.id}_${row.day}`];if(row.day>=from&&expected&&actual!==expected)issues.push(`${row.day}: 원본 장부 ${expected}회와 수강권 연결 ${actual||'미확인'}회가 다릅니다.`);}
+ for(const pass of passSeeds){const cell=e.sheet?.cells.find(c=>c.day===pass.start),row=records.find(r=>r.day===pass.start);if(cell&&Number(cell.value)!==1&&!['makeup','makeup_reserved','paused','cancelled'].includes(row?.status||'present'))issues.push(`${pass.start}: 원본 장부는 ${cell.value}회인데 수강권 시작일로 연결되어 있습니다.`);}
  issues.push(...projection.issues);
  const current=projection.passes.find(p=>p.id===projection.currentPassId);
  if(current&&!current.actual&&!records.some(r=>r.day>=from))issues.push('현재 수강권의 실제 출결이 없어 시작 잔여 확인 필요');

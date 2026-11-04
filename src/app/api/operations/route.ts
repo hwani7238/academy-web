@@ -1,4 +1,4 @@
-import {migrateLessonLedger} from '@/lib/operations/ledger-migration-service';
+import {migrateLessonLedger,saveLedgerSheetSource} from '@/lib/operations/ledger-migration-service';
 import {projectLessonLedger} from '@/lib/operations/lesson-ledger';
 import { correctLedgerLink } from '@/lib/operations/ledger-correction';
 import { reconcileCourseLedger } from '@/lib/operations/course-ledger-service';
@@ -85,6 +85,7 @@ export async function GET(request: Request) {
     const attendanceRows=namedRows(attendance) as Attendance[];
     const correctionsById = new Map(legacyCorrections.docs.map(d => [d.id, d.data() as LegacyCorrection]));
     const allLegacy = [...legacyCells.values()].filter((v): v is NonNullable<typeof v> => Boolean(v)).map(row => correctedLegacy(row, correctionsById.get(`${row.studentId}_${row.day}`)));
+    for(const doc of canonicalLedgers.docs){const seed=doc.data().seed;for(const r of seed?.history||[]){if(r.day>=end.toISOString().slice(0,10)||attendanceRows.some(a=>a.studentId===doc.id&&a.day===r.day)||allLegacy.some(a=>a.studentId===doc.id&&a.day===r.day))continue;const value=String(r.sheetSource?.value||'');allLegacy.push(correctedLegacy({studentId:doc.id,day:r.day,value,color:r.sheetSource?.color||'',status:r.status},correctionsById.get(`${doc.id}_${r.day}`)));}}
     const cycleStarts = [...passCycleStarts(accounts.docs.map(d=>({...d.data(),id:d.id}) as Account)), ...cycleInvoices.docs.map(d=>d.data()).filter(v=>v.status!=='cancelled' && typeof v.cycleStart==='string').map(v=>({studentId:String(v.studentId),day:String(v.cycleStart)}))];
     const beforeMonth = `${month}-01`;
     const references = lessonReferences.docs.flatMap(d => (d.data().references || []) as LessonReference[]);
@@ -110,6 +111,7 @@ export async function POST(request: Request) {
     sameOrigin(request); const actor = await manager(request); const input = await request.json();
     if(['recordAttendance','recordAttendanceRange','adjust','correctLegacyAttendance','correctLessonReferences','correctRemaining','savePassHistory','saveNextPass','linkInvoiceLesson','monthlyPayment','cancelPayment'].includes(input.action))after(async()=>{try{await scanBillingIntegrity(actor,typeof input.studentId==='string'?input.studentId:undefined);}catch{console.error('Billing integrity check failed; administrator panel will retry.');}});
     switch (input.action) {
+      case 'saveLedgerSheetSource': return Response.json(await saveLedgerSheetSource(input,actor));
       case 'migrateLessonLedger': return Response.json(await migrateLessonLedger(input,actor));
       case 'correctLedgerLink': return Response.json(await correctLedgerLink(input,actor));
       case 'reconcileCourseLedger': return Response.json(await reconcileCourseLedger(input,actor));

@@ -8,7 +8,8 @@ export type LessonSlot = { ordinal:number; originDay:string; attendanceIds:strin
 export type CoursePass = { id:string; start:string; units:number; invoiceId:string; amount:number; paid:number; paymentStatus:'unpaid'|'partial'|'paid'|'review'; receiptIds:string[]; slots:LessonSlot[]; regularRemaining:number; makeupOutstanding:number };
 export type SlotBinding = { attendanceId:string; passId:string; ordinal:number; originDay:string };
 export type CourseLedger = { version:1; studentId:string; name:string; passes:CoursePass[]; bindings:SlotBinding[]; issues:string[]; currentRemaining:number; makeupOutstanding:number; repair:null|{start:string; units:number; amount:number; expectedRemaining:number; attendanceIds:string[]; previousInvoiceId:string} };
-export type LedgerEvidence = { account:Account; attendance:Attendance[]; invoices:Invoice[]; payments:Payment[]; references:LessonReference[]; legacy:LegacyAttendance[] };
+export type LedgerSheetSource={source:string;cells:{day:string;value:string;color:string;cell:string;sheet:string}[];history:Attendance[];note:string;updatedAt:string};
+export type LedgerEvidence = { sheet?:LedgerSheetSource; account:Account; attendance:Attendance[]; invoices:Invoice[]; payments:Payment[]; references:LessonReference[]; legacy:LegacyAttendance[] };
 
 /** A reproducible, event-backed read model. Attendance and receipts are source
  * events, never synthesized from a balance. Unassigned slots are future rights,

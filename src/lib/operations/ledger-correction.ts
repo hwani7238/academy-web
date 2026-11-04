@@ -41,7 +41,7 @@ export async function correctLedgerLink(input:Record<string,unknown>,actor:strin
    tx.update(db.doc(`opsAccounts/${studentId}`),account);
    tx.create(auditRef,{actor,studentId,action:'merge-duplicate-payments',at:stamp,detail:{reason,before:{payments:[keep,drop],invoices:e.invoices.filter(i=>affected.has(i.id)),account:e.account,attendance:linked},after:{payments:payments.filter(p=>p.id===keep.id||p.id===drop.id),invoices:changed,account},creditedUnits:0,remainingBefore:e.account.remaining,remainingAfter:account.remaining}});
   }else if(input.kind==='receipt-links'){
-   const links=Array.isArray(input.links)?input.links as {paymentId:string;invoiceId:string;lessonDate:string}[]:[];
+   const links=Array.isArray(input.links)?input.links as {paymentId:string;invoiceId:string;lessonDate:string;units?:number}[]:[];
    if(!links.length||links.length>10||new Set(links.map(v=>v.paymentId)).size!==links.length||new Set(links.map(v=>v.invoiceId)).size!==links.length)throw Error('연결할 수납과 수강권을 확인해주세요.');
    const changedPayments=e.payments.map(p=>({...p})),changedInvoices:Invoice[]=[];
    for(const link of links){
@@ -49,11 +49,12 @@ export async function correctLedgerLink(input:Record<string,unknown>,actor:strin
     if(!receipt||receipt.cancelledAt||!invoice||invoice.status==='cancelled'||receipt.amount>invoice.amount)throw Error('실제 수납과 수강권을 확인해주세요.');
     Object.assign(receipt,{invoiceId:invoice.id,passId:invoice.passId||invoice.id,lessonDate:day});
    }
+   for(const link of links){if(link.units!==undefined&&(!Number.isInteger(link.units)||link.units<1||link.units>200))throw Error('확인된 수강권 횟수를 입력해주세요.');if(link.units!==undefined&&e.account.ledgerVersion===2)throw Error('전환된 수강권의 횟수는 수강권 변경에서 정정해주세요.');}
    const affected=new Set([...links.map(l=>l.invoiceId),...links.map(l=>e.payments.find(p=>p.id===l.paymentId)!.invoiceId)]);
    for(const id of affected){
     const old=e.invoices.find(i=>i.id===id)!;const link=links.find(l=>l.invoiceId===id),paid=changedPayments.filter(p=>p.invoiceId===id&&!p.cancelledAt).reduce((n,p)=>n+p.amount,0);
     if(paid>old.amount)throw Error('연결 후 수납 합계가 청구 금액보다 큽니다.');
-    changedInvoices.push({...old,paid,status:paid===old.amount?'paid':'open',...(link?{passId:old.passId||old.id,lessonDate:link.lessonDate,cycleStart:link.lessonDate,linkReview:false,needsReview:false}:{}),updatedAt:stamp});
+    changedInvoices.push({...old,paid,status:paid===old.amount?'paid':'open',...(link?{passId:old.passId||old.id,lessonDate:link.lessonDate,cycleStart:link.lessonDate,linkReview:false,needsReview:false,...(link.units===undefined?{}:{units:link.units,...(old.allocationState==='allocated'?{allocatedUnits:link.units}:{})})}:{}),updatedAt:stamp});
    }
    const all=e.invoices.map(i=>changedInvoices.find(v=>v.id===i.id)||i),dates=all.filter(i=>i.status!=='cancelled'&&(i.lessonDate||i.cycleStart)).map(i=>i.lessonDate||i.cycleStart);
    if(new Set(dates).size!==dates.length)throw Error('같은 시작일의 수강권이 여러 개입니다.');

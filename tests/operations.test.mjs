@@ -3334,3 +3334,27 @@ test('canonical integration: dated plan changes, future leave and advance makeup
 test('canonical integrity scanner cannot restore a legacy mutable balance after migration',async()=>{
  const s=await canonicalServiceFixture(),before=structuredClone(s.records);await s.load('integrity-service').scanBillingIntegrity('owner');assert.deepEqual(s.records,before);
 });
+test('canonical sheet evidence: original historical lessons fill gaps without overwriting native attendance or importing future lessons',async()=>{
+ const s=await canonicalServiceFixture(),e=await s.load('course-ledger-service').readCourseLedgerEvidence('v2');e.attendance=[{...s.f.row('2026-10-12','paused',0)}];
+ const input={source:'https://docs.google.com/spreadsheets/d/confirmed/edit',cells:[{day:'2026-10-01',value:'1',color:'#FF00FF',sheet:'26년 10월',cell:'D4'},{day:'2026-10-02',value:'2',color:'',sheet:'26년 10월',cell:'E4'},{day:'2026-10-12',value:'3',color:'',sheet:'26년 10월',cell:'O4'},{day:'2026-11-06',value:'4',color:'',sheet:'26년 11월',cell:'I4'}]};
+ const sheet=s.load('ledger-sheet-source').prepareLedgerSheetSource(e,input,'2026-11-04');assert.deepEqual(sheet.history.map(r=>r.day),['2026-10-01','2026-10-02']);assert.equal(sheet.cells.some(c=>c.day==='2026-11-06'),false);
+ const p=s.load('lesson-ledger-migration').prepareLessonLedger({...e,sheet},'2026-11-04','fp');assert.equal(p.ready,true);assert.equal(p.afterRemaining,2);assert.equal(p.projection.labels['v2_2026-10-12'],undefined);
+});
+test('canonical sheet evidence: source-linked historical cancellation replays balance while preserving original sheet and receipts',async()=>{
+ const s=await canonicalServiceFixture();s.records.delete('opsCourseLedgers/v2');const a=s.records.get('opsAccounts/v2');delete a.ledgerVersion;
+ for(const key of [...s.records.keys()])if(key.startsWith('opsAttendance/'))s.records.delete(key);
+ const source={source:'https://docs.google.com/spreadsheets/d/confirmed/edit',cells:[{day:'2026-10-01',value:'1',color:'#FF00FF',cell:'D4',sheet:'26년 10월'},{day:'2026-10-02',value:'2',color:'',cell:'E4',sheet:'26년 10월'}]};
+ const svc=s.load('course-ledger-service'),e=await svc.readCourseLedgerEvidence('v2'),sheet=s.load('ledger-sheet-source').prepareLedgerSheetSource(e,source,'2026-11-04');s.records.set('opsLedgerSources/v2',sheet);
+ const fresh=await svc.readCourseLedgerEvidence('v2');await s.load('ledger-migration-service').migrateLessonLedger({studentId:'v2',fingerprint:svc.ledgerFingerprint(fresh)},'owner');assert.equal(s.records.get('opsAccounts/v2').remaining,2);
+ const revision=JSON.stringify(['2','', '']);await s.service.correctLegacyAttendance({studentId:'v2',day:'2026-10-02',status:'paused',ordinal:'',expectedRevision:revision,note:'수강 일시 정지'},'owner');assert.equal(s.records.get('opsAccounts/v2').remaining,3);assert.deepEqual(s.records.get('opsLedgerSources/v2'),sheet);assert.equal(s.records.get('opsPayments/receipt').amount,180000);
+});
+test('canonical correction: sheet-confirmed pass units preserve receipt money and do not credit balance',async()=>{
+ const s=setup(),f=canonicalFixture();s.records.set('opsAccounts/v2',{...f.account,remaining:5});
+ s.records.set('opsInvoices/a',{...f.invoices[0],units:12,allocatedUnits:12,amount:160000,paid:160000});
+ const receipt={id:'p',studentId:'v2',invoiceId:'a',amount:160000,method:'지역화폐',paymentDate:'2026-09-30'};s.records.set('opsPayments/p',receipt);
+ const svc=s.load('course-ledger-service'),e=await svc.readCourseLedgerEvidence('v2');
+ const input={studentId:'v2',requestId:'units',fingerprint:svc.ledgerFingerprint(e),kind:'receipt-links',links:[{paymentId:'p',invoiceId:'a',lessonDate:'2026-09-29',units:8}],reason:'출결 현황 9/29~10/21 1~8회 및 등록 현황 주 2회 확인'};
+ await s.load('ledger-correction').correctLedgerLink(input,'owner');assert.equal(s.records.get('opsInvoices/a').units,8);assert.equal(s.records.get('opsInvoices/a').amount,160000);assert.equal(s.records.get('opsAccounts/v2').remaining,5);
+ for(const k of ['amount','method','paymentDate'])assert.equal(s.records.get('opsPayments/p')[k],receipt[k]);
+ const before=structuredClone(s.records);await s.load('ledger-correction').correctLedgerLink(input,'owner');assert.deepEqual(s.records,before);
+});

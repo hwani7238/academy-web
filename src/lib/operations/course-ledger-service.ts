@@ -8,25 +8,26 @@ import type { Transaction } from 'firebase-admin/firestore';
 
 export function ledgerFingerprint(e:LedgerEvidence) {
  const ordered=<T,>(rows:T[])=>[...rows].sort((a,b)=>JSON.stringify(a).localeCompare(JSON.stringify(b)));
- return hash(JSON.stringify({account:e.account,attendance:ordered(e.attendance),invoices:ordered(e.invoices),payments:ordered(e.payments),references:ordered(e.references),legacy:ordered(e.legacy)}));
+ return hash(JSON.stringify({account:e.account,attendance:ordered(e.attendance),invoices:ordered(e.invoices),payments:ordered(e.payments),references:ordered(e.references),legacy:ordered(e.legacy),...(e.sheet?{sheet:e.sheet}:{})}));
 }
 export async function readCourseLedgerEvidence(studentId:string,tx?:Transaction):Promise<LedgerEvidence> {
  const db=database(),get=(ref:FirebaseFirestore.DocumentReference|FirebaseFirestore.Query):Promise<any>=>tx?tx.get(ref as FirebaseFirestore.DocumentReference):ref.get();
  const accountDoc=await get(db.doc(`opsAccounts/${studentId}`));if(!accountDoc.exists)throw Error('수강 정보를 찾을 수 없습니다.');
  const account={...accountDoc.data(),id:studentId} as Account;
- const [attendance,invoices,payments,references,corrections,source]=await Promise.all([
-  get(db.collection('opsAttendance').where('studentId','==',studentId)),get(db.collection('opsInvoices').where('studentId','==',studentId)),get(db.collection('opsPayments').where('studentId','==',studentId)),get(db.collection('opsLessonReferences')),get(db.collection('opsLegacyCorrections').where('studentId','==',studentId)),account.importId?get(db.doc(`opsImports/${account.importId}`)):Promise.resolve(null),
+ const [attendance,invoices,payments,references,corrections,source,sheet]=await Promise.all([
+  get(db.collection('opsAttendance').where('studentId','==',studentId)),get(db.collection('opsInvoices').where('studentId','==',studentId)),get(db.collection('opsPayments').where('studentId','==',studentId)),get(db.collection('opsLessonReferences')),get(db.collection('opsLegacyCorrections').where('studentId','==',studentId)),account.importId?get(db.doc(`opsImports/${account.importId}`)):Promise.resolve(null),get(db.doc(`opsLedgerSources/${studentId}`)),
  ]);
  const rows=<T,>(snap:FirebaseFirestore.QuerySnapshot)=>snap.docs.map(d=>({...d.data(),id:d.id}) as T);
- return {account,attendance:rows<Attendance>(attendance),invoices:rows<Invoice>(invoices),payments:rows<Payment>(payments),references:(references.docs.flatMap((d:FirebaseFirestore.QueryDocumentSnapshot)=>d.data().references||[]) as LessonReference[]).filter(r=>r.studentId===studentId),legacy:integrityLegacy(account,source?.exists?[{...source.data(),id:source.id} as IntegritySource]:[],rows<LegacyCorrection>(corrections))};
+ return {account,...(sheet?.exists?{sheet:sheet.data()}:{}),attendance:rows<Attendance>(attendance),invoices:rows<Invoice>(invoices),payments:rows<Payment>(payments),references:(references.docs.flatMap((d:FirebaseFirestore.QueryDocumentSnapshot)=>d.data().references||[]) as LessonReference[]).filter(r=>r.studentId===studentId),legacy:integrityLegacy(account,source?.exists?[{...source.data(),id:source.id} as IntegritySource]:[],rows<LegacyCorrection>(corrections))};
 }
 export async function courseLedgerReports(includeEvidence=false){
  const db=database(),today=seoulDay();
- const [aa,rr,ii,pp,refs,imports,cc]=await Promise.all(['opsAccounts','opsAttendance','opsInvoices','opsPayments','opsLessonReferences','opsImports','opsLegacyCorrections'].map(c=>db.collection(c).get()));
+ const [aa,rr,ii,pp,refs,imports,cc,ss]=await Promise.all(['opsAccounts','opsAttendance','opsInvoices','opsPayments','opsLessonReferences','opsImports','opsLegacyCorrections','opsLedgerSources'].map(c=>db.collection(c).get()));
  const rows=<T,>(s:FirebaseFirestore.QuerySnapshot)=>s.docs.map(d=>({...d.data(),id:d.id}) as T);
  const records=rows<Attendance>(rr),invoices=rows<Invoice>(ii),payments=rows<Payment>(pp),references=refs.docs.flatMap(d=>d.data().references||[]) as LessonReference[],sources=rows<IntegritySource>(imports),corrections=rows<LegacyCorrection>(cc);
  return rows<Account>(aa).filter(a=>a.active).map(account=>{
-  const e:LedgerEvidence={account,attendance:records.filter(r=>r.studentId===account.id),invoices:invoices.filter(r=>r.studentId===account.id),payments:payments.filter(r=>r.studentId===account.id),references:references.filter(r=>r.studentId===account.id),legacy:integrityLegacy(account,sources,corrections)};
+  const sheet=ss.docs.find(d=>d.id===account.id)?.data() as LedgerEvidence['sheet'];
+  const e:LedgerEvidence={account,...(sheet?{sheet}:{}),attendance:records.filter(r=>r.studentId===account.id),invoices:invoices.filter(r=>r.studentId===account.id),payments:payments.filter(r=>r.studentId===account.id),references:references.filter(r=>r.studentId===account.id),legacy:integrityLegacy(account,sources,corrections)};
   const {phone,checkinSuffixes,...safeAccount}=account;
   return {...buildCourseLedger(e,today),fingerprint:ledgerFingerprint(e),...(includeEvidence?{evidence:{...e,account:safeAccount}}:{})};
  }).sort((a,b)=>a.name.localeCompare(b.name,'ko'));

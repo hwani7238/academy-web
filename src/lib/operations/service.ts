@@ -70,6 +70,7 @@ export async function correctLegacyAttendance(input: Record<string, unknown>, ac
         if (cell.day === day) cells.push({ studentId, day, value: String(cell.value), color: String(cell.color || '') });
       }
     }
+    if(!cells.length){const imported=(await tx.get(db.doc(`opsLedgerSources/${studentId}`))).data();const cell=imported?.cells?.find((c:{day:string})=>c.day===day);if(cell&&imported?.history?.some((r:Attendance)=>r.day===day))cells.push({studentId,day,value:cell.value,color:cell.color});}
     if (cells.length !== 1) throw Error('이전 장부 기록이 없거나 중복되어 있습니다. 새로고침 후 확인해주세요.');
     const old = previous.data() as LegacyCorrection | undefined, current = correctedLegacy(cells[0], old);
     if (current.revision !== input.expectedRevision) throw Error('다른 화면에서 이전 출결이 변경됐습니다. 창을 닫고 다시 열어주세요.');
@@ -227,6 +228,7 @@ async function makeupSource(tx: Transaction, db: Firestore, account: Account, da
     if (matching.length !== 1 || enrollmentId(sourceId, matching[0]) !== account.id || relatedDay > (source.attendanceCutoffs?.[relatedDay.slice(0,7)] || source.asOf || '')) continue;
     for (const history of source.history || []) for (const cell of history.cells || []) if (cell.day === relatedDay) cells.push({studentId:account.id,day:relatedDay,value:String(cell.value),color:String(cell.color || '')});
   }
+  if(!cells.length){const source=(await tx.get(db.doc(`opsLedgerSources/${account.id}`))).data();const cell=source?.cells?.find((c:{day:string})=>c.day===relatedDay);if(cell&&source?.history?.some((r:Attendance)=>r.day===relatedDay))cells.push({studentId:account.id,day:relatedDay,value:cell.value,color:cell.color});}
   if (cells.length !== 1 || !['absent','travel','sick','late_cancel'].includes(legacyAttendanceAppearance(correctedLegacy(cells[0], correction.data() as LegacyCorrection | undefined)).tone)) throw Error('원래 날짜의 결석·여행 기록을 확인해주세요.');
   return { charged: false };
 }
