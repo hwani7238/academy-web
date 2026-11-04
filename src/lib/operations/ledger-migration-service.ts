@@ -1,13 +1,12 @@
 import {database,hash} from './auth';
 import {ledgerDatabase} from './ledger-store';
 import {courseLedgerReports,readCourseLedgerEvidence,ledgerFingerprint} from './course-ledger-service';
-import {prepareLessonLedger} from './lesson-ledger-migration';
-import {projectLessonLedger,type LessonLedgerSeed} from './lesson-ledger';
+import {previewLessonLedgerMigration} from './lesson-ledger-migration';
 import {seoulDay} from './model';
 
 export async function ledgerMigrationReports(){
  const [reports,stored]=await Promise.all([courseLedgerReports(true),database().collection('opsCourseLedgers').get()]);
- return reports.map(r=>{const e=r.evidence!,old=stored.docs.find(d=>d.id===r.studentId)?.data();const preview=old?.version===2?(()=>{const seed=old.seed as LessonLedgerSeed,projection=projectLessonLedger(e.account as Parameters<typeof projectLessonLedger>[0],seed,e.attendance,e.invoices,seoulDay());return {seed,projection,issues:projection.issues,beforeRemaining:e.account.remaining,afterRemaining:projection.currentRemaining,ready:projection.issues.length===0};})():prepareLessonLedger(e as Parameters<typeof prepareLessonLedger>[0],seoulDay(),r.fingerprint);return {studentId:r.studentId,name:r.name,fingerprint:r.fingerprint,version:e.account.ledgerVersion||1,...preview};});
+ return reports.map(r=>{const e=r.evidence!,old=stored.docs.find(d=>d.id===r.studentId)?.data();const preview=previewLessonLedgerMigration(e as Parameters<typeof previewLessonLedgerMigration>[0],seoulDay(),r.fingerprint,old);return {studentId:r.studentId,name:r.name,fingerprint:r.fingerprint,version:e.account.ledgerVersion||1,...preview};});
 }
 /** A fresh evidence fingerprint and a reproducible preview are required. Source
  * facts and receipt amounts are never changed by migration. */
@@ -17,10 +16,10 @@ export async function migrateLessonLedger(input:Record<string,unknown>,actor:str
  const db=ledgerDatabase();
  return db.runTransaction(async tx=>{
   const ledgerRef=db.doc(`opsCourseLedgers/${id}`),old=(await tx.get(ledgerRef)).data();
-  if(old?.version===2)return {ok:true,duplicate:true};
   const e=await readCourseLedgerEvidence(id,tx);
+  const plan=previewLessonLedgerMigration(e,seoulDay(),fingerprint,old);
+  if(old?.version===2&&!plan.pendingSource)return {ok:true,duplicate:true};
   if(ledgerFingerprint(e)!==fingerprint)throw Error('점검 후 기록이 변경되었습니다. 다시 점검해주세요.');
-  const plan=prepareLessonLedger(e,seoulDay(),fingerprint);
   if(!plan.ready)throw Error(plan.issues.join(' / '));
   const stamp=new Date().toISOString();
   tx.set(ledgerRef,JSON.parse(JSON.stringify({version:2,seed:plan.seed,revision:'migration',updatedAt:stamp})));
@@ -36,7 +35,6 @@ export async function saveLedgerSheetSource(input:Record<string,unknown>,actor:s
  const db=database(),saved:string[]=[],errors:{name:string;reason:string}[]=[];
  for(const row of input.rows){try{const id=String(row.studentId||'');if(!/^[A-Za-z0-9_-]{1,160}$/.test(id))throw Error('학생·과목 확인 필요');await db.runTransaction(async tx=>{
   const e=await readCourseLedgerEvidence(id,tx),ledger=(await tx.get(db.doc(`opsCourseLedgers/${id}`))).data();
-  if(ledger?.version===2)throw Error('이미 새 계산으로 전환된 수강권입니다. 기존 출결 수정에서 확인해주세요.');
   if(ledgerFingerprint(e)!==row.fingerprint)throw Error('점검 후 변경된 기록입니다. 다시 점검해주세요.');
   const source=prepareLedgerSheetSource(e,{...row,source:input.source}),ref=db.doc(`opsLedgerSources/${id}`),before=(await tx.get(ref)).data();
   tx.set(ref,source);tx.create(db.collection('opsAudit').doc(),{studentId:id,actor,action:'import-ledger-sheet-source',at:source.updatedAt,detail:{before:before||null,after:source,nativeAttendanceUnchanged:true,paymentsUnchanged:true}});

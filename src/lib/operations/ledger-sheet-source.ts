@@ -2,7 +2,7 @@ import {validDay,seoulDay,type Attendance} from './model';
 import {legacyAttendanceAppearance} from './attendance-appearance';
 import type {LedgerEvidence,LedgerSheetSource} from './course-ledger';
 import {passStart} from './pass-settlement';
-/** A sheet supplies only missing history before the first native record. Native
+/** A sheet supplies only missing past history. Native
  * attendance, including the owner's later makeup/pause corrections, always wins. */
 export function prepareLedgerSheetSource(e:LedgerEvidence,input:Record<string,unknown>,today=seoulDay()):LedgerSheetSource{
  const source=String(input.source||'');if(!/^https:\/\/docs\.google\.com\/spreadsheets\/d\/[\w-]+(?:\/[^\s]*)?$/.test(source))throw Error('원본 스프레드시트 주소를 확인해주세요.');
@@ -14,11 +14,12 @@ export function prepareLedgerSheetSource(e:LedgerEvidence,input:Record<string,un
  const anchor=dated.filter(day=>day<=firstModern).at(-1)||dated[0]||cells.filter(c=>c.day<firstModern&&Number(c.value)===1&&legacyAttendanceAppearance(c).tone!=='makeup').at(-1)?.day;
  if(!anchor)throw Error('시트에서 계산을 시작할 1회차 또는 연결된 수강권을 확인할 수 없습니다.');
  const history:Attendance[]=[];
- for(const c of cells.filter(c=>c.day>=anchor&&c.day<firstModern)){
-  const tone=legacyAttendanceAppearance(c).tone;
+ for(const c of cells.filter(c=>c.day>=anchor&&c.day<today&&!e.attendance.some(r=>r.day===c.day))){
+  const correction=e.legacy.find(r=>r.day===c.day&&r.status),tone=legacyAttendanceAppearance(correction||c).tone;
   if(tone==='makeup')continue; // A standalone orange number cannot identify its original lesson.
   if(!Number.isInteger(Number(c.value)))throw Error(`${c.day}: 반 회차의 차감 기준 확인 필요`);
-  const status=tone==='absent'?'absent':'present';
+  if(c.color==='#FF0000'&&!correction)throw Error(`${c.day}: 빨간색 장부 표시의 출결 상태 확인 필요`);
+  const status=correction?.status||(tone==='absent'?'absent':'present');
   history.push({id:`sheet_${e.account.id}_${c.day}`,studentId:e.account.id,name:e.account.name,day:c.day,status,units:status==='absent'?0:1,source:'manual',sheetSource:{value:c.value,color:c.color,sheet:c.sheet,cell:c.cell},at:'',updatedAt:'',note:`원본 장부 ${c.sheet}!${c.cell} · ${c.value}회`});
  }
  return {source,cells,history,note:String(input.note||'').slice(0,500),updatedAt:new Date().toISOString()};

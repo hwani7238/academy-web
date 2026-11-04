@@ -3380,3 +3380,13 @@ test('canonical integration: renewal reuses a legacy undated unpaid invoice inst
  assert.equal(s.records.get('opsAccounts/v2').currentPassId,'legacy-pending');assert.equal(s.records.get('opsAccounts/v2').remaining,3);
  assert.equal(s.records.get('opsInvoices/legacy-pending').lessonDate,'2026-10-05');assert.equal([...s.records.keys()].filter(k=>k.startsWith('opsInvoices/')).length,2);
 });
+test('canonical sheet supplement: missing middle lessons are previewed and applied once, preserving native pauses and receipts',async()=>{
+ const s=await canonicalServiceFixture();s.records.delete('opsAttendance/v2_2026-10-02');s.records.get('opsAccounts/v2').remaining=2;
+ const svc=s.load('course-ledger-service'),e=await svc.readCourseLedgerEvidence('v2'),money=structuredClone(s.records.get('opsPayments/receipt'));
+ const input={source:'https://docs.google.com/spreadsheets/d/confirmed/edit',cells:['01','02','03'].map((d,i)=>({day:'2026-10-'+d,value:String(i+1),color:'#000000',sheet:'26년 10월',cell:`D${i+1}`}))};
+ const source=s.load('ledger-sheet-source').prepareLedgerSheetSource(e,input,'2026-11-04');assert.deepEqual(source.history.map(r=>r.day),['2026-10-02']);s.records.set('opsLedgerSources/v2',source);
+ const fresh=await svc.readCourseLedgerEvidence('v2'),fp=svc.ledgerFingerprint(fresh),preview=s.load('lesson-ledger-migration').previewLessonLedgerMigration(fresh,'2026-11-04',fp,s.records.get('opsCourseLedgers/v2'));
+ assert.equal(preview.pendingSource,true);assert.equal(preview.ready,true);assert.equal(preview.afterRemaining,1);assert.equal(s.records.get('opsAccounts/v2').remaining,2);
+ await s.load('ledger-migration-service').migrateLessonLedger({studentId:'v2',fingerprint:fp},'owner');assert.equal(s.records.get('opsAccounts/v2').remaining,1);assert.deepEqual(s.records.get('opsPayments/receipt'),money);assert.equal(s.records.has('opsAttendance/v2_2026-10-02'),false);
+ const before=structuredClone(s.records);await s.load('ledger-migration-service').migrateLessonLedger({studentId:'v2',fingerprint:fp},'owner');assert.deepEqual(s.records,before);
+});

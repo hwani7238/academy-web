@@ -61,3 +61,16 @@ export function prepareLessonLedger(e:LedgerEvidence,today:string,fingerprint:st
  if(current&&!current.actual&&!records.some(r=>r.day>=from))issues.push('현재 수강권의 실제 출결이 없어 시작 잔여 확인 필요');
  return {seed,projection,issues:[...new Set(issues)],beforeRemaining:a.remaining,afterRemaining:projection.currentRemaining,ready:issues.length===0};
 }
+
+/** Source supplements remain a preview until explicitly applied. Existing
+ * canonical corrections take priority over an unchanged original spreadsheet. */
+export function previewLessonLedgerMigration(e:LedgerEvidence,today:string,fingerprint:string,stored?:{version?:number;seed?:LessonLedgerSeed}){
+ if(stored?.version!==2||!stored.seed)return {...prepareLessonLedger(e,today,fingerprint),pendingSource:false};
+ const old=stored.seed,additions=(e.sheet?.history||[]).filter(r=>r.day>=old.from&&!old.history?.some(v=>v.day===r.day)&&!e.attendance.some(v=>v.day===r.day));
+ if(!additions.length){const projection=projectLessonLedger(e.account,old,e.attendance,e.invoices,today);return {seed:old,projection,issues:projection.issues,beforeRemaining:e.account.remaining,afterRemaining:projection.currentRemaining,ready:!projection.issues.length,pendingSource:false};}
+ const history=new Map((e.sheet?.history||[]).map(r=>[r.day,r]));for(const r of old.history||[])history.set(r.day,r);
+ const preview=prepareLessonLedger({...e,sheet:{...e.sheet!,history:[...history.values()]}},today,fingerprint);
+ preview.seed.adjustments=old.adjustments;const projection=projectLessonLedger(e.account,preview.seed,e.attendance,e.invoices,today);
+ const issues=[...new Set([...preview.issues,...projection.issues])];
+ return {...preview,projection,afterRemaining:projection.currentRemaining,issues,ready:!issues.length,pendingSource:true};
+}
