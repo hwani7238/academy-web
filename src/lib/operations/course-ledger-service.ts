@@ -20,14 +20,15 @@ export async function readCourseLedgerEvidence(studentId:string,tx?:Transaction)
  const rows=<T,>(snap:FirebaseFirestore.QuerySnapshot)=>snap.docs.map(d=>({...d.data(),id:d.id}) as T);
  return {account,attendance:rows<Attendance>(attendance),invoices:rows<Invoice>(invoices),payments:rows<Payment>(payments),references:(references.docs.flatMap((d:FirebaseFirestore.QueryDocumentSnapshot)=>d.data().references||[]) as LessonReference[]).filter(r=>r.studentId===studentId),legacy:integrityLegacy(account,source?.exists?[{...source.data(),id:source.id} as IntegritySource]:[],rows<LegacyCorrection>(corrections))};
 }
-export async function courseLedgerReports(){
+export async function courseLedgerReports(includeEvidence=false){
  const db=database(),today=seoulDay();
  const [aa,rr,ii,pp,refs,imports,cc]=await Promise.all(['opsAccounts','opsAttendance','opsInvoices','opsPayments','opsLessonReferences','opsImports','opsLegacyCorrections'].map(c=>db.collection(c).get()));
  const rows=<T,>(s:FirebaseFirestore.QuerySnapshot)=>s.docs.map(d=>({...d.data(),id:d.id}) as T);
  const records=rows<Attendance>(rr),invoices=rows<Invoice>(ii),payments=rows<Payment>(pp),references=refs.docs.flatMap(d=>d.data().references||[]) as LessonReference[],sources=rows<IntegritySource>(imports),corrections=rows<LegacyCorrection>(cc);
  return rows<Account>(aa).filter(a=>a.active).map(account=>{
   const e:LedgerEvidence={account,attendance:records.filter(r=>r.studentId===account.id),invoices:invoices.filter(r=>r.studentId===account.id),payments:payments.filter(r=>r.studentId===account.id),references:references.filter(r=>r.studentId===account.id),legacy:integrityLegacy(account,sources,corrections)};
-  return {...buildCourseLedger(e,today),fingerprint:ledgerFingerprint(e)};
+  const {phone,checkinSuffixes,...safeAccount}=account;
+  return {...buildCourseLedger(e,today),fingerprint:ledgerFingerprint(e),...(includeEvidence?{evidence:{...e,account:safeAccount}}:{})};
  }).sort((a,b)=>a.name.localeCompare(b.name,'ko'));
 }
 
