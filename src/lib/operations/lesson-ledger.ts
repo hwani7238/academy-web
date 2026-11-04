@@ -15,7 +15,7 @@ const regular = (r:LedgerAttendance) => !['makeup','makeup_reserved','paused','c
 const dayOf=(i:Invoice)=>i.lessonDate||i.cycleStart||'';
 
 export function projectLessonLedger(account:Account,seed:LessonLedgerSeed,attendance:LedgerAttendance[],invoices:Invoice[],today:string,reflowFrom?:string):LessonLedgerProjection {
- const combined=new Map((seed.history||[]).map(r=>[r.day,r]));
+ const combined=new Map<string,LedgerAttendance>((seed.history||[]).map(r=>[r.day,r]));
  for(const row of attendance.filter(r=>r.studentId===account.id))combined.set(row.day,row);
  const rows=[...combined.values()].filter(r=>r.studentId===account.id).sort((a,b)=>a.day.localeCompare(b.day)||a.id.localeCompare(b.id));
  const bills=invoices.filter(i=>i.studentId===account.id&&i.status!=='cancelled');
