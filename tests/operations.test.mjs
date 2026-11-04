@@ -3372,3 +3372,11 @@ test('canonical integration: future prepaid rights remain visible separately fro
  await s.service.recordAttendance({studentId:'v2',day:'2026-10-04',status:'present',units:1},'owner');
  const a=s.records.get('opsAccounts/v2');assert.equal(a.remaining,0);assert.deepEqual(a.upcomingPasses,[{start:future,remaining:4}]);assert.equal(s.records.get('opsInvoices/future').paid,180000);
 });
+
+test('canonical integration: renewal reuses a legacy undated unpaid invoice instead of duplicating the bill',async()=>{
+ const s=await canonicalServiceFixture();s.records.set('opsInvoices/legacy-pending',{id:'legacy-pending',studentId:'v2',name:'학생',units:4,amount:180000,paid:0,status:'open',needsReview:false,createdAt:'2026-10-01'});
+ await s.service.recordAttendance({studentId:'v2',day:'2026-10-04',status:'present',units:1},'owner');
+ await s.service.recordAttendance({studentId:'v2',day:'2026-10-05',status:'present',units:1},'owner');
+ assert.equal(s.records.get('opsAccounts/v2').currentPassId,'legacy-pending');assert.equal(s.records.get('opsAccounts/v2').remaining,3);
+ assert.equal(s.records.get('opsInvoices/legacy-pending').lessonDate,'2026-10-05');assert.equal([...s.records.keys()].filter(k=>k.startsWith('opsInvoices/')).length,2);
+});

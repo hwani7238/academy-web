@@ -32,7 +32,7 @@ export function projectLessonLedger(account:Account,seed:LessonLedgerSeed,attend
  let cursor=0;
  const anchor=reflowFrom?passes.filter(p=>p.start<reflowFrom).at(-1)||passes.find(p=>p.start===reflowFrom):undefined;
  const reflowStart=anchor?.start;
- const pending=bills.filter(i=>i.allocationState==='pending'&&!dayOf(i)&&!i.reservedPass);
+ const pending=bills.filter(i=>(i.allocationState==='pending'||!i.allocationState)&&!dayOf(i)&&!i.reservedPass);
  const bind=(id:string,p:ProjectedPass,s:AllocatedLesson)=>{(assignments[id]||=[]).push({passId:p.id,ordinal:s.ordinal,sourceDay:s.day});};
  function advance(day:string){
   const prev=passes[cursor],next=passes[cursor+1];
