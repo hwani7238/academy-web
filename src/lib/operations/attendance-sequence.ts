@@ -3,8 +3,12 @@ import {passUnitsOn,passCycleStarts,passPlanResetFrom} from './pass-history';
 import type { Account, Attendance, Snapshot } from './model';
 import { legacyAttendanceAppearance } from './attendance-appearance';
 import { plannedLesson } from './schedule';
+import {projectLessonLedger,type LessonLedgerSeed} from './lesson-ledger';
+import type {Invoice} from './model';
 
+export type CanonicalSequence = {seed:LessonLedgerSeed;records:Attendance[];invoices:Invoice[];today:string};
 export type SequenceContext = {
+  canonical?:Record<string,CanonicalSequence>;
   references?: LessonReference[];
   referenceRevision?: string;
   positions: Record<string, number>;
@@ -19,6 +23,12 @@ type Legacy = NonNullable<Snapshot['legacyAttendance']>[number];
 // Display-only chronology: neither payments nor current balances rewrite old lessons.
 // Imported numbers anchor the sequence; modern records take precedence on the same day.
 export function attendanceSequence(accounts: Pick<Account, 'id' | 'planUnits' | 'schedule' | 'passHistory' | 'initialPlanUnits' | 'referenceResetFrom'>[], records: RecordRow[], legacy: Legacy[], context?: SequenceContext) {
+  const projections = new Map(Object.entries(context?.canonical||{}).map(([id,c])=>{
+    const a=accounts.find(a=>a.id===id) as Account;
+    const combined=new Map(c.records.map(r=>[r.day,r]));
+    for(const r of records.filter(r=>r.studentId===id))combined.set(r.day,{...combined.get(r.day),...r,id:combined.get(r.day)?.id||`preview_${id}_${r.day}`,projected:!combined.has(r.day)} as Attendance);
+    return [id,projectLessonLedger(a,c.seed,[...combined.values()],c.invoices,c.today)] as const;
+  }));
   const plans = new Map(accounts.map(a => [a.id, a]));
   const planResets = new Map(accounts.map(a => [a.id, passPlanResetFrom(a)]));
   const schedules = new Map(accounts.map(a => [a.id, a.schedule]));
@@ -58,6 +68,12 @@ export function attendanceSequence(accounts: Pick<Account, 'id' | 'planUnits' | 
         if (positions[id] === 1) firstDay();
       }
       return numbers.join('·');
+    }
+    const canonical=context?.canonical?.[id],projection=projections.get(id);
+    if(canonical&&projection&&e.day>=canonical.seed.from){
+      const label=projection.labels[key];
+      if(label){labels.set(key,label);if(status!=='makeup'&&status!=='makeup_reserved'){positions[id]=Number(label.split('·').at(-1));if(label.split('·').includes('1'))firstDay();if(missed)missedLessons[key]=label;}}
+      continue;
     }
     const split=e.record?.passAllocations;
     if(split&&split.length>1&&['present','late_cancel'].includes(status)&&split.reduce((n,s)=>n+s.units,0)===e.record!.units){

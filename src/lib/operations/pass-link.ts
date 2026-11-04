@@ -32,6 +32,7 @@ export function allocatedPass(account: Account, invoice: Invoice, day: string, s
 // Old records keep their existing allocation until the audited migration marks them.
 // New passes activate on the first charged lesson, regardless of payment state.
 export function lessonPass(account: Account, invoices: Invoice[], day: string, units: number, previous: Attendance | undefined, stamp: string, newId: string, cycleStart = '', records: Attendance[] = []): { account:Account; passId?:string; invoice?:Invoice; created?:boolean } {
+  if(account.ledgerVersion===2)return {account,passId:previous?.passId||account.currentPassId};
   if (previous?.passId) return { account, passId: previous.passId };
   if (units <= (previous?.units || 0) || (account.lastPassLessonDay && day < account.lastPassLessonDay)) return { account };
   if (account.currentPassStart && day < account.currentPassStart) return { account };
@@ -72,5 +73,3 @@ export function nextRecordedCycle(account:Account, records:Attendance[], next:At
  const sequence=attendanceSequence([account],[...records.filter(r=>r.day>=account.currentPassStart!&&r.day<=next.day&&r.day!==next.day),next],[],{positions:{},cycleStarts:[{studentId:account.id,day:account.currentPassStart}]});
  return (sequence.cycleFirstDays[account.id]||[]).filter(day=>day>account.currentPassStart!&&day<=next.day).sort().at(-1)||'';
 }
-
-

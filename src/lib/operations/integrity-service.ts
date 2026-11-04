@@ -21,6 +21,7 @@ export async function scanBillingIntegrity(actor:string,onlyStudent?:string){
   const a={...doc.data(),id:doc.id} as Account,owner=students.docs.find(d=>d.id===(a.sourceStudentId||a.id));
   if(!a.active)continue;
   checked++;
+  if(a.ledgerVersion===2)continue; // Canonical allocations are checked in the atomic domain transaction.
   const eligible=!!owner&&enrollmentState(courseLifecycle(owner.data(),a.id),today)==='active';
   const legacy=integrityLegacy(a,imports,cc),check=inspectBilling(a,ii,rr,references,legacy,today,stamp);
   if(!eligible){

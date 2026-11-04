@@ -3269,3 +3269,68 @@ test('canonical correction: two confirmed receipt links swap atomically without 
  await s.load('ledger-correction').correctLedgerLink({studentId:'v2',requestId:'swap',fingerprint:svc.ledgerFingerprint(e),kind:'receipt-links',links:[{paymentId:'p1',invoiceId:'b',lessonDate:'2026-09-30'},{paymentId:'p2',invoiceId:'a',lessonDate:'2026-10-28'}],reason:'원장 확인: 각 수강권 시작일에 맞게 연결'},'owner');
  assert.equal(s.records.get('opsPayments/p1').invoiceId,'b');assert.equal(s.records.get('opsPayments/p2').invoiceId,'a');assert.equal(s.records.get('opsPayments/p1').paymentDate,'2026-09-30');assert.equal(s.records.get('opsInvoices/a').lessonDate,'2026-10-28');assert.equal(s.records.get('opsAccounts/v2').remaining,3);
 });
+
+async function canonicalServiceFixture(){
+ const s=setup();await s.seed('v2',1);const f=canonicalFixture();
+ Object.assign(s.records.get('opsAccounts/v2'),{...f.account,remaining:1,ledgerVersion:2,currentPassId:'a',currentPassStart:'2026-10-01',updatedAt:'v1'});
+ f.invoices=f.invoices.slice(0,1);f.seed.passes=f.seed.passes.slice(0,1);
+ for(const i of f.invoices)s.records.set('opsInvoices/'+i.id,{...i,updatedAt:'v1',creditUnits:0,allocatedUnits:4,createdAt:'2026-10-01'});
+ for(const day of ['2026-10-01','2026-10-02','2026-10-03']){const r=f.row(day);s.records.set('opsAttendance/'+r.id,{...r,updatedAt:'v1',passId:'a'});}
+ s.records.set('opsPayments/receipt',{id:'receipt',studentId:'v2',invoiceId:'a',amount:180000,paymentDate:'2026-10-01',method:'카드'});
+ s.records.set('opsCourseLedgers/v2',{version:2,seed:f.seed,revision:'v1'});
+ return {...s,f};
+}
+test('canonical integration: complete and renew derive balances atomically; repeat never adds units',async()=>{
+ const s=await canonicalServiceFixture(),money=structuredClone(s.records.get('opsPayments/receipt'));
+ await s.service.recordAttendance({studentId:'v2',day:'2026-10-04',status:'absent',units:0},'owner');
+ assert.equal(s.records.get('opsAccounts/v2').remaining,0);
+ await s.service.recordAttendance({studentId:'v2',day:'2026-10-05',status:'present',units:1},'owner');
+ assert.equal(s.records.get('opsAccounts/v2').remaining,3);
+ const p=s.records.get('opsAccounts/v2').currentPassId;assert.notEqual(p,'a');
+ const next=[...s.records.values()].find(i=>i.passId===p&&i.status==='open');assert.equal(next.paid,0);assert.equal(next.lessonDate,'2026-10-05');
+ const row=s.records.get('opsAttendance/v2_2026-10-05');await s.service.recordAttendance({studentId:'v2',day:row.day,status:'present',units:1,expectedUpdatedAt:row.updatedAt},'owner');
+ assert.equal(s.records.get('opsAccounts/v2').remaining,3);assert.deepEqual(s.records.get('opsPayments/receipt'),money);
+});
+test('canonical integration: old makeup, pause and past attendance replay use one ledger and preserve receipts',async()=>{
+ const s=await canonicalServiceFixture(),money=structuredClone(s.records.get('opsPayments/receipt'));
+ const r=s.records.get('opsAttendance/v2_2026-10-02');await s.service.recordAttendance({studentId:'v2',day:r.day,status:'travel',units:0,expectedUpdatedAt:r.updatedAt},'owner');assert.equal(s.records.get('opsAccounts/v2').remaining,1);
+ await s.service.recordAttendance({studentId:'v2',day:'2026-10-04',status:'makeup',units:1,relatedDay:r.day},'owner');assert.equal(s.records.get('opsAccounts/v2').remaining,1);
+ await s.service.recordAttendance({studentId:'v2',day:'2026-10-05',status:'present',units:1},'owner');assert.equal(s.records.get('opsAccounts/v2').remaining,0);
+ const old=s.records.get('opsAttendance/v2_2026-10-03');await s.service.recordAttendance({studentId:'v2',day:old.day,status:'paused',units:0,expectedUpdatedAt:old.updatedAt},'owner');assert.equal(s.records.get('opsAccounts/v2').remaining,1);assert.equal(s.records.get('opsCourseLedgers/v2').projection.labels['v2_2026-10-05'],'3');
+ assert.deepEqual(s.records.get('opsPayments/receipt'),money);
+});
+test('canonical integration: migration is fresh, atomic, idempotent and leaves source facts unchanged',async()=>{
+ const s=await canonicalServiceFixture();s.records.delete('opsCourseLedgers/v2');delete s.records.get('opsAccounts/v2').ledgerVersion;
+ const svc=s.load('course-ledger-service'),e=await svc.readCourseLedgerEvidence('v2'),fp=svc.ledgerFingerprint(e),before=structuredClone(s.records),migration=s.load('ledger-migration-service');
+ await assert.rejects(migration.migrateLessonLedger({studentId:'v2',fingerprint:'stale'},'owner'),/변경/);assert.deepEqual(s.records,before);
+ await migration.migrateLessonLedger({studentId:'v2',fingerprint:fp},'owner');assert.equal(s.records.get('opsAccounts/v2').ledgerVersion,2);assert.equal(s.records.get('opsAccounts/v2').remaining,1);
+ assert.equal((await migration.migrateLessonLedger({studentId:'v2',fingerprint:fp},'owner')).duplicate,true);
+ assert.deepEqual(s.records.get('opsPayments/receipt'),before.get('opsPayments/receipt'));
+ for(const [path,r] of before)if(path.startsWith('opsAttendance/'))for(const field of ['day','status','units','at','relatedDay'])assert.deepEqual(s.records.get(path)[field],r[field]);
+ assert.equal([...s.records.keys()].some(k=>k.startsWith('opsNotices/')),false);
+});
+test('canonical UI: monthly numbers and forecasts use the same slots despite stale spreadsheet anchors',async()=>{
+ const s=await canonicalServiceFixture(),e=await s.load('course-ledger-service').readCourseLedgerEvidence('v2');e.account.schedule={rules:[{start:'2026-10-01',weekdays:[1,2,3,4,5]}],moves:[]};
+ const context={positions:{},cycleStarts:[],references:[{studentId:'v2',day:'2026-10-03',value:'1',color:'#000000'}],canonical:{v2:{seed:s.f.seed,records:e.attendance,invoices:e.invoices,today:'2026-10-04'}}};
+ const r=s.load('attendance-forecast').attendanceForecastSequence([e.account],e.attendance,[],context,['2026-10-06','2026-10-07'],'2026-10-04');
+ assert.equal(r.sequence.labels.get('v2_2026-10-03'),'3');assert.equal(r.forecast.get('v2_2026-10-06'),'4');assert.equal(r.forecast.get('v2_2026-10-07'),'1');assert.equal(e.account.remaining,1);
+});
+test('canonical integration: paid future pass survives replay and cancellation without changing payment facts',async()=>{
+ const s=await canonicalServiceFixture();await s.service.recordAttendance({studentId:'v2',day:'2026-10-04',status:'present',units:1},'owner');await s.service.recordAttendance({studentId:'v2',day:'2026-10-05',status:'present',units:1},'owner');
+ const invoice=[...s.records.entries()].find(([k,i])=>k.startsWith('opsInvoices/')&&i.id!=='a')[1];Object.assign(invoice,{paid:180000,status:'paid'});const receipt={id:'next-receipt',studentId:'v2',invoiceId:invoice.id,amount:180000,paymentDate:'2026-10-05',method:'현금'};s.records.set('opsPayments/next-receipt',receipt);
+ const old=s.records.get('opsAttendance/v2_2026-10-02');await s.service.recordAttendance({studentId:'v2',day:old.day,status:'paused',units:0,expectedUpdatedAt:old.updatedAt},'owner');
+ assert.equal(s.records.get('opsAccounts/v2').currentPassId,'a');assert.equal(s.records.get('opsAccounts/v2').remaining,0);assert.equal(s.records.get('opsInvoices/'+invoice.id).allocationState,'pending');assert.deepEqual(s.records.get('opsPayments/next-receipt'),receipt);
+ await s.service.recordAttendance({studentId:'v2',day:'2026-10-06',status:'present',units:1},'owner');assert.equal(s.records.get('opsAccounts/v2').remaining,3);assert.equal(s.records.get('opsInvoices/'+invoice.id).lessonDate,'2026-10-06');assert.equal(s.records.get('opsInvoices/'+invoice.id).paid,180000);
+});
+test('canonical integration: dated plan changes, future leave and advance makeup never duplicate current credits',async()=>{
+ const s=await canonicalServiceFixture(),a=s.records.get('opsAccounts/v2');a.updatedAt='2026-11-04T01:00:00Z';
+ await s.service.saveNextPass({studentId:'v2',expectedUpdatedAt:a.updatedAt,units:8,amount:160000,mode:'date',start:'2026-10-04',note:'주 2회 변경'},'owner');
+ await s.service.recordAttendance({studentId:'v2',day:'2026-10-04',status:'present',units:1},'owner');assert.equal(s.records.get('opsAccounts/v2').remaining,7);assert.equal(s.records.get('opsAccounts/v2').planUnits,8);
+ const future='2999-01-08';await s.service.recordAttendance({studentId:'v2',day:future,status:'travel',units:0},'owner');assert.equal(s.records.get('opsAccounts/v2').remaining,7);
+ await s.service.recordAttendance({studentId:'v2',day:'2026-10-06',status:'makeup',units:1,relatedDay:future},'owner');assert.equal(s.records.get('opsAccounts/v2').remaining,6);
+ assert.equal(s.records.get('opsAttendance/v2_2026-10-06').passId,s.records.get('opsAttendance/v2_'+future).passId);
+ const before=structuredClone(s.records);await assert.rejects(s.service.recordAttendance({studentId:'v2',day:'2026-10-07',status:'makeup',units:1,relatedDay:future},'owner'),/보강|중복/);assert.deepEqual(s.records,before);
+});
+test('canonical integrity scanner cannot restore a legacy mutable balance after migration',async()=>{
+ const s=await canonicalServiceFixture(),before=structuredClone(s.records);await s.load('integrity-service').scanBillingIntegrity('owner');assert.deepEqual(s.records,before);
+});

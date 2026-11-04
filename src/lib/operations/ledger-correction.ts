@@ -1,4 +1,5 @@
-import { database, hash } from './auth';
+import {ledgerDatabase as database} from './ledger-store';
+import { hash } from './auth';
 import { readCourseLedgerEvidence, ledgerFingerprint } from './course-ledger-service';
 import { validDay, type Attendance, type Invoice } from './model';
 

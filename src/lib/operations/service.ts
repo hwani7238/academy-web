@@ -24,7 +24,8 @@ import { correctedArrival } from './attendance-time';
 import { randomUUID, randomBytes } from 'node:crypto';
 import { REGISTRATION_SUBJECTS, registrationInput, firstEnrollmentInvoice } from './registration';
 import type { Transaction, Firestore } from 'firebase-admin/firestore';
-import { database, hash, HttpError } from './auth';
+import { hash, HttpError } from './auth';
+import { ledgerDatabase as database } from './ledger-store';
 import { Account, Invoice, Attendance, type Payment, integer, adjustBalance, settle, suffixes, seoulDay, METHODS, validDay, attendanceInput } from './model';
 
 const now = () => new Date().toISOString();
@@ -286,7 +287,7 @@ async function registerArrival(studentId: string, digits: string, actor: string,
     account=pass.account;
     if(pass.invoice){if(pass.created)tx.create(db.doc(`opsInvoices/${pass.invoice.id}`),pass.invoice);else tx.update(db.doc(`opsInvoices/${pass.invoice.id}`),{...pass.invoice});audit(tx,db,actor,'allocate-pass',id,{passId:pass.passId,day,units:pass.invoice.units,remaining:account.remaining});}
     const remaining = adjustBalance(account.remaining, 0, units);
-    const openInvoiceId = remaining <= 0 && units > 0 && !account.openInvoiceId && !passRows.some(i=>i.allocationState==='pending'&&i.status!=='cancelled') && !unresolvedReceipts(passRows).length ? newInvoice(tx, db, account, invoiceId, '수업 횟수 소진') : account.openInvoiceId;
+    const openInvoiceId = account.ledgerVersion!==2 && remaining <= 0 && units > 0 && !account.openInvoiceId && !passRows.some(i=>i.allocationState==='pending'&&i.status!=='cancelled') && !unresolvedReceipts(passRows).length ? newInvoice(tx, db, account, invoiceId, '수업 횟수 소진') : account.openInvoiceId;
     tx.set(attendanceRef, { ...(pass.passId?{passId:pass.passId}:{}),id: attendanceId, studentId: id, name: account.name, day, at: now(), units, status: reservation ? 'makeup' : 'present', source: teacher ? 'teacher' : 'kiosk', ...(teacher ? {arrivalAt:teacher.arrivalAt, notificationSuppressed:true} : {}), note: reservation?.note || '', ...(reservation ? {relatedDay:reservation.relatedDay} : {}), updatedAt: now() });
     tx.update(ref, { ...account, remaining, openInvoiceId, updatedAt: now() });
     if (!teacher && !previousNotice?.exists) enqueue(tx, db, `attendance_${attendanceId}`, account, 'attendance', { student_name: String(owner.name || account.name), attendance_time: new Date().toLocaleTimeString('ko-KR', { timeZone: 'Asia/Seoul', hour: '2-digit', minute: '2-digit', hour12: false }) });
@@ -338,7 +339,7 @@ export async function adjust(input: Record<string, unknown>, actor: string) {
       return;
     }
     const remaining = adjustBalance(account.remaining, attendance.units, units);
-    const openInvoiceId = remaining <= 0 && !account.openInvoiceId && !passes.some(i=>i.allocationState==='pending'&&i.status!=='cancelled') ? newInvoice(tx, db, account, invoiceId, '횟수 수정 후 소진') : account.openInvoiceId;
+    const openInvoiceId = account.ledgerVersion!==2 && remaining <= 0 && !account.openInvoiceId && !passes.some(i=>i.allocationState==='pending'&&i.status!=='cancelled') ? newInvoice(tx, db, account, invoiceId, '횟수 수정 후 소진') : account.openInvoiceId;
     if (remaining > 0 && attendance.units !== units && currentInvoice?.data()?.status === 'open' && !currentInvoice.data()?.reservedPass) tx.update(currentInvoice.ref, invoiceReviewPatch({kind:'attendance_changed',day:attendance.day,beforeRemaining:account.remaining,afterRemaining:remaining},now()));
     tx.update(ref, { remaining, openInvoiceId, updatedAt: now() });
     tx.update(attendanceRef, { units, note, updatedAt: now() });
@@ -600,8 +601,8 @@ export async function recordAttendance(input: Record<string, unknown>, actor: st
     account=pass.account;
     if(pass.invoice){if(pass.created)tx.create(db.doc(`opsInvoices/${pass.invoice.id}`),pass.invoice);else tx.update(db.doc(`opsInvoices/${pass.invoice.id}`),{...pass.invoice});audit(tx,db,actor,'allocate-pass',studentId,{passId:pass.passId,day:values.day,units:pass.invoice.units,remaining:account.remaining});}
     const remaining = adjustBalance(account.remaining, old?.units || 0, values.units);
-    const openInvoiceId = remaining <= 0 && values.units > (old?.units || 0) && !account.openInvoiceId && !passRows.some(i=>i.allocationState==='pending'&&i.status!=='cancelled') && !unresolvedReceipts(passRows).length ? newInvoice(tx, db, account, invoiceId, '수동 출결 기록 후 소진', stamp) : account.openInvoiceId;
-    const review = remaining > 0 && values.units < (old?.units || 0);
+    const openInvoiceId = account.ledgerVersion!==2 && remaining <= 0 && values.units > (old?.units || 0) && !account.openInvoiceId && !passRows.some(i=>i.allocationState==='pending'&&i.status!=='cancelled') && !unresolvedReceipts(passRows).length ? newInvoice(tx, db, account, invoiceId, '수동 출결 기록 후 소진', stamp) : account.openInvoiceId;
+    const review = account.ledgerVersion!==2 && remaining > 0 && values.units < (old?.units || 0);
     const reviewPatch = review && currentInvoice?.data()?.status === 'open' && !currentInvoice.data()?.reservedPass ? invoiceReviewPatch({kind:values.status==='cancelled'?'attendance_cancelled':'attendance_changed',day:values.day,beforeRemaining:accountSnap.data()!.remaining,afterRemaining:remaining},stamp) : undefined;
     if (reviewPatch) tx.update(currentInvoice!.ref, reviewPatch);
     const attendance:Attendance={ ...old, ...values,...(pass.passId?{passId:pass.passId}:{}), id, studentId, name: account.name, source: old?.source || 'manual', at: old?.at || stamp, updatedAt: stamp };

@@ -7,6 +7,7 @@ export function nextPassInput(input:Record<string,unknown>,invoiceId:string,toda
  return {units,amount,mode:input.mode,start,note:typeof input.note==='string'?input.note.trim().slice(0,500):'',invoiceId,reservedOn:today};
 }
 export function nextPassDue(account:Account,day:string,status:string,previousStatus?:string){
+ if(account.ledgerVersion===2)return false; // Activated by the canonical slot projection.
  const next=account.nextPass;
  return !!next && status==='present' && previousStatus!=='present' && previousStatus!=='makeup' && (next.mode==='date'?day>=next.start:day>=next.reservedOn&&account.remaining<=0);
 }

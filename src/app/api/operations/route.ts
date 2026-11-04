@@ -1,3 +1,5 @@
+import {migrateLessonLedger} from '@/lib/operations/ledger-migration-service';
+import {projectLessonLedger} from '@/lib/operations/lesson-ledger';
 import { correctLedgerLink } from '@/lib/operations/ledger-correction';
 import { reconcileCourseLedger } from '@/lib/operations/course-ledger-service';
 import {scanBillingIntegrity} from '@/lib/operations/integrity-service';
@@ -35,7 +37,7 @@ export async function GET(request: Request) {
     }
     const month = day.slice(0, 7); const end = new Date(`${month}-01T00:00:00Z`); end.setUTCMonth(end.getUTCMonth() + 1);
     const forecastEnd=billingHorizon()>end.toISOString().slice(0,10)?billingHorizon():end.toISOString().slice(0,10);
-    const [students, accounts, attendance, invoices, payments, notices, devices, imports, priorAttendance, cycleInvoices, lessonReferences, legacyCorrections] = await Promise.all([
+    const [students, accounts, attendance, invoices, payments, notices, devices, imports, priorAttendance, cycleInvoices, lessonReferences, legacyCorrections, canonicalLedgers] = await Promise.all([
       timing.measure('students', () => db.collection('students').select('name', 'phone', 'instruments', 'instrument', 'lifecycle', 'courseLifecycles', 'operationsCourseGroups', 'courseUpdatedAt', 'phoneUpdatedAt').get()),
       timing.measure('accounts', () => db.collection('opsAccounts').get()),
       timing.measure('attendance', () => db.collection('opsAttendance').where('day', '>=', `${month}-01`).where('day', '<', forecastEnd).get()),
@@ -48,6 +50,7 @@ export async function GET(request: Request) {
       timing.measure('cycles', () => db.collection('opsInvoices').where('creditUnits', '==', 0).select('studentId', 'cycleStart', 'status').get()),
       timing.measure('lessonReferences', () => db.collection('opsLessonReferences').get()),
       timing.measure('legacyCorrections', () => db.collection('opsLegacyCorrections').get()),
+      timing.measure('canonicalLedgers',()=>db.collection('opsCourseLedgers').where('version','==',2).get()),
     ]);
     const studentById = new Map(students.docs.map(d => [d.id, d]));
     const accountById = new Map(accounts.docs.map(d => [d.id, d.data()]));
@@ -86,8 +89,10 @@ export async function GET(request: Request) {
     const beforeMonth = `${month}-01`;
     const references = lessonReferences.docs.flatMap(d => (d.data().references || []) as LessonReference[]);
     const referenceRevision = lessonReferences.docs.find(d => d.id === month)?.data().revision || '';
-    const priorSequence = attendanceSequence(accounts.docs.map(d=>({...d.data(),id:d.id}) as Account), priorAttendance.docs.map(d=>d.data() as Attendance), allLegacy.filter(r=>r.day<beforeMonth), {positions:{},references:references.filter(r=>r.day<beforeMonth),cycleStarts:cycleStarts.filter(r=>r.day<beforeMonth)});
-    const sequenceContext = { references:references.filter(r=>r.day>=beforeMonth && r.day<forecastEnd), referenceRevision, positions: priorSequence.positions, missedLessons: priorSequence.missedLessons, cycleFirstDays: priorSequence.cycleFirstDays, firstLessonTimes: priorSequence.firstLessonTimes, cycleStarts:cycleStarts.filter(r=>r.day>=beforeMonth && r.day<end.toISOString().slice(0,10)) };
+    const canonical=Object.fromEntries(canonicalLedgers.docs.map(d=>[d.id,{seed:d.data().seed,records:[...priorAttendance.docs,...attendance.docs].filter(r=>r.data().studentId===d.id).map(r=>({...r.data(),id:r.id}) as Attendance),invoices:invoiceRows.filter(i=>i.studentId===d.id),today:seoulDay()}]));
+    const canonicalAccounts=rows(accounts).map(value=>{const a=value as Account,c=canonical[a.id];if(!c)return a;const p=projectLessonLedger(a,c.seed,c.records,c.invoices,seoulDay());return {...a,remaining:p.currentRemaining,previousMakeups:p.previousMakeups,currentMakeups:p.currentMakeups};});
+    const priorSequence = attendanceSequence(accounts.docs.map(d=>({...d.data(),id:d.id}) as Account), priorAttendance.docs.map(d=>d.data() as Attendance), allLegacy.filter(r=>r.day<beforeMonth), {canonical,positions:{},references:references.filter(r=>r.day<beforeMonth),cycleStarts:cycleStarts.filter(r=>r.day<beforeMonth)});
+    const sequenceContext = { canonical, references:references.filter(r=>r.day>=beforeMonth && r.day<forecastEnd), referenceRevision, positions: priorSequence.positions, missedLessons: priorSequence.missedLessons, cycleFirstDays: priorSequence.cycleFirstDays, firstLessonTimes: priorSequence.firstLessonTimes, cycleStarts:cycleStarts.filter(r=>r.day>=beforeMonth && r.day<end.toISOString().slice(0,10)) };
     const unpaidCycleKeys = [...new Set(priorAttendance.docs.map(d=>d.data()).filter(r=>r.status==='present' && r.unpaidCycleStart).map(r=>`${r.studentId}_${r.unpaidCycleStart}`))];
     return Response.json({ cancelledInvoiceKeys:invoiceRows.filter(i=>i.status==='cancelled'&&(i.lessonDate||i.cycleStart)).map(i=>`${i.studentId}_${i.lessonDate||i.cycleStart}`), unpaidCycleKeys, ...(revision ? { revision } : {}), day, sequenceContext, legacyAttendance: allLegacy.filter(r=>r.day.startsWith(`${month}-`)), configured: noticeConfigured(), students: students.docs.flatMap<Snapshot['students'][number]>(d => {
       const raw = d.data(); const base = { phoneUpdatedAt:raw.phoneUpdatedAt || '', courseUpdatedAt:raw.courseUpdatedAt || '', name: raw.name || '학생', phone: raw.phone || '', ...(raw.lifecycle ? { lifecycle: raw.lifecycle } : {}) };
@@ -97,7 +102,7 @@ export async function GET(request: Request) {
       if (!subjects.length) return [{ ...base, id: d.id, lifecycle:courseLifecycle(raw,d.id), instruments: [] }];
       const known = (subjectsByStudent.get(d.id) || []);
       return [...new Set([...subjects, ...known])].map(subject => { const id = service.enrollmentId(d.id, subject); const overrideGroup=raw.operationsCourseGroups?.[subject]; const display = overrideGroup ? (overrideGroup.includes('피아노')?'피아노':overrideGroup) : accountById.get(id)?.displaySubject || subject; const attendanceGroup = courseGroup({ ...accountById.get(id), subject, name: base.name }, raw, sourcesByStudent.get(d.id)); return { ...base, id, lifecycle:courseLifecycle(raw,id), sourceStudentId: d.id, subject, ...(attendanceGroup ? { attendanceGroup } : {}), name: `${base.name} · ${display}`, instruments: [display] }; });
-    }), accounts: rows(accounts), attendance: attendanceRows.filter(r=>String(r.day).startsWith(`${month}-`)), forecastAttendance: attendanceRows.filter(r=>!String(r.day).startsWith(`${month}-`)), invoices: invoiceRows.filter(i=>i.status==='open'), settledInvoices: invoiceRows.filter(i=>i.status==='paid'), payments: rows(payments), notices: notices.docs.map(d => { const n = d.data(); return { id: d.id, studentId: n.studentId, name: n.name, kind: n.kind, status: n.status, createdAt: n.createdAt, requestId: n.requestId || '', error: n.error || '' }; }), devices: devices.docs.map(d => { const v = d.data(); return { id: d.id, name: v.name, active: v.active && v.expiresAt > Date.now(), createdAt: v.createdAt }; }) }, { headers: { 'Cache-Control': 'no-store', 'Server-Timing': timing.header() } });
+    }), accounts: canonicalAccounts, attendance: attendanceRows.filter(r=>String(r.day).startsWith(`${month}-`)), forecastAttendance: attendanceRows.filter(r=>!String(r.day).startsWith(`${month}-`)), invoices: invoiceRows.filter(i=>i.status==='open'), settledInvoices: invoiceRows.filter(i=>i.status==='paid'), payments: rows(payments), notices: notices.docs.map(d => { const n = d.data(); return { id: d.id, studentId: n.studentId, name: n.name, kind: n.kind, status: n.status, createdAt: n.createdAt, requestId: n.requestId || '', error: n.error || '' }; }), devices: devices.docs.map(d => { const v = d.data(); return { id: d.id, name: v.name, active: v.active && v.expiresAt > Date.now(), createdAt: v.createdAt }; }) }, { headers: { 'Cache-Control': 'no-store', 'Server-Timing': timing.header() } });
   } catch (error) { return failure(error); }
 }
 export async function POST(request: Request) {
@@ -105,6 +110,7 @@ export async function POST(request: Request) {
     sameOrigin(request); const actor = await manager(request); const input = await request.json();
     if(['recordAttendance','recordAttendanceRange','adjust','correctLegacyAttendance','correctLessonReferences','correctRemaining','savePassHistory','saveNextPass','linkInvoiceLesson','monthlyPayment','cancelPayment'].includes(input.action))after(async()=>{try{await scanBillingIntegrity(actor,typeof input.studentId==='string'?input.studentId:undefined);}catch{console.error('Billing integrity check failed; administrator panel will retry.');}});
     switch (input.action) {
+      case 'migrateLessonLedger': return Response.json(await migrateLessonLedger(input,actor));
       case 'correctLedgerLink': return Response.json(await correctLedgerLink(input,actor));
       case 'reconcileCourseLedger': return Response.json(await reconcileCourseLedger(input,actor));
       case 'correctLessonReferences': return Response.json(await correctLessonReferences(input,actor));

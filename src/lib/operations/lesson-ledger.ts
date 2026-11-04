@@ -9,7 +9,7 @@ export type ArchivedLesson = { day:string; passId:string; ordinal:number|null; c
 export type LessonLedgerSeed = { version:2; from:string; passes:LedgerPassSeed[]; archived:ArchivedLesson[]; adjustments:LedgerAdjustment[]; createdAt:string; sourceFingerprint:string };
 export type AllocatedLesson = { id:string; passId:string; ordinal:number; day:string; attendanceIds:string[]; makeupDays:string[]; charged:number; reserved:boolean; projected:boolean };
 export type ProjectedPass = LedgerPassSeed & { slots:AllocatedLesson[]; charged:number; remaining:number; usedOrdinal:number; actual:boolean };
-export type LessonLedgerProjection = { version:2; passes:ProjectedPass[]; labels:Record<string,string>; assignments:Record<string,{passId:string;ordinal:number;sourceDay:string}[]>; currentPassId:string; currentRemaining:number; previousMakeups:number; issues:string[] };
+export type LessonLedgerProjection = { version:2; passes:ProjectedPass[]; labels:Record<string,string>; assignments:Record<string,{passId:string;ordinal:number;sourceDay:string}[]>; currentPassId:string; currentRemaining:number; previousMakeups:number; currentMakeups:number; issues:string[] };
 export type LedgerAttendance = Attendance & { projected?:boolean };
 const regular = (r:LedgerAttendance) => !['makeup','makeup_reserved','paused','cancelled'].includes(r.status||'present');
 const dayOf=(i:Invoice)=>i.lessonDate||i.cycleStart||'';
@@ -24,7 +24,7 @@ export function projectLessonLedger(account:Account,seed:LessonLedgerSeed,attend
  });
  for(const i of bills)if(!definitions.some(p=>p.invoiceId===i.id)&&dayOf(i)>=seed.from&&!i.reservedPass)definitions.push({id:i.passId||i.id,invoiceId:i.id,start:dayOf(i),units:i.units,amount:i.amount,fixedStart:i.renewalReservation?.mode==='date'});
  definitions.sort((a,b)=>a.start.localeCompare(b.start)||a.id.localeCompare(b.id));
- if(!definitions.length)return {version:2,passes:[],labels,assignments,currentPassId:'',currentRemaining:0,previousMakeups:0,issues:['계산 시작 수강권을 확인해주세요.']};
+ if(!definitions.length)return {version:2,passes:[],labels,assignments,currentPassId:'',currentRemaining:0,previousMakeups:0,currentMakeups:0,issues:['계산 시작 수강권을 확인해주세요.']};
  const passes:ProjectedPass[]=definitions.map(p=>({...p,slots:[],charged:p.openingUsed||0,remaining:p.units-(p.openingUsed||0),usedOrdinal:p.openingOrdinal||0,actual:!!p.openingUsed}));
  const archived=new Map(seed.archived.map(s=>[s.day,{...s,charged:s.charged,makeupDays:[] as string[]}]));
  let cursor=0;
@@ -47,7 +47,7 @@ export function projectLessonLedger(account:Account,seed:LessonLedgerSeed,attend
   const count=Math.max(row.units,missed?1:0);if(!count)continue;
   // Historical invoice boundaries are retained until an explicit past edit
   // replays their suffix. Dated plan changes always retain their effective day.
-  while(passes[cursor+1]&&passes[cursor+1].start<=row.day&&(!reflowStart||passes[cursor+1].start<=reflowStart||passes[cursor+1].fixedStart))cursor++;
+  while(passes[cursor+1]&&!(bills.find(i=>i.id===passes[cursor+1].invoiceId)?.allocationState==='pending'&&!dayOf(bills.find(i=>i.id===passes[cursor+1].invoiceId)!))&&passes[cursor+1].start<=row.day&&(!reflowStart||passes[cursor+1].start<=reflowStart||passes[cursor+1].fixedStart))cursor++;
   const reservation=account.nextPass;
   if(reservation?.mode==='date'&&row.day>=reservation.start&&row.status==='present'&&!passes.some(p=>p.invoiceId===reservation.invoiceId)){
    const invoice=bills.find(i=>i.id===reservation.invoiceId);
@@ -92,6 +92,9 @@ export function projectLessonLedger(account:Account,seed:LessonLedgerSeed,attend
   if(p.charged>p.units)issues.push(`${p.start}: 수강권 횟수보다 많은 차감`);
  }
  const current=passes.filter(p=>p.start<=today&&p.actual).at(-1)||passes.find(p=>p.start<=today)||passes[0];
- const previousMakeups=passes.filter(p=>p!==current&&p.start<=today).reduce((n,p)=>n+p.slots.filter(s=>s.reserved&&!s.projected&&s.day<=today&&s.charged===0).length,0)+[...archived.values()].filter(s=>s.makeupEligible&&s.charged===0).length;
- return {version:2,passes,labels,assignments,currentPassId:current.id,currentRemaining:current.remaining,previousMakeups,issues:[...new Set(issues)]};
+ const completedSourceDays=new Set(rows.filter(r=>r.status==='makeup'&&!r.projected&&r.day<=today).map(r=>r.relatedDay));
+ const due=(s:AllocatedLesson)=>s.reserved&&!s.projected&&s.day<=today&&!completedSourceDays.has(s.day);
+ const currentMakeups=current.slots.filter(due).length;
+ const previousMakeups=passes.filter(p=>p!==current&&p.start<=today).reduce((n,p)=>n+p.slots.filter(due).length,0)+[...archived.values()].filter(s=>s.makeupEligible&&!completedSourceDays.has(s.day)).length;
+ return {version:2,passes,labels,assignments,currentPassId:current.id,currentRemaining:current.remaining,previousMakeups,currentMakeups,issues:[...new Set(issues)]};
 }

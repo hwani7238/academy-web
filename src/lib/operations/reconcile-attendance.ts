@@ -3,6 +3,7 @@ import {passDay,passInvoice,requireClearPassLinks} from './pass-link';
 
 /** Replay only the affected suffix, preserving the ledger's opening balance and receipt identities. */
 export function reconcileAttendance(account:Account,invoices:Invoice[],records:Attendance[],edited:Attendance,stamp:string,newId:string){
+ if(account.ledgerVersion===2)return null; // One canonical projection owns all v2 balances and boundaries.
  const before=records.find(r=>r.id===edited.id);
  const latest=records.map(r=>r.day).sort().at(-1)||'';
  const changed=(before?.units||0)!==edited.units || (before?.relatedDay||'')!==(edited.relatedDay||'') || (before?.status||'')!==(edited.status||'');
