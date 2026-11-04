@@ -1,3 +1,4 @@
+import { reconcileCourseLedger } from '@/lib/operations/course-ledger-service';
 import {scanBillingIntegrity} from '@/lib/operations/integrity-service';
 import { reconcileLessonReferences, correctLessonReferences } from '@/lib/operations/lesson-reference-service';
 import type { LessonReference } from '@/lib/operations/lesson-reference';
@@ -103,6 +104,7 @@ export async function POST(request: Request) {
     sameOrigin(request); const actor = await manager(request); const input = await request.json();
     if(['recordAttendance','recordAttendanceRange','adjust','correctLegacyAttendance','correctLessonReferences','correctRemaining','savePassHistory','saveNextPass','linkInvoiceLesson','monthlyPayment','cancelPayment'].includes(input.action))after(async()=>{try{await scanBillingIntegrity(actor,typeof input.studentId==='string'?input.studentId:undefined);}catch{console.error('Billing integrity check failed; administrator panel will retry.');}});
     switch (input.action) {
+      case 'reconcileCourseLedger': return Response.json(await reconcileCourseLedger(input,actor));
       case 'correctLessonReferences': return Response.json(await correctLessonReferences(input,actor));
       case 'reconcileLessonReferences': {
         const url = new URL(request.url); url.search = '';
@@ -153,4 +155,3 @@ export async function POST(request: Request) {
     return Response.json({ ok: true });
   } catch (error) { return failure(error); }
 }
-

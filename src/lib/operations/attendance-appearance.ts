@@ -1,3 +1,4 @@
+import { passCoversFirst, receiptComplete } from './pass-settlement';
 import { invoiceCycleStart } from './billing-display';
 import { seoulDay, type Account, type Attendance, type Invoice, type Snapshot } from './model';
 
@@ -47,7 +48,7 @@ export function confirmedFirstLessons(invoices: Invoice[], cycleFirstDays: Recor
     const key = `${invoice.studentId}_${day}`;
     byLesson.set(key, [...(byLesson.get(key) || []), invoice]);
   }
-  return new Set([...byLesson].filter(([, rows]) => rows.every(i => i.status === 'paid' && i.amount > 0 && i.paid >= i.amount && !i.needsReview)).map(([key]) => key));
+  return new Set([...byLesson].filter(([, rows]) => rows.every(i => receiptComplete(i))).map(([key]) => key));
 }
 
 // Projected first lessons need the same payment check before the child arrives.
@@ -117,6 +118,6 @@ export function monthlyPaymentDue({ key, row, original, account, invoice, sequen
 // A moved first lesson remains attached to its pass even when its display date changes.
 export function confirmedPassLessons(invoices: Invoice[], records: Attendance[], cycles: Record<string,string[]>, times: Record<string,string>, labels: Map<string,string>) {
  const result=confirmedFirstLessons(invoices,cycles,times);
- for(const row of records){if(!row.passId)continue;const linked=invoices.filter(i=>i.passId===row.passId&&i.studentId===row.studentId&&i.status!=='cancelled');if(linked.length&&linked.every(i=>i.status==='paid'&&i.paid>=i.amount&&!i.needsReview&&!i.linkReview)){const key=row.studentId+'_'+row.day;if(isFirstLesson(labels.get(key),row.status))result.add(key);if(row.unpaidCycleStart)result.add(row.studentId+'_'+row.unpaidCycleStart);}}
+ for(const row of records){if(!row.passId)continue;const linked=invoices.filter(i=>i.passId===row.passId&&i.studentId===row.studentId&&i.status!=='cancelled');if(linked.length&&linked.every(i=>receiptComplete(i)&&passCoversFirst(i,row,cycles[row.studentId]||[]))){const key=row.studentId+'_'+row.day;if(isFirstLesson(labels.get(key),row.status))result.add(key);if(row.unpaidCycleStart)result.add(row.studentId+'_'+row.unpaidCycleStart);}}
  return result;
 }

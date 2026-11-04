@@ -1,3 +1,4 @@
+import { requireDistinctReceipt } from './pass-settlement';
 import {reconcileAttendance} from './reconcile-attendance';
 import { invoiceReviewPatch, invoiceReviewRevision } from './invoice-review';
 export { repairHistoricalPass } from './historical-pass-repair';
@@ -391,10 +392,12 @@ export async function payment(input: Record<string, unknown>, actor: string) {
     const all=(await tx.get(db.collection('opsInvoices').where('studentId','==',invoice.studentId))).docs.map(d=>({...d.data(),id:d.id}) as Invoice);
     const stamp=new Date(Math.max(Date.now(),(Date.parse(invoice.updatedAt||'')||0)+1)).toISOString(),linked=paymentPass(invoice,passDay(invoice)||text(input.lessonDate),all,stamp);
     const { paid, complete } = settle(invoice, input.amount as number);
-    tx.create(paymentRef, { id: requestId, invoiceId: id, passId:linked.passId, studentId: invoice.studentId, amount: input.amount, method, paymentDate, at: now(), note: text(input.note), actor });
+    const priorReceipts=(await tx.get(db.collection('opsPayments').where('studentId','==',invoice.studentId))).docs.map(d=>({...d.data(),id:d.id}) as Payment);
+    const duplicateReceiptIds=requireDistinctReceipt(priorReceipts,invoice.studentId,input,paymentDate,method);
+    tx.create(paymentRef, { id: requestId, invoiceId: id, passId:linked.passId, studentId: invoice.studentId, amount: input.amount, method, paymentDate, at: now(), note: text(input.note), actor, ...(duplicateReceiptIds.length?{duplicateReceiptIds,duplicateReceiptReason:text(input.duplicateReceiptReason)}:{}) });
     tx.update(invoiceRef, { ...linked, paid, status: complete ? 'paid' : 'open' });
     if (complete) tx.update(accountRef, { remaining: account.remaining, openInvoiceId: account.openInvoiceId === id ? null : account.openInvoiceId, updatedAt: now() });
-    audit(tx, db, actor, 'payment', invoice.studentId, { invoiceId: id, passId:linked.passId,lessonDate:passDay(linked),amount: input.amount, method, paymentDate, complete,creditedUnits:0,remaining:account.remaining });
+    audit(tx, db, actor, 'payment', invoice.studentId, { invoiceId: id, passId:linked.passId,lessonDate:passDay(linked),amount: input.amount, method, paymentDate, complete,creditedUnits:0,remaining:account.remaining,duplicateReceiptIds,duplicateReceiptReason:text(input.duplicateReceiptReason) });
   });
 }
 export async function cancelPayment(input:Record<string,unknown>,actor:string){
@@ -979,14 +982,14 @@ export async function monthlyPayment(input:Record<string,unknown>,actor:string){
   invoice=paymentPass(invoice,day,all.docs.map(d=>({...d.data(),id:d.id}) as Invoice),stamp);
   if(invoice.reservedPass&&!invoice.lessonDate)throw Error('예약 수강권의 시작일을 먼저 확인해주세요.');
   const {paid,complete}=settle(invoice,input.amount as number);
+  const priorReceipts=(await tx.get(db.collection('opsPayments').where('studentId','==',studentId))).docs.map(d=>({...d.data(),id:d.id}) as Payment);
+  const duplicateReceiptIds=requireDistinctReceipt(priorReceipts,studentId,input,paymentDate,method);
   const saved={...invoice,lessonDate:day,paid,status:complete?'paid':'open',updatedAt:stamp};
   if(old)tx.update(ref,saved);else tx.create(ref,saved);
   if(linked)audit(tx,db,actor,'invoice-lesson-date',studentId,{invoiceId,before:passDay(old!),after:day,withPayment:true,passId:invoice.passId});
   if(remaining!==account.remaining)audit(tx,db,actor,'allocate-pass',studentId,{passId:invoice.passId,day,units:remaining-account.remaining,remaining});
-  tx.create(paymentRef,{id:requestId,invoiceId,passId:invoice.passId,studentId,amount:input.amount,method,paymentDate,lessonDate:day,at:stamp,note:text(input.note),actor});
+  tx.create(paymentRef,{id:requestId,invoiceId,passId:invoice.passId,studentId,amount:input.amount,method,paymentDate,lessonDate:day,at:stamp,note:text(input.note),actor,...(duplicateReceiptIds.length?{duplicateReceiptIds,duplicateReceiptReason:text(input.duplicateReceiptReason)}:{})});
   tx.update(accountRef,{remaining,...((!old||!old.passId||old.allocationState!=='allocated')&&invoice.allocationState==='allocated'&&(!account.currentPassStart||account.currentPassStart<=day)?{currentPassId:invoice.passId,currentPassStart:day}:{}),openInvoiceId:complete?(account.openInvoiceId===invoiceId?null:account.openInvoiceId):(account.openInvoiceId||invoiceId),updatedAt:stamp});
-  audit(tx,db,actor,'payment',studentId,{invoiceId,amount:input.amount,method,paymentDate,complete,creditedUnits:0,source:'monthly',lessonDate:day});
+  audit(tx,db,actor,'payment',studentId,{invoiceId,amount:input.amount,method,paymentDate,complete,creditedUnits:0,source:'monthly',lessonDate:day,duplicateReceiptIds,duplicateReceiptReason:text(input.duplicateReceiptReason)});
  });
 }
-
-
