@@ -3390,3 +3390,8 @@ test('canonical sheet supplement: missing middle lessons are previewed and appli
  await s.load('ledger-migration-service').migrateLessonLedger({studentId:'v2',fingerprint:fp},'owner');assert.equal(s.records.get('opsAccounts/v2').remaining,1);assert.deepEqual(s.records.get('opsPayments/receipt'),money);assert.equal(s.records.has('opsAttendance/v2_2026-10-02'),false);
  const before=structuredClone(s.records);await s.load('ledger-migration-service').migrateLessonLedger({studentId:'v2',fingerprint:fp},'owner');assert.deepEqual(s.records,before);
 });
+
+test('canonical migration guards against consuming a dated next pass before its first lesson',()=>{
+ const s=setup(),f=canonicalFixture();f.invoices[1].lessonDate='2026-10-06';f.invoices[1].cycleStart='2026-10-06';f.seed.passes[1].start='2026-10-06';
+ const p=s.load('lesson-ledger').projectLessonLedger(f.account,f.seed,['01','02','03','04','05'].map(d=>f.row('2026-10-'+d)),f.invoices,'2026-11-04');assert.ok(p.issues.some(v=>v.includes('첫 수업일 확인')));
+});

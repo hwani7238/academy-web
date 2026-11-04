@@ -91,6 +91,7 @@ export function projectLessonLedger(account:Account,seed:LessonLedgerSeed,attend
   const adjustment=seed.adjustments.filter(a=>a.passId===p.id).reduce((n,a)=>n+a.units,0);
   const usedRights=(p.openingOrdinal||0)+p.slots.filter(s=>!s.projected&&(s.day<=today||s.charged>0)).length;
   p.remaining=p.units-usedRights+adjustment;
+  if(p.slots.some(s=>!s.projected&&s.day<p.start))issues.push(`${p.start}: 수강권 시작일보다 이른 수업이 배정되어 첫 수업일 확인 필요`);
   if(p.charged>p.units)issues.push(`${p.start}: 수강권 횟수보다 많은 차감`);
  }
  const current=passes.filter(p=>p.start<=today&&p.actual).at(-1)||passes.find(p=>p.start<=today)||passes[0];
