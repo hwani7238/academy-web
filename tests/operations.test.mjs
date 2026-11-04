@@ -2969,6 +2969,16 @@ test('historical-pass repair fails without any writes for ambiguous money, stale
   const before=structuredClone(s.records);await assert.rejects(s.service.repairHistoricalPass(input,'owner'));assert.deepEqual(s.records,before,scenario);
  }
 });
+test('canonical accounts reject legacy pass repairs without changing source facts or the canonical ledger',async()=>{
+ const {s,input}=await corruptedHistoricalPass();
+ s.records.get('opsAccounts/p').ledgerVersion=2;
+ s.records.set('opsCourseLedgers/p',{version:2,seed:{preserve:true}});
+ const before=structuredClone(s.records);
+ await assert.rejects(s.service.repairHistoricalPass(input,'owner'),/회차 계산 전환/);
+ const svc=s.load('course-ledger-service'),e=await svc.readCourseLedgerEvidence('p');
+ await assert.rejects(svc.reconcileCourseLedger({studentId:'p',fingerprint:svc.ledgerFingerprint(e)},'owner'),/회차 계산 전환/);
+ assert.deepEqual(s.records,before);
+});
 
 test('imported opening balances and later pass starts prevent old pending receipts being recycled without modern attendance',()=>{
  const s=setup(),{lessonPass,passInvoice}=s.load('pass-link');

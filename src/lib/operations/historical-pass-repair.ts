@@ -28,6 +28,7 @@ export async function repairHistoricalPass(input:Record<string,unknown>,actor:st
    tx.get(db.collection('opsAudit').where('studentId','==',old.studentId)),
   ]);
   const account=accountSnap.data() as Account|undefined;
+  if(account?.ledgerVersion===2)throw Error('회차 계산 전환이 완료된 수강권입니다. 수강권·회차 점검의 연결 정정에서 확인해주세요.');
   if(!account||account.updatedAt!==input.expectedAccountUpdatedAt||(old.updatedAt||'')!==input.expectedInvoiceUpdatedAt)throw Error('수강권 또는 출결이 변경됐습니다. 창을 닫고 다시 확인해주세요.');
   const payments=receipts.docs.map(d=>d.data() as Payment).filter(p=>!p.cancelledAt);
   if(!payments.length||payments.some(p=>{const conflict=historicalPaymentConflict(old,p);return !conflict||conflict.originalStart!==originalStart||conflict.currentStart!==currentStart;})||payments.reduce((sum,p)=>sum+p.amount,0)!==old.paid||old.paid!==old.amount)throw Error('수납 기록의 원래 시작일이 일치하지 않습니다. 자동 복구할 수 없습니다.');

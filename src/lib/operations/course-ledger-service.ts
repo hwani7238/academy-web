@@ -42,6 +42,7 @@ export async function reconcileCourseLedger(input:Record<string,unknown>,actor:s
  return db.runTransaction(async tx=>{
   const previous=await tx.get(auditRef);if(previous.exists)return {ok:true,duplicate:true};
   const e=await readCourseLedgerEvidence(studentId,tx);
+  if(e.account.ledgerVersion===2)throw Error('회차 계산 전환이 완료된 수강권입니다. 연결 정정에서 확인해주세요.');
   if(ledgerFingerprint(e)!==fingerprint)throw Error('점검 후 출결 또는 수납이 변경됐습니다. 다시 점검해주세요.');
   const ledger=buildCourseLedger(e,seoulDay()),plan=ledger.repair;
   if(!plan)throw Error('근거가 불명확해 자동 정정할 수 없습니다. 기존 기록은 유지합니다.');
