@@ -121,3 +121,11 @@ export function confirmedPassLessons(invoices: Invoice[], records: Attendance[],
  for(const row of records){if(!row.passId)continue;const linked=invoices.filter(i=>i.passId===row.passId&&i.studentId===row.studentId&&i.status!=='cancelled');if(linked.length&&linked.every(i=>receiptComplete(i)&&passCoversFirst(i,row,cycles[row.studentId]||[]))){const key=row.studentId+'_'+row.day;if(isFirstLesson(labels.get(key),row.status))result.add(key);if(row.unpaidCycleStart)result.add(row.studentId+'_'+row.unpaidCycleStart);}}
  return result;
 }
+
+// Keep the stored sheet coordinate/value as evidence, while rendering the same
+// recalculated ordinal as native attendance after a historical edit.
+export function canonicalLegacyDisplay(row:Legacy|undefined,account:Account|undefined,labels:Map<string,string>){
+ if(!row||account?.ledgerVersion!==2)return row;
+ const value=['paused','cancelled'].includes(row.status||'')?'':labels.get(`${row.studentId}_${row.day}`);
+ return value===undefined?row:{...row,value};
+}

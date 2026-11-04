@@ -10,10 +10,10 @@ export function ledgerFingerprint(e:LedgerEvidence) {
  const ordered=<T,>(rows:T[])=>[...rows].sort((a,b)=>JSON.stringify(a).localeCompare(JSON.stringify(b)));
  return hash(JSON.stringify({account:e.account,attendance:ordered(e.attendance),invoices:ordered(e.invoices),payments:ordered(e.payments),references:ordered(e.references),legacy:ordered(e.legacy),...(e.sheet?{sheet:e.sheet}:{})}));
 }
-export async function readCourseLedgerEvidence(studentId:string,tx?:Transaction):Promise<LedgerEvidence> {
+export async function readCourseLedgerEvidence(studentId:string,tx?:Transaction,newAccount?:Account):Promise<LedgerEvidence> {
  const db=database(),get=(ref:FirebaseFirestore.DocumentReference|FirebaseFirestore.Query):Promise<any>=>tx?tx.get(ref as FirebaseFirestore.DocumentReference):ref.get();
- const accountDoc=await get(db.doc(`opsAccounts/${studentId}`));if(!accountDoc.exists)throw Error('수강 정보를 찾을 수 없습니다.');
- const account={...accountDoc.data(),id:studentId} as Account;
+ const accountDoc=await get(db.doc(`opsAccounts/${studentId}`));if(!accountDoc.exists&&!newAccount)throw Error('수강 정보를 찾을 수 없습니다.');
+ const account={...(accountDoc.exists?accountDoc.data():newAccount),id:studentId} as Account;
  const [attendance,invoices,payments,references,corrections,source,sheet]=await Promise.all([
   get(db.collection('opsAttendance').where('studentId','==',studentId)),get(db.collection('opsInvoices').where('studentId','==',studentId)),get(db.collection('opsPayments').where('studentId','==',studentId)),get(db.collection('opsLessonReferences')),get(db.collection('opsLegacyCorrections').where('studentId','==',studentId)),account.importId?get(db.doc(`opsImports/${account.importId}`)):Promise.resolve(null),get(db.doc(`opsLedgerSources/${studentId}`)),
  ]);

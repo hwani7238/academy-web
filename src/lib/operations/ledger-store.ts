@@ -26,7 +26,7 @@ export function ledgerDatabase():Firestore{
     const persisted=(await real.get(db.doc(`opsCourseLedgers/${id}`))).data();
     const stored=writes.find(w=>w.ref.path===`opsCourseLedgers/${id}`&&w.data?.version===2)?.data||persisted;
     if(stored?.version!==2||!stored.seed)continue;
-    const e=await readCourseLedgerEvidence(id,real),seed=structuredClone(stored.seed) as LessonLedgerSeed;
+    const e=await readCourseLedgerEvidence(id,real,writes.find(w=>w.ref.path===`opsAccounts/${id}`&&w.kind==='create')?.data as Account|undefined),seed=structuredClone(stored.seed) as LessonLedgerSeed;
     const overlay=<T extends {id:string}>(collection:string,original:T[])=>{
      const map=new Map(original.map(row=>[row.id,{...row}]));
      for(const w of writes.filter(w=>w.ref.path.startsWith(collection+'/'))){const key=w.ref.id;if(w.kind==='delete')map.delete(key);else map.set(key,{...(w.kind==='update'||w.options?(map.get(key)||{}):{}),...w.data,id:key} as T);}
@@ -84,7 +84,7 @@ export function ledgerDatabase():Firestore{
     const current=projection.passes.find(p=>p.id===projection.currentPassId)!;
     const open=invoices.filter(i=>i.status==='open'&&i.paid<i.amount).sort((a,b)=>(a.lessonDate||'9999').localeCompare(b.lessonDate||'9999'))[0];
     const revision=hash(JSON.stringify([projection,seed.adjustments,attendance,invoices,payments]));
-    const updated:Account={...account,ledgerVersion:2,ledgerRevision:revision,currentPassId:current.id,currentPassStart:current.start,remaining:projection.currentRemaining,previousMakeups:projection.previousMakeups,currentMakeups:projection.currentMakeups,planUnits:current.units,planAmount:current.amount,openInvoiceId:open?.id||null,updatedAt:stamp,...(account.nextPass&&activePasses.some(p=>p.invoiceId===account.nextPass!.invoiceId)?{nextPass:null}:{})};
+    const updated:Account={...account,ledgerVersion:2,ledgerRevision:revision,currentPassId:current.id,currentPassStart:current.start,remaining:projection.currentRemaining,upcomingPasses:projection.passes.filter(p=>p.invoiceId&&p.start>today).map(p=>({start:p.start,remaining:p.remaining})),previousMakeups:projection.previousMakeups,currentMakeups:projection.currentMakeups,planUnits:current.units,planAmount:current.amount,openInvoiceId:open?.id||null,updatedAt:stamp,...(account.nextPass&&activePasses.some(p=>p.invoiceId===account.nextPass!.invoiceId)?{nextPass:null}:{})};
     seed.passes=projection.passes.filter(p=>p.actual||!!p.invoiceId).map(({id,invoiceId,start,units,amount,openingUsed,openingOrdinal,fixedStart})=>({id,invoiceId,start,units,amount,...(openingUsed?{openingUsed}:{}),...(openingOrdinal?{openingOrdinal}:{}),...(fixedStart?{fixedStart}:{})}));
     writes.push({kind:'update',ref:db.doc(`opsAccounts/${id}`),data:{...updated}});
     writes.push({kind:'set',ref:db.doc(`opsCourseLedgers/${id}`),data:JSON.parse(JSON.stringify({version:2,seed,projection,revision,asOf:today,updatedAt:stamp}))});

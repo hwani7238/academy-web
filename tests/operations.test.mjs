@@ -288,7 +288,7 @@ test('new registration creates exactly one first invoice and keeps lessons uncha
  assert.equal(results.filter(r=>r.duplicate).length,1);
  const students=[...s.records].filter(([k])=>k.startsWith('students/'));assert.equal(students.length,1);
  assert.equal(students[0][1].status,'등록');assert.equal(students[0][1].phoneLast4,'1234');
- const a=s.records.get(`opsAccounts/${results[0].studentId}`);assert.equal(a.attendanceGroup,'어린이 피아노(2관)');assert.equal(a.remaining,8);assert.deepEqual(a.checkinSuffixes,['1234','5678']);
+ const a=s.records.get(`opsAccounts/${results[0].studentId}`);assert.equal(a.ledgerVersion,2);assert.equal(s.records.get(`opsCourseLedgers/${a.id}`).version,2);assert.equal(a.attendanceGroup,'어린이 피아노(2관)');assert.equal(a.remaining,8);assert.deepEqual(a.checkinSuffixes,['1234','5678']);
  const invoice=s.records.get(`opsInvoices/${a.openInvoiceId}`);
  assert.equal([...s.records.keys()].filter(k=>k.startsWith('opsInvoices/')).length,1);
  assert.equal(invoice.amount,170000);assert.equal(invoice.units,8);assert.equal(invoice.creditUnits,0);assert.equal(invoice.cycleStart,input.firstLessonDate);assert.equal(invoice.status,'open');
@@ -3357,4 +3357,18 @@ test('canonical correction: sheet-confirmed pass units preserve receipt money an
  await s.load('ledger-correction').correctLedgerLink(input,'owner');assert.equal(s.records.get('opsInvoices/a').units,8);assert.equal(s.records.get('opsInvoices/a').amount,160000);assert.equal(s.records.get('opsAccounts/v2').remaining,5);
  for(const k of ['amount','method','paymentDate'])assert.equal(s.records.get('opsPayments/p')[k],receipt[k]);
  const before=structuredClone(s.records);await s.load('ledger-correction').correctLedgerLink(input,'owner');assert.deepEqual(s.records,before);
+});
+
+test('canonical UI: imported history renders recalculated numbers without modifying original sheet evidence',()=>{
+ const s=setup(),f=canonicalFixture(),source={studentId:'v2',day:'2026-10-03',value:'3',color:'#000000'},labels=new Map([['v2_2026-10-03','2']]);
+ assert.equal(s.load('attendance-appearance').canonicalLegacyDisplay(source,{...f.account,ledgerVersion:2},labels).value,'2');assert.equal(source.value,'3');
+ assert.equal(s.load('attendance-appearance').canonicalLegacyDisplay({...source,status:'paused'},{...f.account,ledgerVersion:2},labels).value,'');
+ assert.equal(s.load('attendance-appearance').canonicalLegacyDisplay(source,f.account,labels).value,'3');
+});
+test('canonical integration: future prepaid rights remain visible separately from an exhausted current pass',async()=>{
+ const s=await canonicalServiceFixture(),future='2999-01-01';
+ s.records.set('opsInvoices/future',{...s.f.invoices[0],id:'future',passId:'future',lessonDate:future,cycleStart:future});
+ s.records.get('opsCourseLedgers/v2').seed.passes.push({id:'future',invoiceId:'future',start:future,units:4,amount:180000,fixedStart:true});
+ await s.service.recordAttendance({studentId:'v2',day:'2026-10-04',status:'present',units:1},'owner');
+ const a=s.records.get('opsAccounts/v2');assert.equal(a.remaining,0);assert.deepEqual(a.upcomingPasses,[{start:future,remaining:4}]);assert.equal(s.records.get('opsInvoices/future').paid,180000);
 });

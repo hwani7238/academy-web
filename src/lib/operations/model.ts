@@ -1,7 +1,7 @@
 import type { InvoiceReviewReason } from './invoice-review';
 import type { Lifecycle } from './lifecycle';
 export type Account = {
-  ledgerVersion?:2; ledgerRevision?:string; previousMakeups?:number; currentMakeups?:number;
+  ledgerVersion?:2; ledgerRevision?:string; upcomingPasses?:{start:string;remaining:number}[]; previousMakeups?:number; currentMakeups?:number;
   currentPassId?: string; currentPassStart?: string; lastPassLessonDay?: string;
   nextPass?: import('./next-pass').NextPass | null;
   initialPlanUnits?: number;

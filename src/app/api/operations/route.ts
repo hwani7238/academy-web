@@ -40,7 +40,7 @@ export async function GET(request: Request) {
     const [students, accounts, attendance, invoices, payments, notices, devices, imports, priorAttendance, cycleInvoices, lessonReferences, legacyCorrections, canonicalLedgers] = await Promise.all([
       timing.measure('students', () => db.collection('students').select('name', 'phone', 'instruments', 'instrument', 'lifecycle', 'courseLifecycles', 'operationsCourseGroups', 'courseUpdatedAt', 'phoneUpdatedAt').get()),
       timing.measure('accounts', () => db.collection('opsAccounts').get()),
-      timing.measure('attendance', () => db.collection('opsAttendance').where('day', '>=', `${month}-01`).where('day', '<', forecastEnd).get()),
+      timing.measure('attendance', () => db.collection('opsAttendance').where('day', '>=', `${month}-01`).get()),
       timing.measure('invoices', () => db.collection('opsInvoices').where('status', 'in', ['open', 'paid', 'cancelled']).get()),
       timing.measure('payments', () => db.collection('opsPayments').orderBy('at', 'desc').limit(100).get()),
       timing.measure('notices', () => db.collection('opsNotices').orderBy('createdAt', 'desc').limit(50).get()),
@@ -91,7 +91,7 @@ export async function GET(request: Request) {
     const references = lessonReferences.docs.flatMap(d => (d.data().references || []) as LessonReference[]);
     const referenceRevision = lessonReferences.docs.find(d => d.id === month)?.data().revision || '';
     const canonical=Object.fromEntries(canonicalLedgers.docs.map(d=>[d.id,{seed:d.data().seed,records:[...priorAttendance.docs,...attendance.docs].filter(r=>r.data().studentId===d.id).map(r=>({...r.data(),id:r.id}) as Attendance),invoices:invoiceRows.filter(i=>i.studentId===d.id),today:seoulDay()}]));
-    const canonicalAccounts=rows(accounts).map(value=>{const a=value as Account,c=canonical[a.id];if(!c)return a;const p=projectLessonLedger(a,c.seed,c.records,c.invoices,seoulDay());return {...a,remaining:p.currentRemaining,previousMakeups:p.previousMakeups,currentMakeups:p.currentMakeups};});
+    const canonicalAccounts=rows(accounts).map(value=>{const a=value as Account,c=canonical[a.id];if(!c)return a;const p=projectLessonLedger(a,c.seed,c.records,c.invoices,seoulDay());return {...a,remaining:p.currentRemaining,previousMakeups:p.previousMakeups,currentMakeups:p.currentMakeups,upcomingPasses:p.passes.filter(v=>v.invoiceId&&v.start>seoulDay()).map(v=>({start:v.start,remaining:v.remaining}))};});
     const priorSequence = attendanceSequence(accounts.docs.map(d=>({...d.data(),id:d.id}) as Account), priorAttendance.docs.map(d=>d.data() as Attendance), allLegacy.filter(r=>r.day<beforeMonth), {canonical,positions:{},references:references.filter(r=>r.day<beforeMonth),cycleStarts:cycleStarts.filter(r=>r.day<beforeMonth)});
     const sequenceContext = { canonical, references:references.filter(r=>r.day>=beforeMonth && r.day<forecastEnd), referenceRevision, positions: priorSequence.positions, missedLessons: priorSequence.missedLessons, cycleFirstDays: priorSequence.cycleFirstDays, firstLessonTimes: priorSequence.firstLessonTimes, cycleStarts:cycleStarts.filter(r=>r.day>=beforeMonth && r.day<end.toISOString().slice(0,10)) };
     const unpaidCycleKeys = [...new Set(priorAttendance.docs.map(d=>d.data()).filter(r=>r.status==='present' && r.unpaidCycleStart).map(r=>`${r.studentId}_${r.unpaidCycleStart}`))];

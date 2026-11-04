@@ -34,6 +34,11 @@ const text = (value: unknown, max = 500) => typeof value === 'string' ? value.tr
 function audit(tx: Transaction, db: Firestore, actor: string, action: string, studentId: string, detail: object) {
   tx.create(db.collection('opsAudit').doc(), { actor, action, studentId, detail, at: now() });
 }
+function initializeLessonLedger(tx:Transaction,db:Firestore,account:Account,invoice:Invoice){
+ const used=account.planUnits-account.remaining,start=invoice.lessonDate||invoice.cycleStart!;
+ if(!Number.isInteger(used)||used<0||used>account.planUnits)throw Error('처음 사용할 횟수를 확인해주세요.');
+ tx.create(db.doc(`opsCourseLedgers/${account.id}`),{version:2,revision:'registration',seed:{version:2,from:start,passes:[{id:invoice.passId||invoice.id,invoiceId:invoice.id,start,units:invoice.units,amount:invoice.amount,openingUsed:used,openingOrdinal:used,fixedStart:true}],archived:[],adjustments:[],createdAt:account.updatedAt,sourceFingerprint:'owner-registration'},updatedAt:account.updatedAt});
+}
 function enqueue(tx: Transaction, db: Firestore, id: string, account: Account, kind: 'attendance' | 'billing', parameters: Record<string, string>) {
   tx.create(db.doc(`opsNotices/${id}`), { id, studentId: account.id, name: account.name, phone: account.phone, kind, parameters, status: 'queued', createdAt: now() });
 }
@@ -143,7 +148,8 @@ export async function registerStudent(input: Record<string, unknown>, actor: str
       name: `${v.name} · ${v.subject}`, phone: v.phone, checkinSuffixes: [...new Set([v.phone.slice(-4), ...(v.personalPhone ? [v.personalPhone.slice(-4)] : [])])],
       planUnits: v.planUnits, planAmount: v.planAmount, remaining: v.remaining, openInvoiceId: null, autoBilling: false, active: true, updatedAt: at };
     const invoice = firstEnrollmentInvoice(account, v.firstLessonDate, at);
-    tx.create(accountRef, { ...account, currentPassId:invoice.id,currentPassStart:v.firstLessonDate,openInvoiceId: invoice.id });
+    initializeLessonLedger(tx,db,account,invoice);
+    tx.create(accountRef, { ...account,ledgerVersion:2, currentPassId:invoice.id,currentPassStart:v.firstLessonDate,openInvoiceId: invoice.id });
     tx.create(db.doc(`opsInvoices/${invoice.id}`), { ...invoice, reason: '신규 등록' });
     audit(tx, db, actor, 'register-student', id, { sourceStudentId, group: v.group, planUnits: v.planUnits, planAmount: v.planAmount, remaining: v.remaining, invoiceId: invoice.id, firstLessonDate: v.firstLessonDate });
     return { ok: true, studentId: id };
@@ -195,7 +201,8 @@ export async function configure(input: Record<string, unknown>, actor: string) {
       saved.openInvoiceId = firstInvoice.id;
       tx.create(db.doc(`opsInvoices/${firstInvoice.id}`), { ...firstInvoice, reason: '신규 수강 등록' });
     }
-    tx.set(ref, {...saved,...(firstInvoice?{currentPassId:firstInvoice.id,currentPassStart:firstInvoice.cycleStart}: {})});
+    if(firstInvoice){initializeLessonLedger(tx,db,saved as Account,firstInvoice);tx.create(ref,{...saved,ledgerVersion:2,currentPassId:firstInvoice.id,currentPassStart:firstInvoice.cycleStart});}
+    else tx.set(ref, {...saved});
     if (revisedInvoice) {
       tx.update(db.doc(`opsInvoices/${revisedInvoice.id}`), { units: revisedInvoice.units, amount: revisedInvoice.amount, creditUnits: revisedInvoice.creditUnits, updatedAt: revisedInvoice.updatedAt });
       if (billingNotice?.exists && billingNotice.data()?.status !== 'cancelled') tx.update(billingNotice.ref, { parameters: { ...billingNotice.data()?.parameters, amount: String(revisedInvoice.amount - revisedInvoice.paid), lesson_count: String(revisedInvoice.units) } });
