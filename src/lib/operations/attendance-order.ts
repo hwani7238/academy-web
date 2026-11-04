@@ -1,6 +1,6 @@
 import type { Snapshot } from './model';
 import { attendanceTimeMs } from './attendance-time';
-import { compareNames, compareStudents } from './student-order';
+import { compareGroups, compareNames, compareStudents, groupName } from './student-order';
 
 export type DailyAttendanceOrder = 'earliest' | 'latest' | 'name';
 export function orderDailyAttendance(rows: Snapshot['attendance'], order: DailyAttendanceOrder) {
@@ -16,7 +16,7 @@ export function orderDailyAttendance(rows: Snapshot['attendance'], order: DailyA
   });
 }
 
-export type AttendanceOrder = 'name' | 'payment';
+export type AttendanceOrder = 'group' | 'name' | 'payment';
 export type Arrival = { time?: number };
 
 export function arrivalsOnDay(data: Pick<Snapshot, 'attendance' | 'legacyAttendance'>, day: string) {
@@ -40,6 +40,7 @@ export function arrivalsOnDay(data: Pick<Snapshot, 'attendance' | 'legacyAttenda
 export function orderAttendanceStudents(students: Snapshot['students'], order: AttendanceOrder, paymentDue: Set<string>) {
   return [...students].sort((a, b) => {
     if (order === 'payment' && paymentDue.has(a.id) !== paymentDue.has(b.id)) return paymentDue.has(a.id) ? -1 : 1;
+    if (order === 'group') return compareGroups(groupName(a), groupName(b)) || compareStudents(a, b);
     return compareStudents(a, b);
   });
 }

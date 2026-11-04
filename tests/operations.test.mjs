@@ -3118,3 +3118,20 @@ test('legacy exhaustion bill is reused only when complete attendance and debt pr
 test('integrity scan shows paused and orphaned account issues but never auto repairs them',async()=>{
  for(const orphan of [true,false]){const s=await integrityFixture();if(orphan)s.records.delete('students/p');else s.records.get('students/p').lifecycle={status:'paused',until:'2099-01-01'};const before=structuredClone(s.records),r=await s.load('integrity-service').scanBillingIntegrity('owner');assert.equal(r.checked,1);assert.equal(r.repaired.length,0);assert(r.issues.length);assert.deepEqual(s.records,before);if(orphan)assert(r.issues.some(i=>i.kind==='missing-student'));}
 });
+
+test('monthly roster follows sheet instrument order and Korean names within each instrument',()=>{
+ const {orderAttendanceStudents}=setup().load('attendance-order');
+ const groups=['성인 피아노','어린이 피아노(1관)','어린이 피아노(2관)','앙상블','보컬','드럼','우쿨렐레','기타','미디'];
+ const students=groups.flatMap((attendanceGroup,i)=>[
+  {id:`g${i}-kim`,name:'김가람 · '+attendanceGroup,attendanceGroup},
+  {id:`g${i}-gang`,name:'강하늘 · '+attendanceGroup,attendanceGroup}
+ ]).reverse();
+ students.push({id:'guitar-alias',name:'박하늘',instruments:['통기타']},{id:'unknown',name:'가나다',attendanceGroup:'새 과목'});
+ const before=structuredClone(students);
+ const ordered=orderAttendanceStudents(students,'group',new Set(['g5-kim']));
+ const expected=groups.flatMap((_,i)=>[`g${i}-gang`,`g${i}-kim`,...(i===7?['guitar-alias']:[])]);
+ assert.deepEqual(ordered.map(s=>s.id),[...expected,'unknown']);
+ assert.equal(orderAttendanceStudents(students,'payment',new Set(['g5-kim']))[0].id,'g5-kim');
+ assert.equal(orderAttendanceStudents(students,'name',new Set())[0].id,'unknown');
+ assert.deepEqual(students,before);
+});
