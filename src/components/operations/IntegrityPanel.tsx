@@ -18,7 +18,7 @@ export function IntegrityPanel({user,revision}:{user:User;revision:string}){
   <div className="section-head"><div><h2>출석·청구 자동 점검</h2><p>{result?.checkedAt?`${result.checked}개 수강 설정 점검 · 확인 필요 ${new Set(result.issues.map(i=>i.studentId)).size}개 수강 설정`:'저장된 점검 결과가 아직 없습니다.'}</p><small>{busy?'전체 점검 중':result?.scheduledConfigured?'매일 23:30 자동 점검 · 변경한 학생은 즉시 검증':'매일 23:30 자동 점검 · 서버 예약 설정 확인 필요'}</small></div><button disabled={busy} onClick={()=>void load(true)}>지금 다시 점검</button></div>
   {(error||result?.error)&&<p role="alert">점검 확인 필요: {error||result?.error} 기존 점검 결과는 유지됩니다.</p>}
   {result&&!result.scheduledConfigured&&<p role="alert">자동 점검 실행을 위한 서버 인증 설정이 필요합니다. 설정 전에는 지금 다시 점검을 이용해주세요.</p>}
-  {!!result?.notification?.count&&<p role="alert" key={result.notification.key}>관리자 확인 필요: {result.notification.count}건 · 아래 점검 결과를 확인해주세요.</p>
+  {!!result?.notification?.count&&<p role="alert" key={result.notification.key}>관리자 확인 필요: {result.notification.count}건 · 아래 점검 결과를 확인해주세요.</p>}
   {!!result?.issues.length&&<details><summary>확인이 필요한 학생과 사유 보기 ({result.issues.length}건)</summary><p role="status">관리자 확인 필요 · 실제 오류와 과거 기록의 근거 부족 항목을 함께 표시합니다. 출결과 수납을 임의로 변경하지 않습니다.</p><label>점검 학생 찾기<input value={search} onChange={e=>setSearch(e.target.value)} placeholder="학생 이름"/></label><div className="table-wrap"><table><thead><tr><th>학생</th><th>수업일</th><th>확인할 내용</th></tr></thead><tbody>{visible.map((i,n)=><tr key={`${i.studentId}-${i.kind}-${i.day}-${n}`}><td>{i.name}</td><td>{i.day||'미확인'}</td><td>{i.reason}</td></tr>)}</tbody></table></div></details>}
   {result?.lastFullAt&&<p><small>마지막 전체 점검: {time(result.lastFullAt)} · 출결 확인 기준 {result.lastFullDay}</small></p>}
   {result?.lastScopedAt&&<p><small>최근 변경 항목 점검: {time(result.lastScopedAt)}</small></p>}
