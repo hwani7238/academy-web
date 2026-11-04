@@ -3,13 +3,34 @@ import { passUnitsOn } from './pass-history';
 import { passStart, receiptComplete } from './pass-settlement';
 import type { Account, Attendance, Invoice, LegacyAttendance, Payment } from './model';
 import type { LessonReference } from './lesson-reference';
+import {projectLessonLedger,type LessonLedgerSeed} from './lesson-ledger';
 
 export type LessonSlot = { ordinal:number; originDay:string; attendanceIds:string[]; makeupDays:string[]; state:'unused'|'scheduled'|'completed'|'makeup-due'; charged:number; imported:boolean };
 export type CoursePass = { id:string; start:string; units:number; invoiceId:string; amount:number; paid:number; paymentStatus:'unpaid'|'partial'|'paid'|'review'; receiptIds:string[]; slots:LessonSlot[]; regularRemaining:number; makeupOutstanding:number };
 export type SlotBinding = { attendanceId:string; passId:string; ordinal:number; originDay:string };
-export type CourseLedger = { version:1; studentId:string; name:string; passes:CoursePass[]; bindings:SlotBinding[]; issues:string[]; currentRemaining:number; makeupOutstanding:number; repair:null|{start:string; units:number; amount:number; expectedRemaining:number; attendanceIds:string[]; previousInvoiceId:string} };
+export type CourseLedger = { version:1|2; studentId:string; name:string; passes:CoursePass[]; bindings:SlotBinding[]; issues:string[]; currentRemaining:number; makeupOutstanding:number; repair:null|{start:string; units:number; amount:number; expectedRemaining:number; attendanceIds:string[]; previousInvoiceId:string} };
 export type LedgerSheetSource={source:string;cells:{day:string;value:string;color:string;cell:string;sheet:string}[];history:Attendance[];note:string;updatedAt:string};
 export type LedgerEvidence = { sheet?:LedgerSheetSource; account:Account; attendance:Attendance[]; invoices:Invoice[]; payments:Payment[]; references:LessonReference[]; legacy:LegacyAttendance[] };
+
+/** The review screen must use the same saved seed as attendance and balances.
+ * Unapplied spreadsheet suggestions cannot alter the live review projection. */
+export function buildCanonicalCourseLedger(e:LedgerEvidence,seed:LessonLedgerSeed,today:string):CourseLedger {
+ const p=projectLessonLedger(e.account,seed,e.attendance,e.invoices,today),issues=[...p.issues];
+ const passes:CoursePass[]=p.passes.map(pass=>{
+  const invoice=e.invoices.find(i=>i.id===pass.invoiceId&&i.status!=='cancelled');
+  const receipts=invoice?e.payments.filter(r=>r.invoiceId===invoice.id&&r.studentId===e.account.id&&!r.cancelledAt):[];
+  const uncertain=!!invoice&&(!!invoice.needsReview||!!invoice.linkReview||receipts.reduce((n,r)=>n+r.amount,0)!==invoice.paid);
+  if(uncertain)issues.push(`${pass.start}: 청구와 실제 수납 연결 확인 필요`);
+  const slots:LessonSlot[]=Array.from({length:pass.units},(_,n)=>{
+   const slot=pass.slots.find(s=>s.ordinal===n+1);
+   return {ordinal:n+1,originDay:slot?.day||'',attendanceIds:slot?.attendanceIds||[],makeupDays:slot?.makeupDays||[],state:!slot?'unused':slot.projected||slot.day>today?'scheduled':slot.reserved&&!slot.makeupDays.length?'makeup-due':'completed',charged:slot?.charged||0,imported:!!slot?.attendanceIds.some(id=>id.startsWith('sheet_'))};
+  });
+  return {id:pass.id,start:pass.start,units:pass.units,invoiceId:pass.invoiceId,amount:pass.amount,paid:invoice?.paid||0,paymentStatus:uncertain||!invoice?'review':receiptComplete(invoice)?'paid':invoice.paid?'partial':'unpaid',receiptIds:receipts.map(r=>r.id),slots,regularRemaining:pass.remaining,makeupOutstanding:slots.filter(s=>s.state==='makeup-due').length};
+ });
+ const historical=buildCourseLedger(e,today).passes.filter(pass=>pass.start<seed.from&&!passes.some(p=>p.id===pass.id));
+ const bindings=Object.entries(p.assignments).flatMap(([attendanceId,rows])=>rows.map(r=>({attendanceId,passId:r.passId,ordinal:r.ordinal,originDay:r.sourceDay})));
+ return {version:2,studentId:e.account.id,name:e.account.name,passes:[...historical,...passes],bindings,issues:[...new Set(issues)],currentRemaining:p.currentRemaining,makeupOutstanding:p.previousMakeups+p.currentMakeups,repair:null};
+}
 
 /** A reproducible, event-backed read model. Attendance and receipts are source
  * events, never synthesized from a balance. Unassigned slots are future rights,

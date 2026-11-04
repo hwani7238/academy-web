@@ -1,5 +1,5 @@
 import { database, hash } from './auth';
-import { buildCourseLedger, type LedgerEvidence } from './course-ledger';
+import { buildCourseLedger, buildCanonicalCourseLedger, type LedgerEvidence } from './course-ledger';
 import { integrityLegacy, type IntegritySource } from './integrity-service';
 import { seoulDay, type Account, type Attendance, type Invoice, type Payment } from './model';
 import type { LessonReference } from './lesson-reference';
@@ -22,14 +22,16 @@ export async function readCourseLedgerEvidence(studentId:string,tx?:Transaction,
 }
 export async function courseLedgerReports(includeEvidence=false){
  const db=database(),today=seoulDay();
- const [aa,rr,ii,pp,refs,imports,cc,ss]=await Promise.all(['opsAccounts','opsAttendance','opsInvoices','opsPayments','opsLessonReferences','opsImports','opsLegacyCorrections','opsLedgerSources'].map(c=>db.collection(c).get()));
+ const [aa,rr,ii,pp,refs,imports,cc,ss,ll]=await Promise.all(['opsAccounts','opsAttendance','opsInvoices','opsPayments','opsLessonReferences','opsImports','opsLegacyCorrections','opsLedgerSources','opsCourseLedgers'].map(c=>db.collection(c).get()));
  const rows=<T,>(s:FirebaseFirestore.QuerySnapshot)=>s.docs.map(d=>({...d.data(),id:d.id}) as T);
  const records=rows<Attendance>(rr),invoices=rows<Invoice>(ii),payments=rows<Payment>(pp),references=refs.docs.flatMap(d=>d.data().references||[]) as LessonReference[],sources=rows<IntegritySource>(imports),corrections=rows<LegacyCorrection>(cc);
  return rows<Account>(aa).filter(a=>a.active).map(account=>{
   const sheet=ss.docs.find(d=>d.id===account.id)?.data() as LedgerEvidence['sheet'];
   const e:LedgerEvidence={account,...(sheet?{sheet}:{}),attendance:records.filter(r=>r.studentId===account.id),invoices:invoices.filter(r=>r.studentId===account.id),payments:payments.filter(r=>r.studentId===account.id),references:references.filter(r=>r.studentId===account.id),legacy:integrityLegacy(account,sources,corrections)};
   const {phone,checkinSuffixes,...safeAccount}=account;
-  return {...buildCourseLedger(e,today),fingerprint:ledgerFingerprint(e),...(includeEvidence?{evidence:{...e,account:safeAccount}}:{})};
+  const saved=ll.docs.find(d=>d.id===account.id)?.data();
+  const report=account.ledgerVersion===2&&saved?.version===2&&saved.seed?buildCanonicalCourseLedger(e,saved.seed,today):buildCourseLedger(e,today);
+  return {...report,fingerprint:ledgerFingerprint(e),...(includeEvidence?{evidence:{...e,account:safeAccount}}:{})};
  }).sort((a,b)=>a.name.localeCompare(b.name,'ko'));
 }
 

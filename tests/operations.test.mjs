@@ -3290,6 +3290,18 @@ async function canonicalServiceFixture(){
  s.records.set('opsCourseLedgers/v2',{version:2,seed:f.seed,revision:'v1'});
  return {...s,f};
 }
+test('canonical review reads the saved ledger, ignores unapplied sheet proposals and flags mismatched receipts',async()=>{
+ const s=await canonicalServiceFixture(),svc=s.load('course-ledger-service');
+ s.records.set('opsLessonReferences/2026-10',{references:[{studentId:'v2',day:'2026-10-03',value:'1',color:'',row:1}]});
+ s.records.set('opsLedgerSources/v2',{history:[s.f.row('2026-10-04')],cells:[],source:'pending'});
+ const before=structuredClone(s.records),rows=await svc.courseLedgerReports(true),r=rows.find(r=>r.studentId==='v2');
+ assert.equal(r.version,2);assert.equal(r.currentRemaining,1);assert.equal(r.repair,null);assert.deepEqual(r.issues,[]);
+ assert.equal(r.passes.length,1);assert.equal(r.passes[0].slots[2].originDay,'2026-10-03');assert.equal(r.passes[0].paymentStatus,'paid');
+ assert.deepEqual(s.records,before);
+ s.records.get('opsPayments/receipt').amount=1;
+ const mismatch=(await svc.courseLedgerReports()).find(r=>r.studentId==='v2');
+ assert.equal(mismatch.passes[0].paymentStatus,'review');assert.ok(mismatch.issues.some(x=>x.includes('실제 수납')));
+});
 test('canonical integration: complete and renew derive balances atomically; repeat never adds units',async()=>{
  const s=await canonicalServiceFixture(),money=structuredClone(s.records.get('opsPayments/receipt'));
  await s.service.recordAttendance({studentId:'v2',day:'2026-10-04',status:'absent',units:0},'owner');
