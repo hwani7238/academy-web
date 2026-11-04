@@ -13,7 +13,7 @@ import { CloseButton } from './CloseButton';
 import { enrollmentState } from '@/lib/operations/lifecycle';
 import { ACADEMY_DAYS } from '@/lib/operations/academy-calendar';
 import { calendarDay, HOLIDAY_YEARS } from '@/lib/operations/holidays';
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ATTENDANCE_LABELS, AttendanceStatus, Snapshot, seoulDay, defaultAttendanceUnits } from '@/lib/operations/model';
 import { GROUPS, groupName, compareGroups, displayEnrollmentName } from '@/lib/operations/student-order';
 import { attendanceMonthDay, orderAttendanceStudents, type AttendanceOrder } from '@/lib/operations/attendance-order';
@@ -108,7 +108,10 @@ export function MonthlyAttendance({ data, day, busy, loading, onDayChange, save 
     {month === '2026-10' && <p className="month-help academy-calendar-note">10월 3일 정상 수업 · 5일·9일 휴원 — 휴원일은 예정 회차에서 제외됩니다.</p>}
     {moveError && <p className="error" role="alert">{moveError}</p>}
     {loading ? <p className="empty" role="status">{month} 출석표를 불러오고 있습니다…</p> : <div className="table-wrap monthly-scroll" ref={scrollRef}><table className="monthly-table" style={{minWidth:190 + count * 32}}><colgroup><col style={{width:190}} />{dates.map(d=><col key={d} />)}</colgroup><thead><tr><th>학생 / 현재 잔여</th>{dates.map((d, i) => { const calendar = calendarDay(d); return <th key={d} ref={d === day ? dateRef : undefined} title={[calendar.holiday, ACADEMY_DAYS[d]?.label].filter(Boolean).join(' · ')} aria-label={`${d} ${['일','월','화','수','목','금','토'][calendar.weekday]}${calendar.holiday ? ` · ${calendar.holiday}` : ''}${ACADEMY_DAYS[d] ? ` · ${ACADEMY_DAYS[d].label}` : ''}`} className={`${d === today ? 'month-today' : ''} ${calendar.className}`}>{i + 1}<small>{['일','월','화','수','목','금','토'][calendar.weekday]}</small>{ACADEMY_DAYS[d] && <small className="academy-day-label">{ACADEMY_DAYS[d].open ? '운영' : '휴원'}</small>}</th>; })}</tr></thead><tbody>
-      {visibleStudents.map(s => <MonthlyRow key={s.id} student={s} account={accountById.get(s.id)} invoice={invoiceByStudent.get(s.id)} dates={dates} today={today} lookup={lookup} legacy={displayLegacy} references={references} sequence={sequence} confirmedFirst={confirmedFirst} unpaidCycles={unpaidCycles} cycleFirstDays={sequenceState.cycleFirstDays} forecast={forecast} unpaidForecastFirst={unpaidForecastFirst} busy={busy} open={open} openPayment={openPayment} openRange={openRange} openSchedule={openSchedule} move={move} />)}
+      {visibleStudents.map((s, index) => <Fragment key={s.id}>
+        {order === 'group' && (index === 0 || groupName(visibleStudents[index - 1]) !== groupName(s)) && <tr className="monthly-group-heading"><th colSpan={dates.length + 1}><span>{groupName(s)}</span></th></tr>}
+        <MonthlyRow key={s.id} student={s} account={accountById.get(s.id)} invoice={invoiceByStudent.get(s.id)} dates={dates} today={today} lookup={lookup} legacy={displayLegacy} references={references} sequence={sequence} confirmedFirst={confirmedFirst} unpaidCycles={unpaidCycles} cycleFirstDays={sequenceState.cycleFirstDays} forecast={forecast} unpaidForecastFirst={unpaidForecastFirst} busy={busy} open={open} openPayment={openPayment} openRange={openRange} openSchedule={openSchedule} move={move} />
+      </Fragment>)}
     </tbody></table></div>}{!loading && !visibleStudents.length && <p className="empty">선택한 과목과 이름에 해당하는 학생이 없습니다.</p>}
 
     {!HOLIDAY_YEARS.includes(Number(month.slice(0, 4))) && <p className="month-help">이 연도의 공휴일 자료는 아직 등록되지 않아 주말 색상만 표시합니다.</p>}<p className="month-help">표시 수강권 {visibleStudents.length}건 · 과목별 수강권은 출결·잔여 횟수·결제를 각각 관리합니다. 기존 통합 수강권은 분리 확인이 필요합니다. 제목 옆 화살표로 월을 이동하고, 미래 날짜에도 여행·결석·병가와 보강 예약을 미리 표시할 수 있습니다. 수동 기록은 보호자에게 출석 알림을 보내지 않습니다.</p>
