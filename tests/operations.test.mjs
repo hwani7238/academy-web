@@ -3302,6 +3302,16 @@ test('canonical review reads the saved ledger, ignores unapplied sheet proposals
  const mismatch=(await svc.courseLedgerReports()).find(r=>r.studentId==='v2');
  assert.equal(mismatch.passes[0].paymentStatus,'review');assert.ok(mismatch.issues.some(x=>x.includes('실제 수납')));
 });
+test('canonical migration retries cannot report completion while source records have unresolved makeup conflicts',async()=>{
+ const s=await canonicalServiceFixture(),svc=s.load('course-ledger-service');
+ const row=s.f.row('2026-10-04','makeup',1,'2026-10-03');
+ s.records.set('opsAttendance/'+row.id,row);
+ const evidence=await svc.readCourseLedgerEvidence('v2'),before=structuredClone(s.records);
+ const reports=await s.load('ledger-migration-service').ledgerMigrationReports();
+ const report=reports.find(r=>r.studentId==='v2');assert.equal(report.ready,false);assert.equal(report.pendingSource,false);
+ await assert.rejects(s.load('ledger-migration-service').migrateLessonLedger({studentId:'v2',fingerprint:svc.ledgerFingerprint(evidence)},'owner'),/원수업/);
+ assert.deepEqual(s.records,before);
+});
 test('canonical integration: complete and renew derive balances atomically; repeat never adds units',async()=>{
  const s=await canonicalServiceFixture(),money=structuredClone(s.records.get('opsPayments/receipt'));
  await s.service.recordAttendance({studentId:'v2',day:'2026-10-04',status:'absent',units:0},'owner');

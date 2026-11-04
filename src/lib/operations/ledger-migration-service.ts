@@ -18,7 +18,10 @@ export async function migrateLessonLedger(input:Record<string,unknown>,actor:str
   const ledgerRef=db.doc(`opsCourseLedgers/${id}`),old=(await tx.get(ledgerRef)).data();
   const e=await readCourseLedgerEvidence(id,tx);
   const plan=previewLessonLedgerMigration(e,seoulDay(),fingerprint,old);
-  if(old?.version===2&&!plan.pendingSource)return {ok:true,duplicate:true};
+  if(old?.version===2&&!plan.pendingSource){
+   if(!plan.ready)throw Error(plan.issues.join(' / '));
+   return {ok:true,duplicate:true};
+  }
   if(ledgerFingerprint(e)!==fingerprint)throw Error('점검 후 기록이 변경되었습니다. 다시 점검해주세요.');
   if(!plan.ready)throw Error(plan.issues.join(' / '));
   const stamp=new Date().toISOString();
