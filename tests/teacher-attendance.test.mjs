@@ -56,7 +56,7 @@ test('today-only read returns all piano groups with an explicit privacy allowlis
   const response = await s.call('piano', '?day=2000-01-01&subject=드럼&studentId=drum');
   assert.equal(response.status, 200); assert.match(response.headers.get('cache-control'), /no-store/);
   const result = await response.json(); assert.equal(result.day, s.day); assert.equal(result.arrivals.length, 3);
-  assert.ok(result.arrivals.every(row => row.course.includes('피아노')));
+  assert.ok(result.arrivals.every(row => row.course === '어린이 피아노'));
   assert.deepEqual(Object.keys(result.arrivals[0]).sort(), ['arrivalAt', 'course', 'id', 'name', 'source', 'status', 'studentId', 'updatedAt']);
   assert.ok(!JSON.stringify(result).includes('secret')); assert.ok(!JSON.stringify(result).includes('private'));
   assert.deepEqual(s.reads, [{ name: 'opsAttendance', field: 'day', operator: '==', value: s.day }]);
@@ -92,5 +92,5 @@ test('teacher arrivals are visible, manual calendar rows remain excluded and ros
  }
  s.records.set('opsAttendance/arrival',{studentId:'piano',day:s.day,source:'teacher',status:'present',arrivalAt:s.day+'T09:10:00+09:00',updatedAt:'revision'});
  const result=await(await s.call('piano')).json();assert.equal(result.arrivals.length,1);assert.equal(result.arrivals[0].source,'teacher');assert.equal(result.arrivals[0].updatedAt,'revision');
- const roster=await(await s.call('piano','?roster=1')).json();assert.deepEqual(roster.students,[{id:'piano',name:'piano',course:'피아노',attended:true}]);assert.ok(!JSON.stringify(roster).includes('private-phone'));
+ const roster=await(await s.call('piano','?roster=1')).json();assert.deepEqual(roster.students,[{id:'piano',name:'piano',course:'어린이 피아노',attended:true}]);assert.ok(!JSON.stringify(roster).includes('private-phone'));
 });

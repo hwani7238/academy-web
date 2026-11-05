@@ -25,7 +25,7 @@ export function pianoArrival(id: string, row: RecordData, account: RecordData | 
   const timestamp = typeof row.arrivalAt === 'string' && row.arrivalAt || typeof row.at === 'string' && row.at || '';
   const date = new Date(timestamp);
   const arrivalAt = Number.isFinite(date.getTime()) && koreaDay(date) === day ? date.toISOString() : '';
-  return { id, studentId: String(row.studentId || ''), updatedAt: String(row.updatedAt || ''), source: row.source === 'teacher' ? 'teacher' : 'kiosk', name: String(owner.name || account.name || '학생').split(' · ')[0], course, arrivalAt, status: row.status === 'makeup' ? 'makeup' : 'present' };
+  return { id, studentId: String(row.studentId || ''), updatedAt: String(row.updatedAt || ''), source: row.source === 'teacher' ? 'teacher' : 'kiosk', name: String(owner.name || account.name || '학생').split(' · ')[0], course: '어린이 피아노', arrivalAt, status: row.status === 'makeup' ? 'makeup' : 'present' };
 }
 
 export type PianoStudent = { id: string; name: string; course: string; attended: boolean };
