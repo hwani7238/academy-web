@@ -3614,3 +3614,33 @@ test('legacy unused claims prevent duplicate billing even when the account point
  assert.equal(s.records.get('opsAccounts/p').remaining,0);
  assert.equal([...s.records.values()].filter(v=>v.studentId==='p'&&v.source==='kiosk').length,1);
 });
+test('confirmed deferred illness preserves native absence and receipts while the same lesson ordinal resumes',async()=>{
+ const s=setup();await s.seed('p',3);Object.assign(s.records.get('opsAccounts/p'),{planUnits:4,planAmount:180000});
+ const first={id:'old',passId:'old',studentId:'p',units:4,amount:180000,paid:180000,status:'paid',allocationState:'allocated',lessonDate:'2026-09-21'};
+ for(const i of [first,{...first,id:'new',passId:'new',lessonDate:'2026-11-02'}]){s.records.set('opsInvoices/'+i.id,i);s.records.set('opsPayments/'+i.id,{id:i.id,studentId:'p',invoiceId:i.id,amount:180000,method:'카드',paymentDate:i.lessonDate});}
+ const dates=['2026-09-21','2026-09-28','2026-10-12','2026-10-19','2026-10-26','2026-11-02'],values=['1','2','2','3','4','1'];
+ for(const day of dates.slice(1))s.records.set('opsAttendance/p_'+day,{id:'p_'+day,studentId:'p',day,status:day==='2026-09-28'?'sick':'present',units:day==='2026-09-28'?0:1});
+ const source={source:'test',cells:dates.map((day,n)=>({day,value:values[n],color:'',cell:'A'+n,sheet:'test'})),history:[{id:'sheet-first',studentId:'p',day:dates[0],status:'present',units:1}],note:'original',updatedAt:'v1'};
+ s.records.set('opsLedgerSources/p',source);
+ const evidence=s.load('course-ledger-service'),api=s.load('ledger-migration-service'),fix=s.load('ledger-correction');
+ const original=structuredClone([...s.records].filter(([k])=>k.startsWith('opsAttendance/')||k.startsWith('opsPayments/')));
+ let e=await evidence.readCourseLedgerEvidence('p');
+ const request={studentId:'p',requestId:'defer',fingerprint:evidence.ledgerFingerprint(e),kind:'deferred-lessons',days:['2026-09-28'],reason:'원장 확인: 병결 후 같은 회차 진행'};
+ await fix.correctLedgerLink(request,'owner');await fix.correctLedgerLink(request,'owner');
+ assert.deepEqual([...s.records].filter(([k])=>k.startsWith('opsAttendance/')||k.startsWith('opsPayments/')),original);
+ const preview=(await api.ledgerMigrationReports())[0];assert.equal(preview.ready,true);assert.equal(preview.afterRemaining,3);
+ await api.migrateLessonLedger({studentId:'p',fingerprint:preview.fingerprint},'owner');
+ const l=s.records.get('opsCourseLedgers/p');assert.equal(l.projection.labels['p_2026-10-12'],'2');assert.equal(l.projection.labels['p_2026-10-26'],'4');assert.equal(l.projection.labels['p_2026-11-02'],'1');assert.equal(s.records.get('opsAttendance/p_2026-09-28').status,'sick');
+ assert.deepEqual(s.records.get('opsLedgerSources/p').cells,source.cells);
+ assert.deepEqual([...s.records].filter(([k])=>k.startsWith('opsPayments/')),original.filter(([k])=>k.startsWith('opsPayments/')));
+ await s.service.recordAttendance({studentId:'p',day:'2026-09-28',status:'paused',units:0,note:'일시 정지로 직접 확인'},'owner');assert.deepEqual(s.records.get('opsCourseLedgers/p').seed.deferredDays,[]);
+});
+test('repeated deferred absences retain the next second lesson, with no new invoice or fabricated attendance',()=>{
+ const s=setup(),project=s.load('lesson-ledger').projectLessonLedger;
+ const account={id:'p',planUnits:4,planAmount:120000},days=['2026-10-03','2026-10-10','2026-10-14','2026-10-17'];
+ const invoice={id:'pass',passId:'pass',studentId:'p',units:4,amount:120000,paid:120000,status:'paid',lessonDate:'2026-09-19'};
+ const seed={version:2,from:'2026-09-19',passes:[{id:'pass',invoiceId:'pass',start:'2026-09-19',units:4,amount:120000}],deferredDays:days,archived:[],adjustments:[]};
+ const records=[{id:'first',studentId:'p',day:'2026-09-19',status:'present',units:1},...days.map(day=>({id:day,studentId:'p',day,status:'absent',units:0}))];
+ const before=structuredClone(records);const p=project(account,seed,records,[invoice],'2026-11-06');assert.equal(p.currentRemaining,3);assert.equal(p.passes.length,1);assert.deepEqual(p.issues,[]);assert.deepEqual(records,before);
+ const next=project(account,seed,[...records,{id:'return',studentId:'p',day:'2026-11-07',status:'present',units:1}],[invoice],'2026-11-07');assert.equal(next.labels['p_2026-11-07'],'2');assert.equal(next.currentRemaining,2);
+});

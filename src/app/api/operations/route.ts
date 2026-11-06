@@ -83,10 +83,11 @@ export async function GET(request: Request) {
     const rows = (snap: FirebaseFirestore.QuerySnapshot) => snap.docs.map(d => ({ ...d.data(), id: d.id }));
     const namedRows = (snap: FirebaseFirestore.QuerySnapshot) => snap.docs.map(d => { const value=d.data(); return {...value,id:d.id,name:accountById.get(value.studentId)?.name||value.name}; });
     const invoiceRows = namedRows(invoices) as Snapshot['invoices'];
-    const attendanceRows=namedRows(attendance) as Attendance[];
+    const attendanceRows=(namedRows(attendance) as Attendance[]).map(r=>canonicalLedgers.docs.find(d=>d.id===r.studentId)?.data().seed?.deferredDays?.includes(r.day)?{...r,status:'paused' as const,units:0}:r);
     const correctionsById = new Map(legacyCorrections.docs.map(d => [d.id, d.data() as LegacyCorrection]));
     const allLegacy = [...legacyCells.values()].filter((v): v is NonNullable<typeof v> => Boolean(v)).map(row => correctedLegacy(row, correctionsById.get(`${row.studentId}_${row.day}`)));
     for(const doc of canonicalLedgers.docs){const seed=doc.data().seed;for(const r of seed?.history||[]){if(r.day>=end.toISOString().slice(0,10)||attendanceRows.some(a=>a.studentId===doc.id&&a.day===r.day)||allLegacy.some(a=>a.studentId===doc.id&&a.day===r.day))continue;const value=String(r.sheetSource?.value||'');allLegacy.push(correctedLegacy({studentId:doc.id,day:r.day,value,color:r.sheetSource?.color||'',status:r.status},correctionsById.get(`${doc.id}_${r.day}`)));}}
+    for(const doc of canonicalLedgers.docs)for(const day of doc.data().seed?.deferredDays||[]){const r=allLegacy.find(r=>r.studentId===doc.id&&r.day===day);if(r)Object.assign(r,{status:'paused',value:'일시 정지',color:''});}
     const cycleStarts = [...passCycleStarts(accounts.docs.map(d=>({...d.data(),id:d.id}) as Account)), ...cycleInvoices.docs.map(d=>d.data()).filter(v=>v.status!=='cancelled' && typeof v.cycleStart==='string').map(v=>({studentId:String(v.studentId),day:String(v.cycleStart)}))];
     const beforeMonth = `${month}-01`;
     const references = lessonReferences.docs.flatMap(d => (d.data().references || []) as LessonReference[]);

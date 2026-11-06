@@ -40,6 +40,7 @@ export function ledgerDatabase():Firestore{
     const legacyChanges=writes.filter(w=>w.ref.path.startsWith('opsLegacyCorrections/')&&w.data?.studentId===id);
     for(const w of legacyChanges){const r=seed.history?.find(r=>r.day===w.data?.day);if(r){const status=w.data!.status as Attendance['status'];Object.assign(r,{status,units:status==='present'?1:0,note:String(w.data!.note||''),updatedAt:String(w.data!.updatedAt||'')});}}
     const changed=attendance.filter(row=>{const old=e.attendance.find(r=>r.id===row.id);return !old||old.units!==row.units||old.status!==row.status||old.relatedDay!==row.relatedDay;});
+    if(seed.deferredDays)seed.deferredDays=seed.deferredDays.filter(day=>!changed.some(r=>r.day===day));
     const isRegular=(r?:Attendance)=>!!r&&!['makeup','makeup_reserved','paused','cancelled'].includes(r.status||'present');
     const reflowFrom=[...changed.filter(r=>isRegular(r)||isRegular(e.attendance.find(x=>x.id===r.id))).map(r=>r.day),...legacyChanges.map(w=>String(w.data!.day))].sort()[0];
     if(reflowFrom&&reflowFrom<seed.from)throw Error('이관 시작일 이전의 정규 출결입니다. 해당 수강권의 시작 회차를 먼저 확인해주세요. 변경은 저장하지 않았습니다.');

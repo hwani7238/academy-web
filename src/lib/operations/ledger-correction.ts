@@ -14,7 +14,16 @@ export async function correctLedgerLink(input:Record<string,unknown>,actor:strin
   const e=await readCourseLedgerEvidence(studentId,tx);
   if(input.fingerprint!==ledgerFingerprint(e))throw Error('출결·수납이 변경됐습니다. 다시 확인해주세요.');
   const stamp=new Date().toISOString();
-  if(input.kind==='duplicate-receipt'){
+  if(input.kind==='deferred-lessons'){
+   if(e.account.ledgerVersion===2)throw Error('전환된 출결은 월별 출석부에서 수강 일시 정지로 변경해주세요.');
+   if(!e.sheet)throw Error('보존할 원본 장부 근거가 없습니다.');
+   const days=Array.isArray(input.days)?[...new Set(input.days.map(d=>validDay(d)))]:[];
+   if(!days.length||days.length>60)throw Error('회차를 미룬 날짜를 선택해주세요.');
+   for(const day of days){const r=e.attendance.find(r=>r.day===day)||e.sheet.history.find(r=>r.day===day);if(!r||!['absent','sick','travel','paused'].includes(r.status||''))throw Error(`${day}: 결석·병결·여행 기록을 확인해주세요.`);}
+   const after={...e.sheet,deferredDays:[...new Set([...(e.sheet.deferredDays||[]),...days])].sort(),updatedAt:stamp};
+   tx.set(db.doc(`opsLedgerSources/${studentId}`),after);
+   tx.create(auditRef,{actor,studentId,action:'confirm-deferred-lessons',at:stamp,detail:{reason,days,before:e.sheet,after,nativeAttendanceUnchanged:true,paymentsUnchanged:true}});
+  }else if(input.kind==='duplicate-receipt'){
    const keep=e.payments.find(p=>p.id===input.keepPaymentId),drop=e.payments.find(p=>p.id===input.duplicatePaymentId),target=e.invoices.find(i=>i.id===input.targetInvoiceId);
    const first=validDay(input.lessonDate);
    if(!keep||!drop||keep.id===drop.id||keep.cancelledAt||drop.cancelledAt||keep.amount!==drop.amount||keep.method!==drop.method||!target||target.status==='cancelled')throw Error('같은 과목·금액·수단의 수납 두 건과 연결할 수강권을 확인해주세요.');
