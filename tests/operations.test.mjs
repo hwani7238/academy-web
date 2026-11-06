@@ -3644,3 +3644,12 @@ test('repeated deferred absences retain the next second lesson, with no new invo
  const before=structuredClone(records);const p=project(account,seed,records,[invoice],'2026-11-06');assert.equal(p.currentRemaining,3);assert.equal(p.passes.length,1);assert.deepEqual(p.issues,[]);assert.deepEqual(records,before);
  const next=project(account,seed,[...records,{id:'return',studentId:'p',day:'2026-11-07',status:'present',units:1}],[invoice],'2026-11-07');assert.equal(next.labels['p_2026-11-07'],'2');assert.equal(next.currentRemaining,2);
 });
+test('confirming an already allocated unpaid pass clears only its review and never fabricates a receipt',async()=>{
+ const s=setup();await s.seed('p',3);
+ const invoice={id:'unpaid',studentId:'p',passId:'unpaid',units:8,amount:160000,paid:0,status:'open',allocationState:'allocated',allocatedUnits:8,linkReview:true,lessonDate:'2026-10-13',updatedAt:'v1'};
+ s.records.set('opsInvoices/unpaid',invoice);s.records.set('opsAttendance/p_2026-10-13',{id:'p_2026-10-13',studentId:'p',passId:'unpaid',day:'2026-10-13',status:'present',units:1});
+ const a=structuredClone(s.records.get('opsAccounts/p')),r=structuredClone(s.records.get('opsAttendance/p_2026-10-13'));
+ await s.service.linkInvoiceLesson({invoiceId:'unpaid',lessonDate:'2026-10-13',expectedUpdatedAt:'v1'},'owner');
+ const saved=s.records.get('opsInvoices/unpaid');assert.equal(saved.linkReview,false);assert.equal(saved.status,'open');assert.equal(saved.paid,0);assert.equal(saved.allocatedUnits,8);
+ assert.deepEqual(s.records.get('opsAccounts/p'),a);assert.deepEqual(s.records.get('opsAttendance/p_2026-10-13'),r);assert.equal([...s.records.keys()].some(k=>k.startsWith('opsPayments/')),false);
+});

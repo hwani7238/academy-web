@@ -41,6 +41,7 @@ export function MonthlyPaymentDialog({data,studentId,day:initialDay,initialInvoi
  </>}</div>}
  {invoice?.needsReview&&<InvoiceReviewPanel invoice={invoice} save={save} cancelled={close} onBusyChange={value=>{lock.current=value;setBusy(value);}}/>}
  {duplicateCheck&&<label>실제로 별도 결제받은 사유<input name="duplicateReceiptReason" required minLength={5} maxLength={500} placeholder="예: 다음 수강권을 같은 날 별도로 선납"/><small>기존 결제를 다시 입력하는 경우에는 저장하지 말고 기존 수납을 연결해주세요.</small></label>}
+ {invoice?.linkReview&&invoice.status==='open'&&invoice.paid===0&&invoice.allocationState==='allocated'&&<button type="button" disabled={busy||!day||!!contractProblem} onClick={async()=>{if(lock.current)return;lock.current=true;setBusy(true);setError('');try{await save({action:'linkInvoiceLesson',invoiceId:invoice.id,lessonDate:day,expectedUpdatedAt:invoice.updatedAt||''});close();}catch(e){setError(e instanceof Error?e.message:'연결 확인 실패');}finally{lock.current=false;setBusy(false);}}}>수납 없이 미납 연결 확인 · 횟수 유지</button>}
  {contractProblem&&<p className="error" role="alert">{contractProblem}</p>}
  {error&&<p className="error" role="alert">{error}</p>}{!invoice?.needsReview&&<button className="primary" disabled={busy||!!contractProblem||!choice||!day||(choice!=='new'&&!invoice)}>{busy?'저장 중…':linkOnly?'기존 수납 연결 · 금액·횟수 유지':'수강권 연결·수납 저장'}</button>}
  </form></dialog>;
