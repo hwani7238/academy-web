@@ -74,3 +74,20 @@ export function previewLessonLedgerMigration(e:LedgerEvidence,today:string,finge
  const issues=[...new Set([...preview.issues,...projection.issues])];
  return {...preview,projection,afterRemaining:projection.currentRemaining,issues,ready:!issues.length,pendingSource:true};
 }
+
+/** Some paper ledgers number several prepaid passes continuously (1..12 for
+ * three 4-lesson passes). This interpretation requires explicit owner approval;
+ * original source cells, attendance and receipts are never rewritten. */
+export function prepaidSeriesEvidence(e:LedgerEvidence){
+ if(!e.sheet||e.account.ledgerVersion===2)return null;
+ const bills=e.invoices.filter(i=>i.status!=='cancelled').sort((a,b)=>passStart(a).localeCompare(passStart(b)));
+ if(bills.length<2||bills.length>24)return null;
+ const units=bills[0].units,start=passStart(bills[0]);
+ if(!start||units!==e.account.planUnits||bills.some(i=>!passStart(i)||i.units!==units||i.amount!==bills[0].amount||i.paid!==i.amount||i.status!=='paid'||i.linkReview||i.allocationState!=='allocated'||e.payments.filter(p=>p.invoiceId===i.id&&!p.cancelledAt).reduce((n,p)=>n+p.amount,0)!==i.amount))return null;
+ if(bills.some((i,n)=>Number(e.sheet!.cells.find(c=>c.day===passStart(i))?.value)!==n*units+1))return null;
+ const end=bills.at(-1)!;const range=e.sheet.cells.filter(c=>c.day>=start);
+ if(range.some(c=>!/^\d+$/.test(c.value)||Number(c.value)<1||Number(c.value)>units*bills.length))return null;
+ const value=(day:string,v:string)=>day>=start&&/^\d+$/.test(v)?String((Number(v)-1)%units+1):v;
+ const evidence:LedgerEvidence={...e,sheet:{...e.sheet,cells:e.sheet.cells.map(c=>({...c,value:value(c.day,c.value)}))},references:e.references.map(r=>({...r,value:value(r.day,r.value)}))};
+ return {evidence,start,units,count:bills.length,lastStart:passStart(end)};
+}

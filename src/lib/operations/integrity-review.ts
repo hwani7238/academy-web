@@ -1,3 +1,4 @@
+import {auditInvoiceContracts} from './invoice-contract';
 import {buildCourseLedger,buildCanonicalCourseLedger,type LedgerEvidence} from './course-ledger';
 import {inspectBilling,type IntegrityIssue} from './billing-integrity';
 import {projectLessonLedger,type LessonLedgerSeed} from './lesson-ledger';
@@ -14,6 +15,7 @@ export function closedAttendanceDay(now=new Date()){const local=new Date(now.get
 export function reviewAccount(e:LedgerEvidence,ctx:ReviewContext,day:string,attendanceDays:string[],stamp:string):ReviewEntry{
  const a=e.account,issues:IntegrityIssue[]=[];
  const issue=(kind:string,reason:string,date='')=>issues.push({studentId:a.id,name:a.name,kind,day:date,reason,automatic:false});
+ for(const f of auditInvoiceContracts(a,e.invoices,e.attendance,e.payments,ctx.seed))issue('invoice-contract',f.reason);
  if(!a.active)return {studentId:a.id,name:a.name,checked:false,checkedAt:stamp,issues};
  if(!ctx.owner)issue('missing-student','수강 설정에 연결된 학생 등록 정보가 없습니다. 이전 또는 중복 등록인지 확인해주세요.');
  const ledger=a.ledgerVersion===2&&ctx.seed?buildCanonicalCourseLedger(e,ctx.seed,day):buildCourseLedger(e,day);

@@ -1,3 +1,4 @@
+import {requireInvoiceContract} from './invoice-contract';
 import {attendanceSequence} from './attendance-sequence';
 import { type Account, type Invoice, type Attendance, validDay } from './model';
 
@@ -53,10 +54,11 @@ export function lessonPass(account: Account, invoices: Invoice[], day: string, u
   });
   if (candidates.length > 1) return { account }; // Owner resolves ambiguous legacy allocations.
   const invoice = candidates[0] || passInvoice({ id:newId,studentId:account.id,name:account.name,units:account.planUnits,amount:account.planAmount,paid:0,status:'open',needsReview:false,createdAt:stamp },false,stamp);
+  requireInvoiceContract(account,invoice,passDay(invoice)||cycleStart||day);
   const start=passDay(invoice)||cycleStart||day; // Never move a receipt's explicit first day on activation.
   requireUniquePass(invoices, invoice, start);
   const activated = allocatedPass(account, invoice, start, stamp);
-  return { account: { ...activated.account, lastPassLessonDay: day, openInvoiceId: invoice.status === 'open' ? invoice.id : account.openInvoiceId === invoice.id ? null : account.openInvoiceId },
+  return { account: { ...activated.account, ...(account.planUnits!==invoice.units||account.planAmount!==invoice.amount?{initialPlanUnits:account.initialPlanUnits||account.planUnits,planUnits:invoice.units,planAmount:invoice.amount,passHistory:[...(account.passHistory||[]).filter(p=>p.start!==start),{start,units:invoice.units}].sort((a,b)=>a.start.localeCompare(b.start))}:{}), lastPassLessonDay: day, openInvoiceId: invoice.status === 'open' ? invoice.id : account.openInvoiceId === invoice.id ? null : account.openInvoiceId },
     invoice: activated.invoice, passId: activated.invoice.passId, created: !candidates.length };
 }
 export function paymentPass(invoice: Invoice, day: string, invoices: Invoice[], stamp: string) {

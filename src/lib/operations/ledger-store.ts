@@ -1,4 +1,5 @@
 import {database as rawDatabase,hash} from './auth';
+import {requireUnusedInvoice} from './invoice-contract';
 import {readCourseLedgerEvidence} from './course-ledger-service';
 import {projectLessonLedger,type LessonLedgerSeed} from './lesson-ledger';
 import {seoulDay,type Account,type Attendance,type Invoice,type Payment} from './model';
@@ -35,6 +36,7 @@ export function ledgerDatabase():Firestore{
     const account=overlay<Account>('opsAccounts',[e.account]).find(a=>a.id===id)!;
     const attendance=overlay<Attendance>('opsAttendance',e.attendance).filter(r=>r.studentId===id),invoices=overlay<Invoice>('opsInvoices',e.invoices).filter(i=>i.studentId===id);
     const payments=overlay<Payment>('opsPayments',e.payments).filter(p=>p.studentId===id);
+    for(const old of e.invoices){const next=invoices.find(i=>i.id===old.id);if(next&&(next.units!==old.units||next.amount!==old.amount))requireUnusedInvoice(old,e.attendance,e.payments,seed);}
     const legacyChanges=writes.filter(w=>w.ref.path.startsWith('opsLegacyCorrections/')&&w.data?.studentId===id);
     for(const w of legacyChanges){const r=seed.history?.find(r=>r.day===w.data?.day);if(r){const status=w.data!.status as Attendance['status'];Object.assign(r,{status,units:status==='present'?1:0,note:String(w.data!.note||''),updatedAt:String(w.data!.updatedAt||'')});}}
     const changed=attendance.filter(row=>{const old=e.attendance.find(r=>r.id===row.id);return !old||old.units!==row.units||old.status!==row.status||old.relatedDay!==row.relatedDay;});

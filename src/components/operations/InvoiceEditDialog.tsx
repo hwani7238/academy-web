@@ -26,11 +26,11 @@ export function InvoiceEditDialog({ invoice, account, save, close }: {
         {account && <><p>현재 수강 설정: {account.planUnits}회 · {account.planAmount.toLocaleString('ko-KR')}원 · 잔여 {account.remaining}회</p><button type="button" onClick={() => { setUnits(String(account.planUnits)); setAmount(String(account.planAmount)); }}>현재 수강 설정 불러오기</button></>}
         <label>청구 횟수<input type="number" required min="1" max="200" value={units} onChange={e => setUnits(e.target.value)} /></label>
         <label>청구 금액 (원)<input type="number" inputMode="numeric" required min="1" max="100000000" value={amount} onChange={e => setAmount(e.target.value)} /></label>
-        <label>수납 완료 시 횟수 처리<select value={kind} onChange={e => setKind(e.target.value)}><option value="next">새 수강권 횟수 추가</option><option value="current">이미 횟수 반영됨 · 현재 잔여 유지</option></select></label>
+        <label>수강권 연결 상태<select value={kind} onChange={e => setKind(e.target.value)}><option value="next">아직 사용하지 않은 다음 수강권</option><option value="current">이미 횟수 반영됨 · 현재 잔여 유지</option></select></label>
         {kind === 'current' && <label>1회차 시작일<input name="cycleStart" type="date" required max={invoice.id === `first_${invoice.studentId}` ? undefined : seoulDay()} defaultValue={invoice.lessonDate || invoice.cycleStart || (invoice.id === `first_${invoice.studentId}` ? '' : seoulDay())} /></label>}
-        <p>{kind === 'current' ? '수납해도 횟수를 다시 추가하지 않습니다. 이미 새 수강권의 잔여를 입력했다면 선택하세요.' : `전액 수납 시 ${units || '0'}회가 추가됩니다.`}</p>
+        <p>{kind === 'current' ? '수납해도 횟수를 다시 추가하지 않습니다. 이미 새 수강권의 잔여를 입력했다면 선택하세요.' : '선납해도 잔여는 늘어나지 않습니다. 첫 수업에서 수강권이 시작됩니다.'}</p>
         <label>변경 사유·비고<input name="note" maxLength={500} placeholder="예: 9/30 콩쿨반 전환, 12회·23만 원" /></label>
-        <p>청구서만 수정합니다. 수강 설정·잔여 횟수는 유지되며, 수납이나 결제 안내 발송은 하지 않습니다.</p>
+        <p>사용·수납 이력이 없는 청구를 현재 등록 조건에 맞춥니다. 수강 조건 자체를 바꾸려면 총 등록 현황의 수강권 관리를 이용해주세요. 기존 출결·수납·잔여는 유지됩니다.</p>
         {error && <p className="error" role="alert">{error}</p>}
         <button className="primary" disabled={busy}>{busy ? '저장 중…' : '청구 수정 저장'}</button>
       </fieldset>

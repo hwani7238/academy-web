@@ -1,3 +1,4 @@
+import {invoiceContractProblem} from './invoice-contract';
 import type { Account, Attendance, Invoice } from './model';
 import { plannedLesson } from './schedule';
 
@@ -39,7 +40,10 @@ export function projectLessonLedger(account:Account,seed:LessonLedgerSeed,attend
   if(next){cursor++;if(!next.fixedStart&&((reflowStart&&prev.start>=reflowStart)||bills.find(i=>i.id===next.invoiceId)?.allocationState==='pending'))next.start=day;return next;}
   const reservation=account.nextPass;
   const reserved=reservation&&(reservation.mode==='date'?day>=reservation.start:day>=reservation.reservedOn)?bills.find(i=>i.id===reservation.invoiceId):undefined;
-  const candidate=reserved||pending.find(i=>!passes.some(p=>p.invoiceId===i.id));
+  const candidates=pending.filter(i=>!passes.some(p=>p.invoiceId===i.id));
+  if(!reserved&&candidates.length>1)issues.push('연결되지 않은 다음 청구가 여러 건입니다. 청구·수강권 전체 점검에서 확인해주세요.');
+  const candidate=reserved||candidates[0];
+  if(candidate){const problem=invoiceContractProblem({...account,planUnits:prev.units,planAmount:prev.amount,initialPlanUnits:prev.units,passHistory:[]},candidate,day);if(problem)issues.push(problem);}
   const p:ProjectedPass={id:candidate?.passId||candidate?.id||`lesson_${account.id}_${day}_${passes.length}`,invoiceId:candidate?.id||'',start:day,units:candidate?.units||prev.units,amount:candidate?.amount||prev.amount,slots:[],charged:0,remaining:candidate?.units||prev.units,usedOrdinal:0,actual:false};
   passes.push(p);cursor=passes.length-1;return p;
  }
@@ -53,7 +57,7 @@ export function projectLessonLedger(account:Account,seed:LessonLedgerSeed,attend
   const reservation=account.nextPass;
   if(reservation?.mode==='date'&&row.day>=reservation.start&&row.status==='present'&&!passes.some(p=>p.invoiceId===reservation.invoiceId)){
    const invoice=bills.find(i=>i.id===reservation.invoiceId);
-   if(invoice){passes.push({id:invoice.passId||invoice.id,invoiceId:invoice.id,start:row.day,units:invoice.units,amount:invoice.amount,fixedStart:true,slots:[],charged:0,remaining:invoice.units,usedOrdinal:0,actual:false});cursor=passes.length-1;}
+   if(invoice){const problem=invoiceContractProblem(account,invoice,row.day);if(problem)issues.push(problem);passes.push({id:invoice.passId||invoice.id,invoiceId:invoice.id,start:row.day,units:invoice.units,amount:invoice.amount,fixedStart:true,slots:[],charged:0,remaining:invoice.units,usedOrdinal:0,actual:false});cursor=passes.length-1;}
   }
   const numbers:number[]=[];
   for(let n=0;n<count;n++){

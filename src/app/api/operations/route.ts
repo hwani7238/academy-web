@@ -1,3 +1,4 @@
+import {reconcileInvoiceContracts} from '@/lib/operations/invoice-contract-service';
 import {migrateLessonLedger,saveLedgerSheetSource} from '@/lib/operations/ledger-migration-service';
 import {projectLessonLedger} from '@/lib/operations/lesson-ledger';
 import { correctLedgerLink } from '@/lib/operations/ledger-correction';
@@ -111,6 +112,7 @@ export async function POST(request: Request) {
     sameOrigin(request); const actor = await manager(request); const input = await request.json();
     const apply=async()=>{
     switch (input.action) {
+      case 'reconcileInvoiceContracts': return Response.json(await reconcileInvoiceContracts(input,actor));
       case 'saveLedgerSheetSource': return Response.json(await saveLedgerSheetSource(input,actor));
       case 'migrateLessonLedger': return Response.json(await migrateLessonLedger(input,actor));
       case 'correctLedgerLink': return Response.json(await correctLedgerLink(input,actor));

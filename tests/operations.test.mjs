@@ -563,16 +563,14 @@ test('overpayment and duplicate id with changed amount fail without writes', asy
   await testPayment(s,{invoiceId,requestId:'same',amount:10000,method:'카드'},'owner');
   await assert.rejects(testPayment(s,{invoiceId,requestId:'same',amount:20000,method:'카드'},'owner'));
 });
-test('changing plan synchronizes the linked unpaid invoice without resetting balance', async () => {
-  const s=setup();await s.seed();await s.service.createInvoice('student-a','owner'); const invoiceId=s.records.get('opsAccounts/student-a').openInvoiceId;
-  const changes = await s.service.configure({studentId:'student-a',planUnits:8,planAmount:210000,remaining:99,phone:'01000005678',phones:['5678']},'owner');
-  assert.deepEqual(changes.accounts, [s.records.get('opsAccounts/student-a')]);
-  const feeOnly = await s.service.configure({studentId:'student-a',planUnits:8,planAmount:230000,phone:'01000005678',phones:['5678']},'owner');
-  assert.deepEqual(feeOnly.accounts, [s.records.get('opsAccounts/student-a')]);
-  assert.deepEqual(Object.keys(feeOnly), ['accounts', 'invoices']);
-  assert.deepEqual(feeOnly.invoices, [s.records.get(`opsInvoices/${invoiceId}`)]);
-  assert.equal(s.records.get('opsAccounts/student-a').remaining,1);
-  const invoice=s.records.get(`opsInvoices/${invoiceId}`);assert.equal(invoice.amount,230000);assert.equal(invoice.units,8);assert.equal(invoice.creditUnits,0);
+test('fee changes require an effective next-pass reservation and reuse an unused claim',async()=>{
+ const s=setup();await s.seed();await s.service.createInvoice('student-a','owner');
+ const a=s.records.get('opsAccounts/student-a'),id=a.openInvoiceId,before=structuredClone([...s.records]);
+ await assert.rejects(s.service.configure({studentId:a.id,planUnits:8,planAmount:230000,phone:'01000005678',phones:['5678']},'owner'),/수강권 관리/);
+ assert.deepEqual([...s.records],before);
+ await s.service.saveNextPass({studentId:a.id,expectedUpdatedAt:a.updatedAt,units:8,amount:230000,mode:'depleted'},'owner');
+ const next=s.records.get('opsAccounts/student-a');assert.equal(next.remaining,1);assert.equal(next.planAmount,160000);assert.equal(next.nextPass.invoiceId,id);
+ assert.equal(s.records.get('opsInvoices/'+id).amount,230000);assert.equal([...s.records.keys()].filter(k=>k.startsWith('opsInvoices/')).length,1);
 });
 test('prepayment reserves a pass without changing current remaining lessons', async () => {
   const s=setup();await s.seed('student-a',3);await s.service.createInvoice('student-a','owner');const invoiceId=s.records.get('opsAccounts/student-a').openInvoiceId;
@@ -959,7 +957,7 @@ test('schedule service is course-scoped, audited, concurrency-safe and preserved
  a=s.records.get('opsAccounts/piano');assert.equal(a.schedule.moves.length,1);
  assert.equal([...s.records.keys()].filter(k=>/^ops(Attendance|Invoices|Payments|Notices)\//.test(k)).length,0);
  const schedule=structuredClone(a.schedule);
- await s.service.configure({studentId:'piano',planUnits:8,planAmount:210000,remaining:99,phone:'01000001234',phones:['1234']},'owner');
+ await s.service.configure({studentId:'piano',planUnits:8,planAmount:160000,remaining:99,phone:'01000001234',phones:['1234']},'owner');
  assert.deepEqual(s.records.get('opsAccounts/piano').schedule,schedule);assert.equal(s.records.get('opsAccounts/piano').remaining,8);
  const changes={accounts:[s.records.get('opsAccounts/piano')]};
  const applied=s.load('snapshot-changes').applySnapshotChanges({day:'2026-10-01',accounts:[],students:[],attendance:[],invoices:[]},changes);
@@ -1083,6 +1081,7 @@ test('unpaid invoice can change from 170000/8 to 230000/12 without duplicating a
 });
 test('editing a new-pass invoice credits only its revised units and rejects stale edits or partial payments',async()=>{
  const s=setup();await s.seed('student-a',0);await s.service.createInvoice('student-a','owner');
+ Object.assign(s.records.get('opsAccounts/student-a'),{planUnits:12,planAmount:230000});
  const id=s.records.get('opsAccounts/student-a').openInvoiceId;
  const input={invoiceId:id,units:12,amount:230000,kind:'next',expectedUpdatedAt:''};
  await s.service.editInvoice(input,'owner');const invoice=s.records.get(`opsInvoices/${id}`);
@@ -1095,6 +1094,7 @@ test('editing a new-pass invoice credits only its revised units and rejects stal
 });
 test('invoice edits update unsent billing amounts without sending and reject uncertain delivery or invalid input',async()=>{
  const s=setup();await s.seed();await s.service.createInvoice('student-a','owner');
+ Object.assign(s.records.get('opsAccounts/student-a'),{planUnits:12,planAmount:230000});
  const id=s.records.get('opsAccounts/student-a').openInvoiceId;
  const input={invoiceId:id,units:12,amount:230000,kind:'next',expectedUpdatedAt:''};
  const noticeId=`opsNotices/billing_${id}`;
@@ -1103,13 +1103,13 @@ test('invoice edits update unsent billing amounts without sending and reject unc
  const revision=s.records.get(`opsInvoices/${id}`).updatedAt;
  for(const status of ['processing','submitted','unknown','failed']){
   s.records.get(noticeId).status=status;
-  await assert.rejects(s.service.editInvoice({...input,amount:240000,expectedUpdatedAt:revision},'owner'),/발송 결과/);
+  await assert.rejects(s.service.editInvoice({...input,expectedUpdatedAt:revision},'owner'),/발송 결과/);
  }
  for(const patch of [{amount:0},{units:-1},{kind:'bad'},{kind:'current',cycleStart:'bad'},{kind:'current',cycleStart:'2999-01-01'}])await assert.rejects(s.service.editInvoice({...input,...patch,expectedUpdatedAt:revision},'owner'));
  assert.equal(s.records.get(`opsInvoices/${id}`).amount,230000);
 });
 test('a payment racing an invoice edit cannot settle using obsolete terms',async()=>{
- const s=setup();await s.seed('student-a',0);await s.service.createInvoice('student-a','owner');const id=s.records.get('opsAccounts/student-a').openInvoiceId;
+ const s=setup();await s.seed('student-a',0);await s.service.createInvoice('student-a','owner');Object.assign(s.records.get('opsAccounts/student-a'),{planUnits:12,planAmount:230000});const id=s.records.get('opsAccounts/student-a').openInvoiceId;
  const results=await Promise.allSettled([
   s.service.editInvoice({invoiceId:id,units:12,amount:230000,kind:'next',expectedUpdatedAt:''},'owner'),
   testPayment(s,{invoiceId:id,requestId:'racing-payment',amount:160000,method:'현금'},'owner'),
@@ -1248,7 +1248,7 @@ test('weekday edits from either list update only that course in the shared snaps
 
 test('snapshot revision detects schedule-only edits and removal without attendance changes', async () => {
  const {operationsRevision}=setup().load('revision');
- const state={opsLessonReferences:[],opsAttendance:[],opsAccounts:[],opsLegacyCorrections:[]},queries=[];
+ const state={opsInvoices:[],opsLessonReferences:[],opsAttendance:[],opsAccounts:[],opsLegacyCorrections:[]},queries=[];
  const db={collection(name){const query={orderBy(field,dir){queries.push([name,field,dir]);return query},limit(n){assert.equal(n,1);return query},select(){return query},async get(){return {docs:state[name]}}};return query}};
  const doc=(id,value,updateTime)=>({id,data:()=>value,updateTime});
  const empty=await operationsRevision(db);
@@ -1650,56 +1650,45 @@ test('plan sync repairs an existing mismatch without altering dates, paid histor
  const review=s.load('balance-review').reviewBalance(s.records.get('opsAccounts/student-a'),undefined,allAudits,[],[revised]);
  assert.equal(review.status,'verified');assert.equal(review.expected,1);
 });
-test('plan sync preserves a partial receipt and only the revised unpaid remainder can settle',async()=>{
+test('a partial receipt freezes agreed terms; the original remainder settles once',async()=>{
  const s=setup();await s.seed('student-a',0);await s.service.createInvoice('student-a','owner');
  const id=s.records.get('opsAccounts/student-a').openInvoiceId;
  await testPayment(s,{invoiceId:id,requestId:'partial-fee',amount:60000,method:'카드',paymentDate:'2026-09-28'},'owner');
- const receipt=structuredClone(s.records.get('opsPayments/partial-fee'));
- const input={studentId:'student-a',planUnits:8,planAmount:210000,phone:'01000001234',phones:['1234']};
- await s.service.configure(input,'owner');
- const invoice=s.records.get(`opsInvoices/${id}`);assert.equal(invoice.paid,60000);assert.equal(invoice.amount,210000);assert.equal(invoice.units,8);
- assert.deepEqual(s.records.get('opsPayments/partial-fee'),receipt);assert.equal(s.records.get('opsAccounts/student-a').remaining,0);
- for(const amount of [60000,50000]){
-  const before=structuredClone([...s.records]);await assert.rejects(s.service.configure({...input,planAmount:amount},'owner'),/이미 수납/);assert.deepEqual([...s.records],before);
- }
- await assert.rejects(testPayment(s,{invoiceId:id,requestId:'stale-fee',expectedInvoiceUpdatedAt:'',amount:100000,method:'현금'},'owner'),/변경/);
- const payment={invoiceId:id,requestId:'revised-fee',amount:150000,method:'현금',expectedInvoiceUpdatedAt:invoice.updatedAt};
- await Promise.all([testPayment(s,payment,'owner'),testPayment(s,payment,'owner')]);
- assert.equal(s.records.get('opsAccounts/student-a').remaining,0);assert.equal(s.records.get(`opsInvoices/${id}`).status,'paid');
- const paidInvoice=structuredClone(s.records.get(`opsInvoices/${id}`));
- await s.service.configure({...input,planUnits:8,planAmount:150000,syncOpenInvoice:true},'owner');
- assert.deepEqual(s.records.get(`opsInvoices/${id}`),paidInvoice);assert.equal(s.records.get('opsAccounts/student-a').remaining,0);
+ const before=structuredClone([...s.records]);
+ await assert.rejects(s.service.configure({studentId:'student-a',planUnits:8,planAmount:210000,phone:'01000001234',phones:['1234']},'owner'),/수강권 관리/);
+ await assert.rejects(s.service.editInvoice({invoiceId:id,units:8,amount:160000,kind:'next',expectedUpdatedAt:s.records.get('opsInvoices/'+id).updatedAt},'owner'),/수납하지 않은/);
+ assert.deepEqual([...s.records],before);
+ const request={invoiceId:id,requestId:'remainder',amount:100000,method:'현금'};
+ await Promise.all([testPayment(s,request,'owner'),testPayment(s,request,'owner')]);
+ assert.equal(s.records.get('opsAccounts/student-a').remaining,0);assert.equal(s.records.get('opsInvoices/'+id).paid,160000);
+ assert.equal([...s.records.keys()].filter(k=>k.startsWith('opsPayments/')).length,2);
 });
-test('current-cycle plan sync never adds already credited lessons again on payment',async()=>{
+test('current-cycle payment preserves agreed terms and never adds credited lessons',async()=>{
  const s=setup();await s.seed('student-a',6);await s.service.createInvoice('student-a','owner');
- const id=s.records.get('opsAccounts/student-a').openInvoiceId;Object.assign(s.records.get(`opsInvoices/${id}`),{creditUnits:0,cycleStart:'2026-09-19'});
- await s.service.configure({studentId:'student-a',planUnits:8,planAmount:210000,phone:'01000001234',phones:['1234']},'owner');
- const invoice=s.records.get(`opsInvoices/${id}`);assert.equal(invoice.creditUnits,0);assert.equal(invoice.units,8);
- await testPayment(s,{invoiceId:id,requestId:'current-plan',amount:210000,method:'현금',expectedInvoiceUpdatedAt:invoice.updatedAt},'owner');
+ const id=s.records.get('opsAccounts/student-a').openInvoiceId;Object.assign(s.records.get('opsInvoices/'+id),{creditUnits:0,cycleStart:'2026-09-19',allocationState:'allocated',allocatedUnits:8});
+ await assert.rejects(s.service.configure({studentId:'student-a',planUnits:8,planAmount:210000,phone:'01000001234',phones:['1234']},'owner'),/수강권 관리/);
+ await testPayment(s,{invoiceId:id,requestId:'current-plan',amount:160000,method:'현금'},'owner');
  assert.equal(s.records.get('opsAccounts/student-a').remaining,6);
 });
-test('plan sync refreshes an unsent billing notice without sending and rejects in-flight notices atomically',async()=>{
+test('unused claim reconciliation refreshes unsent notices but rejects in-flight delivery atomically',async()=>{
  const s=setup();await s.seed();await s.service.createInvoice('student-a','owner');
- const id=s.records.get('opsAccounts/student-a').openInvoiceId,key=`opsNotices/billing_${id}`;
- const input={studentId:'student-a',planUnits:8,planAmount:230000,phone:'01000001234',phones:['1234']};
- s.records.get(`opsInvoices/${id}`).paid=10000;
- for(const [index,status] of ['queued','blocked','review'].entries()){
+ const id=s.records.get('opsAccounts/student-a').openInvoiceId,key='opsNotices/billing_'+id;
+ const input={studentId:'student-a',planUnits:8,planAmount:160000,phone:'01000001234',phones:['1234'],syncOpenInvoice:true};
+ for(const status of ['queued','blocked','review']){
+  s.records.get('opsInvoices/'+id).amount=150000;
   s.records.set(key,{status,parameters:{amount:'150000',lesson_count:'8',student_name:'가상 학생'}});
-  await s.service.configure({...input,planAmount:230000+index*10000},'owner');
-  const notice=s.records.get(key);assert.equal(notice.status,status);assert.equal(notice.parameters.amount,String(220000+index*10000));assert.equal(notice.parameters.lesson_count,'8');assert.equal(notice.parameters.student_name,'가상 학생');
+  await s.service.configure(input,'owner');assert.equal(s.records.get(key).status,status);assert.equal(s.records.get(key).parameters.amount,'160000');
  }
  for(const status of ['processing','submitted','unknown','failed']){
-  s.records.get(key).status=status;const before=structuredClone([...s.records]);
-  await assert.rejects(s.service.configure({...input,planAmount:260000},'owner'),/발송 결과/);assert.deepEqual([...s.records],before);
+  s.records.get('opsInvoices/'+id).amount=150000;s.records.get(key).status=status;const before=structuredClone([...s.records]);
+  await assert.rejects(s.service.configure(input,'owner'),/발송 결과/);assert.deepEqual([...s.records],before);
  }
- s.records.get(key).status='cancelled';const cancelled=structuredClone(s.records.get(key));
- await s.service.configure({...input,planAmount:260000},'owner');assert.deepEqual(s.records.get(key),cancelled);
- assert.equal([...s.records.keys()].filter(k=>k.startsWith('opsNotices/')).length,1);
+ s.records.get(key).status='cancelled';const before=structuredClone(s.records.get(key));await s.service.configure(input,'owner');assert.deepEqual(s.records.get(key),before);
 });
 test('stale plan forms and invalid invoice links reject all changes',async()=>{
  const s=setup();await s.seed();await s.service.createInvoice('student-a','owner');
  const account=s.records.get('opsAccounts/student-a'),id=account.openInvoiceId;
- const input={studentId:'student-a',planUnits:8,planAmount:210000,phone:'01000001234',phones:['1234'],syncOpenInvoice:true,expectedUpdatedAt:account.updatedAt,expectedOpenInvoiceId:id,expectedInvoiceUpdatedAt:''};
+ const input={studentId:'student-a',planUnits:8,planAmount:160000,phone:'01000001234',phones:['1234'],syncOpenInvoice:true,expectedUpdatedAt:account.updatedAt,expectedOpenInvoiceId:id,expectedInvoiceUpdatedAt:''};
  for(const patch of [{expectedUpdatedAt:'old'},{expectedOpenInvoiceId:'other'},{expectedInvoiceUpdatedAt:'old'}]){
   const before=structuredClone([...s.records]);await assert.rejects(s.service.configure({...input,...patch},'owner'),/변경/);assert.deepEqual([...s.records],before);
  }
@@ -1966,7 +1955,7 @@ test('pass history correction preserves remaining, payments and configuration wh
  const after=s.records.get('opsAccounts/p');assert.deepEqual(after.passHistory,history);assert.equal(after.remaining,14);assert.equal(after.planUnits,16);assert.equal(after.planAmount,before.planAmount);
  assert.equal([...s.records.keys()].some(k=>/^ops(Attendance|Invoices|Payments|Notices)\//.test(k)),false);
  await assert.rejects(s.service.savePassHistory({studentId:'p',history,expectedUpdatedAt:before.updatedAt},'owner'),/변경/);
- await s.service.configure({studentId:'p',planUnits:16,planAmount:250000,phone:'01000001234',phones:['1234'],active:true},'owner');
+ await s.service.configure({studentId:'p',planUnits:16,planAmount:160000,phone:'01000001234',phones:['1234'],active:true},'owner');
  assert.deepEqual(s.records.get('opsAccounts/p').passHistory,history);
  const {passHistoryInput}=s.load('pass-history');
  for(const history of [[],[{start:'bad',units:16}],[{start:'2999-01-01',units:16}],[{start:'2026-10-02',units:12}],[{start:'2026-10-02',units:16},{start:'2026-10-02',units:16}]])assert.throws(()=>passHistoryInput(history,16,'2026-10-06'));
@@ -2657,7 +2646,7 @@ test('settings cannot overwrite an existing pass length or its chronology',async
  const before=structuredClone([...s.records]);
  for(const units of [4,12,16])await assert.rejects(s.service.configure({studentId:'p',planUnits:units,planAmount:210000,phone:'01000001234',phones:['1234']},'owner'),/수강권 관리/);
  assert.deepEqual([...s.records],before);
- await s.service.configure({studentId:'p',planUnits:8,planAmount:170000,phone:'01000001234',phones:['1234']},'owner');
+ await s.service.configure({studentId:'p',planUnits:8,planAmount:160000,phone:'01000001234',phones:['1234']},'owner');
  const a=s.records.get('opsAccounts/p');assert.equal(a.remaining,3);assert.equal(a.initialPlanUnits,12);assert.equal(a.referenceResetFrom,'2026-10-20');assert.deepEqual(a.passHistory,[{start:'2026-10-20',units:8}]);
 });
 test('a smaller pass starts at one after the old twelfth lesson and overrides stale spreadsheet anchors',()=>{
@@ -2766,6 +2755,7 @@ function unifiedReceipt(s, invoice, extra={}) {
 }
 async function unlinkedDrum(s, remaining=-1, extra={}) {
  await s.seed('drum',remaining);
+ Object.assign(s.records.get('opsAccounts/drum'),{planUnits:4,planAmount:180000});
  const invoice={id:'drum-pass',studentId:'drum',name:'테스트 · 드럼',units:4,amount:180000,paid:0,status:'open',needsReview:false,linkReview:true,createdAt:'2026-10-24T00:00:00Z',...extra};
  s.records.set('opsInvoices/'+invoice.id,invoice);
  return invoice;
@@ -3518,4 +3508,98 @@ test('daily review: failure keeps the previous result and releases the lease for
  await assert.rejects(svc.runIntegrityReview('cron',{scheduled:true,now:new Date('2026-11-30T14:30:00Z')}));
  const after=s.records.get('opsIntegrityStatus/latest');assert.deepEqual(after.entries,prior.entries);assert(after.error);assert.equal(s.records.get('opsIntegrityRuns/full').leaseUntil,0);
  s.records.delete('opsPayments/bad');await svc.runIntegrityReview('cron',{scheduled:true,now:new Date('2026-11-30T14:30:00Z')});assert.equal((await svc.getIntegrityStatus()).error,'');
+});
+
+// Enrollment/invoice contract regressions. All fixtures are synthetic.
+async function staleUnusedClaim(s){
+ await s.seed('p',1);
+ const a=s.records.get('opsAccounts/p');
+ Object.assign(a,{currentPassId:'current',currentPassStart:'2026-10-12',openInvoiceId:'stale'});
+ s.records.set('opsInvoices/stale',{id:'stale',studentId:'p',name:'가상 학생',units:12,amount:180000,paid:0,status:'open',reason:'수동 출결 기록 후 소진',needsReview:false,linkReview:true,createdAt:'2026-10-15T00:00:00Z'});
+ return s.load('invoice-contract-service');
+}
+test('contract audit corrects only the unused stale claim, preserves all originals and is idempotent',async()=>{
+ const s=setup(),api=await staleUnusedClaim(s);
+ s.records.set('opsInvoices/current',{id:'current',studentId:'p',units:8,amount:160000,paid:160000,status:'paid',lessonDate:'2026-10-12',passId:'current',allocationState:'allocated'});
+ s.records.set('opsPayments/paid',{id:'paid',studentId:'p',invoiceId:'current',amount:160000,method:'카드',paymentDate:'2026-10-15'});
+ s.records.set('opsAttendance/p_2026-10-16',{id:'p_2026-10-16',studentId:'p',day:'2026-10-16',status:'present',units:1,passId:'current'});
+ const originals=structuredClone([...s.records].filter(([k])=>!k.startsWith('opsAudit/')&&k!=='opsInvoices/stale'));
+ const report=(await api.invoiceContractReports()).find(r=>r.studentId==='p');assert.deepEqual(report.findings.map(f=>f.fix),[{units:8,amount:160000}]);
+ const request={studentId:'p',fingerprint:report.fingerprint};
+ const outcomes=await Promise.all([api.reconcileInvoiceContracts(request,'owner'),api.reconcileInvoiceContracts(request,'owner')]);
+ assert.equal(outcomes.filter(r=>r.duplicate).length,1);
+ assert.deepEqual([...s.records].filter(([k])=>!k.startsWith('opsAudit/')&&k!=='opsInvoices/stale'),originals);
+ assert.equal(s.records.get('opsInvoices/stale').units,8);assert.equal(s.records.get('opsInvoices/stale').amount,160000);assert.equal(s.records.get('opsInvoices/stale').paid,0);
+ const audits=[...s.records.values()].filter(v=>v.action==='reconcile-invoice-contracts');assert.equal(audits.length,1);assert.equal(audits[0].detail.changes[0].before.units,12);
+ assert.equal((await api.invoiceContractReports())[0].findings.length,0);
+});
+test('contract repair rejects stale evidence and never infers a receipt or edits used, paid, duplicate or reserved claims',async()=>{
+ for(const patch of ['receipt','cancelled-receipt','used','duplicate','reservation','notice','changed']){
+  const s=setup(),api=await staleUnusedClaim(s),preview=(await api.invoiceContractReports())[0];
+  if(patch.includes('receipt'))s.records.set('opsPayments/r',{id:'r',studentId:'p',invoiceId:'stale',amount:1000,...(patch==='cancelled-receipt'?{cancelledAt:'2026-11-01'}:{})});
+  if(patch==='used')s.records.set('opsAttendance/p_2026-10-20',{id:'p_2026-10-20',studentId:'p',day:'2026-10-20',status:'travel',units:0,passId:'stale'});
+  if(patch==='duplicate')s.records.set('opsInvoices/other',{...s.records.get('opsInvoices/stale'),id:'other'});
+  if(patch==='reservation')s.records.get('opsAccounts/p').nextPass={invoiceId:'stale',units:12,amount:180000,mode:'depleted',start:'',reservedOn:'2026-10-15'};
+  if(patch==='notice')s.records.set('opsNotices/billing_stale',{id:'billing_stale',studentId:'p',status:'submitted'});
+  if(patch==='changed')s.records.get('opsAccounts/p').updatedAt='changed';
+  const before=structuredClone([...s.records]);
+  await assert.rejects(api.reconcileInvoiceContracts({studentId:'p',fingerprint:preview.fingerprint},'owner'),/변경/);
+  if(patch!=='changed')assert.equal((await api.invoiceContractReports())[0].findings.some(f=>f.fix),false,patch);
+  assert.deepEqual([...s.records],before);
+ }
+});
+test('unpaid mismatched contracts are blocked in linking, settlement and renewal while historical receipts keep their terms',async()=>{
+ const s=setup();await staleUnusedClaim(s);const i=s.records.get('opsInvoices/stale'),a=s.records.get('opsAccounts/p'),before=structuredClone([...s.records]);
+ await assert.rejects(s.service.linkInvoiceLesson({invoiceId:'stale',lessonDate:'2026-11-09',expectedUpdatedAt:''},'owner'),/8회권/);
+ await assert.rejects(s.service.payment({invoiceId:'stale',amount:180000,method:'현금',requestId:'bad',expectedInvoiceUpdatedAt:'',lessonDate:'2026-11-09'},'owner'),/8회권/);
+ assert.deepEqual([...s.records],before);
+ const {invoiceContractProblem}=s.load('invoice-contract');
+ assert.equal(invoiceContractProblem(a,{...i,paid:180000,status:'paid'},'2026-09-01'),'');
+ const api=s.load('invoice-contract-service'),preview=(await api.invoiceContractReports())[0];await api.reconcileInvoiceContracts({studentId:'p',fingerprint:preview.fingerprint},'owner');
+ assert.equal(invoiceContractProblem(a,s.records.get('opsInvoices/stale'),'2026-11-09'),'');
+});
+test('current price edits cannot silently rewrite a used invoice even if the stored enrollment already changed',async()=>{
+ const s=setup();await s.seed('p',3);await s.service.createInvoice('p','owner');
+ const a=s.records.get('opsAccounts/p'),id=a.openInvoiceId;Object.assign(a,{planAmount:180000});
+ Object.assign(s.records.get('opsInvoices/'+id),{allocationState:'allocated',allocatedUnits:8,lessonDate:'2026-10-01'});
+ const before=structuredClone([...s.records]);
+ await assert.rejects(s.service.configure({studentId:'p',planUnits:8,planAmount:180000,syncOpenInvoice:true,phone:'01000001234',phones:['1234']},'owner'),/이미 사용/);
+ await assert.rejects(s.service.editInvoice({invoiceId:id,units:8,amount:180000,kind:'current',cycleStart:'2026-10-01',expectedUpdatedAt:''},'owner'),/이미 사용/);
+ await assert.rejects(s.service.invoiceAction({invoiceId:id,action:'cancelInvoice'},'owner'),/이미 사용/);
+ assert.deepEqual([...s.records],before);
+});
+test('three prepaid four-lesson passes keep three contracts, charge once, and bill only the thirteenth lesson',()=>{
+ const s=setup(),project=s.load('lesson-ledger').projectLessonLedger;
+ const account={id:'p',planUnits:4,planAmount:120000,remaining:12};
+ const dates=['2026-08-24','2026-08-31','2026-09-07','2026-09-14','2026-09-21','2026-09-28','2026-10-12','2026-10-19','2026-10-26','2026-11-02','2026-11-09','2026-11-16','2026-11-23'];
+ const invoices=[0,4,8].map((n,j)=>({id:'paid'+j,passId:'paid'+j,studentId:'p',units:4,amount:120000,paid:120000,status:'paid',allocationState:'allocated',lessonDate:dates[n]}));
+ const seed={version:2,from:dates[0],passes:invoices.map(i=>({id:i.id,invoiceId:i.id,start:i.lessonDate,units:4,amount:120000})),archived:[],adjustments:[]};
+ const records=dates.map(day=>({id:'p_'+day,studentId:'p',day,status:'present',units:1}));
+ const original=structuredClone({seed,invoices,records});
+ const ten=project(account,seed,records.slice(0,10),invoices,dates[9]);assert.equal(ten.currentRemaining,2);assert.equal(ten.passes.length,3);
+ const twelve=project(account,seed,records.slice(0,12),invoices,dates[11]);assert.equal(twelve.currentRemaining,0);assert.equal(twelve.passes.length,3);
+ const thirteen=project(account,seed,records,invoices,dates[12]);assert.equal(thirteen.currentRemaining,3);assert.equal(thirteen.passes.length,4);assert.equal(thirteen.passes[3].invoiceId,'');assert.deepEqual(thirteen.issues,[]);
+ assert.deepEqual({seed,invoices,records},original);
+});
+
+test('owner-confirmed cumulative prepayment migrates to separate passes without rewriting source cells or receipt facts',async()=>{
+ const s=setup();await s.seed('p',7);Object.assign(s.records.get('opsAccounts/p'),{planUnits:4,planAmount:120000});
+ const dates=['2026-08-24','2026-08-31','2026-09-07','2026-09-14','2026-09-21','2026-09-28','2026-10-12','2026-10-19','2026-10-26','2026-11-02'];
+ for(const [j,n] of [0,4,8].entries()){
+  s.records.set('opsInvoices/series'+j,{id:'series'+j,studentId:'p',passId:'series'+j,units:4,amount:120000,paid:120000,status:'paid',allocationState:'allocated',lessonDate:dates[n]});
+  s.records.set('opsPayments/r'+j,{id:'r'+j,studentId:'p',invoiceId:'series'+j,amount:120000,method:'카드',paymentDate:'2026-08-24'});
+ }
+ const history=dates.slice(0,5).map(day=>({id:'sheet_p_'+day,studentId:'p',day,status:'present',units:1}));
+ const sheet={source:'test',history,cells:dates.slice(0,9).map((day,n)=>({day,value:String(n+1),color:'',cell:'A'+n,sheet:'test'})),note:'12회 선납',updatedAt:'v1'};
+ s.records.set('opsLedgerSources/p',sheet);
+ for(const day of dates.slice(5))s.records.set('opsAttendance/p_'+day,{id:'p_'+day,studentId:'p',day,status:'present',units:1});
+ const service=s.load('ledger-migration-service'),before=structuredClone([...s.records].filter(([k])=>k.startsWith('opsPayments/')||k.startsWith('opsLedgerSources/'))),facts=structuredClone([...s.records].filter(([k])=>k.startsWith('opsAttendance/')).map(([,r])=>({day:r.day,status:r.status,units:r.units})));
+ const r=(await service.ledgerMigrationReports())[0];assert.equal(r.ready,false);assert.deepEqual(r.prepaidSeries,{start:'2026-08-24',units:4,count:3,afterRemaining:2});
+ await assert.rejects(service.migrateLessonLedger({studentId:'p',fingerprint:r.fingerprint},'owner'),/장부/);
+ await service.migrateLessonLedger({studentId:'p',fingerprint:r.fingerprint,confirmPrepaidSeries:true},'owner');
+ assert.equal(s.records.get('opsAccounts/p').remaining,2);assert.equal(s.records.get('opsAccounts/p').planUnits,4);
+ assert.deepEqual([...s.records].filter(([k])=>k.startsWith('opsPayments/')||k.startsWith('opsLedgerSources/')),before);
+ assert.deepEqual([...s.records].filter(([k])=>k.startsWith('opsAttendance/')).map(([,r])=>({day:r.day,status:r.status,units:r.units})),facts);
+ const ledger=s.records.get('opsCourseLedgers/p');assert.equal(ledger.projection.labels.p_2026_10_12,undefined);assert.equal(ledger.projection.labels['p_2026-10-12'],'3');
+ const unchanged=structuredClone([...s.records]);await service.migrateLessonLedger({studentId:'p',fingerprint:r.fingerprint},'owner');assert.deepEqual([...s.records],unchanged);
 });

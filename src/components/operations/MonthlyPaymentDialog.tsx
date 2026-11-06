@@ -1,6 +1,7 @@
 'use client';
 import {useEffect,useMemo,useRef,useState} from 'react';
 import {type Snapshot,METHODS,seoulDay} from '@/lib/operations/model';
+import {invoiceContractProblem} from '@/lib/operations/invoice-contract';
 import {monthlyPaymentOptions} from '@/lib/operations/monthly-payment';
 import {passUnitsOn} from '@/lib/operations/pass-history';
 import {displayEnrollmentName} from '@/lib/operations/student-order';
@@ -19,6 +20,7 @@ export function MonthlyPaymentDialog({data,studentId,day:initialDay,initialInvoi
  const [duplicateCheck,setDuplicateCheck]=useState('');
  const [busy,setBusy]=useState(false),[error,setError]=useState('');
  const invoice=candidates.find(i=>i.id===choice),linkOnly=invoice?.status==='paid',units=invoice?.units||passUnitsOn(account,day);
+ const contractProblem=invoice?invoiceContractProblem(account,invoice,day):'';
  const chooseAllocation=!invoice||(!invoice.reservedPass&&invoice.allocationState!=='allocated'&&(!invoice.passId?invoice.creditUnits!==0:true));
  useEffect(()=>{ref.current?.showModal();},[]);
  return <dialog ref={ref} className="quick-attendance monthly-payment-dialog" aria-labelledby="monthly-payment-title" onCancel={e=>{e.preventDefault();if(!lock.current)close();}}><div className="section-head"><div><h2 id="monthly-payment-title">수강권 연결·수납</h2><p>{displayEnrollmentName(student)}<br/>{day?`${day} · 1회차`:'1회차 날짜를 입력해주세요'}</p></div><CloseButton disabled={busy} onClick={close}/></div>
@@ -39,6 +41,7 @@ export function MonthlyPaymentDialog({data,studentId,day:initialDay,initialInvoi
  </>}</div>}
  {invoice?.needsReview&&<InvoiceReviewPanel invoice={invoice} save={save} cancelled={close} onBusyChange={value=>{lock.current=value;setBusy(value);}}/>}
  {duplicateCheck&&<label>실제로 별도 결제받은 사유<input name="duplicateReceiptReason" required minLength={5} maxLength={500} placeholder="예: 다음 수강권을 같은 날 별도로 선납"/><small>기존 결제를 다시 입력하는 경우에는 저장하지 말고 기존 수납을 연결해주세요.</small></label>}
- {error&&<p className="error" role="alert">{error}</p>}{!invoice?.needsReview&&<button className="primary" disabled={busy||!choice||!day||(choice!=='new'&&!invoice)}>{busy?'저장 중…':linkOnly?'기존 수납 연결 · 금액·횟수 유지':'수강권 연결·수납 저장'}</button>}
+ {contractProblem&&<p className="error" role="alert">{contractProblem}</p>}
+ {error&&<p className="error" role="alert">{error}</p>}{!invoice?.needsReview&&<button className="primary" disabled={busy||!!contractProblem||!choice||!day||(choice!=='new'&&!invoice)}>{busy?'저장 중…':linkOnly?'기존 수납 연결 · 금액·횟수 유지':'수강권 연결·수납 저장'}</button>}
  </form></dialog>;
 }

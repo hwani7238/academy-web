@@ -5,6 +5,7 @@ import {seoulDay} from './model';
 // A schedule edit does not create an attendance record; include it independently.
 export async function operationsRevision(db: FirebaseFirestore.Firestore) {
   const snapshots = await Promise.all([
+    db.collection('opsInvoices').orderBy('updatedAt','desc').limit(1).select('updatedAt').get(),
     db.collection('opsAccounts').orderBy('updatedAt','desc').limit(1).select('updatedAt').get(),
     db.collection('opsLessonReferences').orderBy('updatedAt', 'desc').limit(1).select('updatedAt').get(),
     db.collection('opsAttendance').orderBy('updatedAt', 'desc').limit(1).select('updatedAt').get(),
