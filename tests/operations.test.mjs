@@ -3603,3 +3603,14 @@ test('owner-confirmed cumulative prepayment migrates to separate passes without 
  const ledger=s.records.get('opsCourseLedgers/p');assert.equal(ledger.projection.labels.p_2026_10_12,undefined);assert.equal(ledger.projection.labels['p_2026-10-12'],'3');
  const unchanged=structuredClone([...s.records]);await service.migrateLessonLedger({studentId:'p',fingerprint:r.fingerprint},'owner');assert.deepEqual([...s.records],unchanged);
 });
+test('legacy unused claims prevent duplicate billing even when the account pointer is missing',async()=>{
+ const s=setup();await staleUnusedClaim(s);Object.assign(s.records.get('opsAccounts/p'),{openInvoiceId:null});
+ const before=structuredClone([...s.records]);
+ await assert.rejects(s.service.createInvoice('p','owner'),/이미 다음/);
+ await assert.rejects(s.service.createCurrentCycleInvoice({studentId:'p',cycleStart:'2026-11-06',expectedUpdatedAt:s.records.get('opsAccounts/p').updatedAt},'owner'),/미사용 청구/);
+ assert.deepEqual([...s.records],before);
+ await s.service.checkIn('p','1234','device');
+ assert.equal([...s.records.keys()].filter(k=>k.startsWith('opsInvoices/')).length,1);
+ assert.equal(s.records.get('opsAccounts/p').remaining,0);
+ assert.equal([...s.records.values()].filter(v=>v.studentId==='p'&&v.source==='kiosk').length,1);
+});

@@ -1,4 +1,4 @@
-import {requireInvoiceContract,requireUnusedInvoice} from './invoice-contract';
+import {invoiceAwaitingStart,requireInvoiceContract,requireUnusedInvoice} from './invoice-contract';
 import { requireDistinctReceipt } from './pass-settlement';
 import {reconcileAttendance} from './reconcile-attendance';
 import { invoiceReviewPatch, invoiceReviewRevision } from './invoice-review';
@@ -299,7 +299,7 @@ async function registerArrival(studentId: string, digits: string, actor: string,
     account=pass.account;
     if(pass.invoice){if(pass.created)tx.create(db.doc(`opsInvoices/${pass.invoice.id}`),pass.invoice);else tx.update(db.doc(`opsInvoices/${pass.invoice.id}`),{...pass.invoice});audit(tx,db,actor,'allocate-pass',id,{passId:pass.passId,day,units:pass.invoice.units,remaining:account.remaining});}
     const remaining = adjustBalance(account.remaining, 0, units);
-    const openInvoiceId = account.ledgerVersion!==2 && remaining <= 0 && units > 0 && !account.openInvoiceId && !passRows.some(i=>i.allocationState==='pending'&&i.status!=='cancelled') && !unresolvedReceipts(passRows).length ? newInvoice(tx, db, account, invoiceId, '수업 횟수 소진') : account.openInvoiceId;
+    const openInvoiceId = account.ledgerVersion!==2 && remaining <= 0 && units > 0 && !account.openInvoiceId && !passRows.some(invoiceAwaitingStart) && !unresolvedReceipts(passRows).length ? newInvoice(tx, db, account, invoiceId, '수업 횟수 소진') : account.openInvoiceId;
     tx.set(attendanceRef, { ...(pass.passId?{passId:pass.passId}:{}),id: attendanceId, studentId: id, name: account.name, day, at: now(), units, status: reservation ? 'makeup' : 'present', source: teacher ? 'teacher' : 'kiosk', ...(teacher ? {arrivalAt:teacher.arrivalAt, notificationSuppressed:true} : {}), note: reservation?.note || '', ...(reservation ? {relatedDay:reservation.relatedDay} : {}), updatedAt: now() });
     tx.update(ref, { ...account, remaining, openInvoiceId, updatedAt: now() });
     if (!teacher && !previousNotice?.exists) enqueue(tx, db, `attendance_${attendanceId}`, account, 'attendance', { student_name: String(owner.name || account.name), attendance_time: new Date().toLocaleTimeString('ko-KR', { timeZone: 'Asia/Seoul', hour: '2-digit', minute: '2-digit', hour12: false }) });
@@ -351,7 +351,7 @@ export async function adjust(input: Record<string, unknown>, actor: string) {
       return;
     }
     const remaining = adjustBalance(account.remaining, attendance.units, units);
-    const openInvoiceId = account.ledgerVersion!==2 && remaining <= 0 && !account.openInvoiceId && !passes.some(i=>i.allocationState==='pending'&&i.status!=='cancelled') ? newInvoice(tx, db, account, invoiceId, '횟수 수정 후 소진') : account.openInvoiceId;
+    const openInvoiceId = account.ledgerVersion!==2 && remaining <= 0 && !account.openInvoiceId && !passes.some(invoiceAwaitingStart) ? newInvoice(tx, db, account, invoiceId, '횟수 수정 후 소진') : account.openInvoiceId;
     if (remaining > 0 && attendance.units !== units && currentInvoice?.data()?.status === 'open' && !currentInvoice.data()?.reservedPass) tx.update(currentInvoice.ref, invoiceReviewPatch({kind:'attendance_changed',day:attendance.day,beforeRemaining:account.remaining,afterRemaining:remaining},now()));
     tx.update(ref, { remaining, openInvoiceId, updatedAt: now() });
     tx.update(attendanceRef, { units, note, updatedAt: now() });
@@ -381,7 +381,7 @@ export async function createInvoice(studentId: unknown, actor: string) {
     if(account.nextPass)throw Error('다음 수강권의 예약 청구가 이미 있습니다. 청구·수납에서 확인해주세요.');
     if (account.openInvoiceId) throw new Error('아직 완료하지 않은 청구가 있습니다.');
     const all=(await tx.get(db.collection('opsInvoices').where('studentId','==',id))).docs.map(d=>({...d.data(),id:d.id}) as Invoice);requireClearPassLinks(all);
-    if(all.some(i=>i.status!=='cancelled'&&i.allocationState==='pending'))throw Error('이미 다음 수강권이 있습니다. 기존 청구를 확인해주세요.');
+    if(all.some(invoiceAwaitingStart))throw Error('이미 다음 수강권이 있습니다. 기존 청구를 확인해주세요.');
     newInvoice(tx, db, account, invoiceId, '원장 등록');
     tx.update(ref, { openInvoiceId: invoiceId, updatedAt: now() }); audit(tx, db, actor, 'invoice', id, { invoiceId });
   });
@@ -619,7 +619,7 @@ export async function recordAttendance(input: Record<string, unknown>, actor: st
     account=pass.account;
     if(pass.invoice){if(pass.created)tx.create(db.doc(`opsInvoices/${pass.invoice.id}`),pass.invoice);else tx.update(db.doc(`opsInvoices/${pass.invoice.id}`),{...pass.invoice});audit(tx,db,actor,'allocate-pass',studentId,{passId:pass.passId,day:values.day,units:pass.invoice.units,remaining:account.remaining});}
     const remaining = adjustBalance(account.remaining, old?.units || 0, values.units);
-    const openInvoiceId = account.ledgerVersion!==2 && remaining <= 0 && values.units > (old?.units || 0) && !account.openInvoiceId && !passRows.some(i=>i.allocationState==='pending'&&i.status!=='cancelled') && !unresolvedReceipts(passRows).length ? newInvoice(tx, db, account, invoiceId, '수동 출결 기록 후 소진', stamp) : account.openInvoiceId;
+    const openInvoiceId = account.ledgerVersion!==2 && remaining <= 0 && values.units > (old?.units || 0) && !account.openInvoiceId && !passRows.some(invoiceAwaitingStart) && !unresolvedReceipts(passRows).length ? newInvoice(tx, db, account, invoiceId, '수동 출결 기록 후 소진', stamp) : account.openInvoiceId;
     const review = account.ledgerVersion!==2 && remaining > 0 && values.units < (old?.units || 0);
     const reviewPatch = review && currentInvoice?.data()?.status === 'open' && !currentInvoice.data()?.reservedPass ? invoiceReviewPatch({kind:values.status==='cancelled'?'attendance_cancelled':'attendance_changed',day:values.day,beforeRemaining:accountSnap.data()!.remaining,afterRemaining:remaining},stamp) : undefined;
     if (reviewPatch) tx.update(currentInvoice!.ref, reviewPatch);
@@ -669,7 +669,7 @@ export async function correctRemaining(input: Record<string, unknown>, actor: st
     let invoice=invoiceSnap?.data() as Invoice|undefined;
     let openInvoiceId=account.openInvoiceId;
     const passes=(await tx.get(db.collection('opsInvoices').where('studentId','==',studentId))).docs.map(d=>d.data() as Invoice);
-    if(remaining<=0 && !openInvoiceId&&!passes.some(i=>i.allocationState==='pending'&&i.status!=='cancelled')){
+    if(remaining<=0 && !openInvoiceId&&!passes.some(invoiceAwaitingStart)){
       openInvoiceId=newInvoice(tx,db,{...account,autoBilling:false},randomUUID(),'잔여 횟수 정정 후 소진',at);
       invoice={id:openInvoiceId,studentId,name:account.name,units:account.planUnits,amount:account.planAmount,paid:0,status:'open',needsReview:false,createdAt:at};
     }else if(remaining!==account.remaining && invoice?.status==='open' && !invoice.reservedPass){
@@ -699,6 +699,7 @@ export async function createCurrentCycleInvoice(input:Record<string,unknown>,act
   if(account.openInvoiceId)throw Error('진행 중인 청구가 있습니다. 기존 청구를 확인해주세요.');
   if(account.updatedAt!==input.expectedUpdatedAt)throw Error('수강 정보가 변경됐습니다. 창을 닫고 다시 확인해주세요.');
   requireClearPassLinks(cycles.docs.map(d=>({...d.data(),id:d.id}) as Invoice));
+  if(cycles.docs.some(d=>invoiceAwaitingStart(d.data() as Invoice)))throw Error('이미 미사용 청구·선납 수강권이 있습니다. 기존 수강권을 먼저 확인해주세요.');
   const at=now();const invoice:Invoice=passInvoice({id:invoiceId,studentId:id,name:account.name,units:account.planUnits,amount:account.planAmount,paid:0,status:'open',needsReview:false,createdAt:at,creditUnits:0,...(cycleStart?{cycleStart}:{})},true,at);
   tx.create(invoiceRef,invoice);tx.update(ref,{openInvoiceId:invoiceId,updatedAt:at});
   audit(tx,db,actor,'current-cycle-invoice',id,{invoiceId,cycleStart,amount:invoice.amount,remaining:account.remaining,creditUnits:0});

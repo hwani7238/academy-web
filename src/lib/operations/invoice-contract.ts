@@ -3,6 +3,7 @@ import {passUnitsOn} from './pass-history';
 import type {LessonLedgerSeed} from './lesson-ledger';
 
 export const invoiceStart=(i:Invoice)=>i.lessonDate||i.cycleStart||'';
+export const invoiceAwaitingStart=(i:Invoice)=>i.status!=='cancelled'&&(i.allocationState==='pending'||i.reservedPass||!invoiceStart(i));
 export function invoiceHasUsage(i:Invoice,records:Attendance[],seed?:LessonLedgerSeed){
  const ids=new Set([i.id,i.passId].filter(Boolean));
  return i.allocationState==='allocated'||(i.allocatedUnits||0)>0||records.some(r=>ids.has(r.passId)||r.passAllocations?.some(p=>ids.has(p.passId)))||!!seed?.passes.some(p=>p.invoiceId===i.id&&((p.openingUsed||0)>0||(p.openingOrdinal||0)>0));
