@@ -3653,3 +3653,10 @@ test('confirming an already allocated unpaid pass clears only its review and nev
  const saved=s.records.get('opsInvoices/unpaid');assert.equal(saved.linkReview,false);assert.equal(saved.status,'open');assert.equal(saved.paid,0);assert.equal(saved.allocatedUnits,8);
  assert.deepEqual(s.records.get('opsAccounts/p'),a);assert.deepEqual(s.records.get('opsAttendance/p_2026-10-13'),r);assert.equal([...s.records.keys()].some(k=>k.startsWith('opsPayments/')),false);
 });
+test('an owner-confirmed native pause supersedes a stale imported first lesson without altering the sheet source',()=>{
+ const s=setup(),prepare=s.load('lesson-ledger-migration').prepareLessonLedger;
+ const days=['2026-10-05','2026-10-12','2026-10-24','2026-10-26','2026-11-02'];
+ const sheet={source:'test',cells:days.map((day,n)=>({day,value:String(n%4+1),color:'',cell:'A'+n,sheet:'test'})),history:days.map(day=>({id:day,studentId:'p',day,status:'present',units:1})),note:'original',updatedAt:'v1'};
+ const e={account:{id:'p',planUnits:4,planAmount:180000,remaining:5},sheet,attendance:[{id:'pause',studentId:'p',day:'2026-11-02',status:'paused',units:0,note:'원장 확인: 결석, 다음주 1회차'}],invoices:[{id:'paid',passId:'paid',studentId:'p',units:4,amount:180000,paid:180000,status:'paid',allocationState:'allocated',lessonDate:days[0]}],payments:[],references:[],legacy:[]};
+ const original=structuredClone(e);const p=prepare(e,'2026-11-06','x');assert.equal(p.ready,true);assert.equal(p.afterRemaining,0);assert.equal(p.projection.passes.length,1);assert.deepEqual(e,original);
+});
