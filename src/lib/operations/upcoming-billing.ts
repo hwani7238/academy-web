@@ -1,8 +1,8 @@
 import {attendanceInvoiceDates} from './billing-attendance';
 import {unresolvedReceipts} from './pass-link';
-import {attendanceForecast} from './attendance-forecast';
+import {attendanceForecastSequence} from './attendance-forecast';
 import {attendanceSequence} from './attendance-sequence';
-import {isFirstLesson,legacyAttendanceAppearance} from './attendance-appearance';
+import {confirmedPassLessons,isFirstLesson,legacyAttendanceAppearance} from './attendance-appearance';
 import {invoiceCycleStart} from './billing-display';
 import {enrollmentState} from './lifecycle';
 import {seoulDay,type Invoice,type Snapshot} from './model';
@@ -15,7 +15,7 @@ export function billingProjection(data:Snapshot,today=seoulDay()){
  const sequence=attendanceSequence(data.accounts,records,data.legacyAttendance||[],context);
  const cycles=Object.fromEntries(Object.entries(sequence.cycleFirstDays).map(([id,days])=>[id,[...days]])),times={...sequence.firstLessonTimes};
  const dates:string[]=[];for(let d=Date.parse(today);d<Date.parse(billingHorizon(today));d+=86400000)dates.push(new Date(d).toISOString().slice(0,10));
- const forecast=attendanceForecast(data.accounts,records,data.legacyAttendance||[],context,dates,today);
+ const {forecast,sequence:forecastSequence}=attendanceForecastSequence(data.accounts,records,data.legacyAttendance||[],context,dates,today);
  const candidateKeys=new Set<string>();
  for(const [key,label] of forecast){if(!isFirstLesson(label,'present'))continue;const id=key.slice(0,-11),day=key.slice(-10);const days=cycles[id]||=[];if(!days.includes(day))days.push(day);times[key]='forecast';candidateKeys.add(key);}
  for(const row of data.attendance)if(isFirstLesson(sequence.labels.get(`${row.studentId}_${row.day}`),row.status))candidateKeys.add(`${row.studentId}_${row.day}`);
@@ -34,6 +34,8 @@ export function billingProjection(data:Snapshot,today=seoulDay()){
  const invoiceDates=attendanceInvoiceDates(data,today);
  for(const i of invoiceRows)if(!invoiceDates[i.id]){const day=invoiceCycleStart(i,cycles,times);if(day)invoiceDates[i.id]=day;}
  const covered=new Set(invoiceRows.filter(i=>i.status!=='cancelled').flatMap(i=>{const day=invoiceDates[i.id];return day?[`${i.studentId}_${day}`]:[];}));
+ for(const key of confirmedPassLessons(invoiceRows,records,cycles,times,sequence.labels))covered.add(key);
+ for(const key of forecastSequence.paidFirstSlots)covered.add(key);
  const upcoming:Invoice[]=[],seen=new Set<string>();
  if(data.day.slice(0,7)!==today.slice(0,7))return {upcoming,invoiceDates,cycleFirstDays:cycles,firstLessonTimes:times};
  for(const key of [...candidateKeys].sort((a,b)=>a.slice(-10).localeCompare(b.slice(-10)))){

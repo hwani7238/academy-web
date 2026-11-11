@@ -1,4 +1,5 @@
 import {invoiceAwaitingStart,requireInvoiceContract,requireUnusedInvoice} from './invoice-contract';
+import { attendanceForecastSequence } from './attendance-forecast';
 import { requireDistinctReceipt } from './pass-settlement';
 import {reconcileAttendance} from './reconcile-attendance';
 import { invoiceReviewPatch, invoiceReviewRevision } from './invoice-review';
@@ -933,6 +934,19 @@ export async function saveNextPass(input:Record<string,unknown>,actor:string){
  });
 }
 
+// Recheck ownership inside the write transaction: an already-open browser may
+// still offer an obsolete projection for a first lesson that has been prepaid.
+async function requireUnpaidLedgerFirst(tx:Transaction,db:Firestore,account:Account,invoices:Invoice[],day:string){
+ if(account.ledgerVersion!==2||!invoices.some(i=>i.status==='paid'))return;
+ const ledger=(await tx.get(db.doc('opsCourseLedgers/'+account.id))).data();
+ if(!ledger?.seed||day<ledger.seed.from)return;
+ const history=await tx.get(db.collection('opsAttendance').where('studentId','==',account.id));
+ const records=history.docs.map(d=>({...d.data(),id:d.id}) as Attendance),today=seoulDay();
+ const context={positions:{},cycleStarts:[],canonical:{[account.id]:{seed:ledger.seed,records,invoices,today}}};
+ const {sequence}=attendanceForecastSequence([account],records,[],context,[day],today);
+ if(sequence.paidFirstSlots.has(account.id+'_'+day))throw Error('이미 선납된 수강권의 1회차입니다. 기존 수납 내역을 확인해주세요.');
+}
+
 export async function prepareUpcomingInvoice(input:Record<string,unknown>,actor:string){
  const id=key(input.studentId),day=validDay(input.lessonDate),today=seoulDay();
  if(day<`${today.slice(0,7)}-01`||Date.parse(day)>Date.parse(today)+32*86400000)throw Error('현재 월 또는 가까운 예정 수업일을 확인해주세요.');
@@ -946,6 +960,7 @@ export async function prepareUpcomingInvoice(input:Record<string,unknown>,actor:
   if(linked)return {...linked.data(),id:linked.id} as Invoice;
   const lesson=(await tx.get(db.doc(`opsAttendance/${id}_${day}`))).data();
   if(lesson?.passId){const existing=all.docs.find(d=>(d.data().passId||d.id)===lesson.passId);if(existing)return {...existing.data(),id:existing.id} as Invoice;throw Error('출석에 연결된 수강권을 먼저 확인해주세요.');}
+  await requireUnpaidLedgerFirst(tx,db,account,all.docs.map(d=>({...d.data(),id:d.id}) as Invoice),day);
   if(all.docs.some(d=>d.id===invoiceId))throw Error('취소한 청구가 있는 날짜입니다. 기존 청구 내역을 확인해주세요.');
   if(account.updatedAt!==input.expectedUpdatedAt||(account.schedule?.updatedAt||'')!==(input.expectedScheduleUpdatedAt||''))throw Error('출결 또는 수강 정보가 변경됐습니다. 다시 확인해주세요.');
   if(account.nextPass)throw Error('다음 수강권의 예약 청구를 확인해주세요.');
@@ -988,6 +1003,7 @@ export async function monthlyPayment(input:Record<string,unknown>,actor:string){
   }
   if(account.updatedAt!==input.expectedUpdatedAt)throw Error('수강 정보가 변경됐습니다. 창을 닫고 다시 확인해주세요.');
   if(old&&(!selectedId||(old.updatedAt||'')!==(input.expectedInvoiceUpdatedAt||'')))throw Error('청구가 변경됐습니다. 창을 닫고 다시 확인해주세요.');
+  if(!old)await requireUnpaidLedgerFirst(tx,db,account,all.docs.map(d=>({...d.data(),id:d.id}) as Invoice),day);
   if(!old){requireClearPassLinks(all.docs.map(d=>({...d.data(),id:d.id}) as Invoice));if(all.docs.some(d=>d.data().status!=='cancelled'&&(!d.data().lessonDate&&!d.data().cycleStart||d.data().allocationState==='pending'||d.data().reservedPass)))throw Error('미사용 청구 또는 선납 수강권이 이미 있습니다. 기존 청구를 확인한 뒤 연결해주세요.');}
   const stamp=new Date(Math.max(Date.now(),(Date.parse(old?.updatedAt||'')||0)+1)).toISOString();let invoice=old||monthlyInvoice(account,invoiceId,day,input,stamp);
   let remaining=account.remaining;

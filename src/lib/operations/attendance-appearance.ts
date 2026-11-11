@@ -53,7 +53,7 @@ export function confirmedFirstLessons(invoices: Invoice[], cycleFirstDays: Recor
 
 // Projected first lessons need the same payment check before the child arrives.
 // Include real cycle dates so an old receipt cannot pay a later forecast cycle.
-export function unpaidForecastFirstLessons(forecast: Map<string, string>, invoices: Invoice[], cycleFirstDays: Record<string, string[]>, firstLessonTimes: Record<string, string> = {}) {
+export function unpaidForecastFirstLessons(forecast: Map<string, string>, invoices: Invoice[], cycleFirstDays: Record<string, string[]>, firstLessonTimes: Record<string, string> = {}, paidFirstSlots?: ReadonlySet<string>) {
   const cycles = Object.fromEntries(Object.entries(cycleFirstDays).map(([id, days]) => [id, [...days]]));
   const firstKeys: string[] = [];
   const times = { ...firstLessonTimes };
@@ -66,7 +66,7 @@ export function unpaidForecastFirstLessons(forecast: Map<string, string>, invoic
     times[key] = 'forecast';
   }
   const confirmed = confirmedFirstLessons(invoices, cycles, times);
-  return new Set(firstKeys.filter(key => !confirmed.has(key)));
+  return new Set(firstKeys.filter(key => !confirmed.has(key) && !paidFirstSlots?.has(key)));
 }
 
 export function importedAttendanceAppearance(row: Legacy, account?: Account, invoice?: Invoice, confirmed = false) {
@@ -116,8 +116,9 @@ export function monthlyPaymentDue({ key, row, original, account, invoice, sequen
 }
 
 // A moved first lesson remains attached to its pass even when its display date changes.
-export function confirmedPassLessons(invoices: Invoice[], records: Attendance[], cycles: Record<string,string[]>, times: Record<string,string>, labels: Map<string,string>) {
+export function confirmedPassLessons(invoices: Invoice[], records: Attendance[], cycles: Record<string,string[]>, times: Record<string,string>, labels: Map<string,string>, paidFirstSlots?: ReadonlySet<string>) {
  const result=confirmedFirstLessons(invoices,cycles,times);
+ for(const key of paidFirstSlots||[])result.add(key);
  for(const row of records){if(!row.passId)continue;const linked=invoices.filter(i=>i.passId===row.passId&&i.studentId===row.studentId&&i.status!=='cancelled');if(linked.length&&linked.every(i=>receiptComplete(i)&&passCoversFirst(i,row,cycles[row.studentId]||[]))){const key=row.studentId+'_'+row.day;if(isFirstLesson(labels.get(key),row.status))result.add(key);if(row.unpaidCycleStart)result.add(row.studentId+'_'+row.unpaidCycleStart);}}
  return result;
 }

@@ -5,6 +5,7 @@ import { legacyAttendanceAppearance } from './attendance-appearance';
 import { plannedLesson } from './schedule';
 import {projectLessonLedger,type LessonLedgerSeed} from './lesson-ledger';
 import type {Invoice} from './model';
+import {receiptComplete} from './pass-settlement';
 
 export type CanonicalSequence = {seed:LessonLedgerSeed;records:Attendance[];invoices:Invoice[];today:string};
 export type SequenceContext = {
@@ -23,11 +24,20 @@ type Legacy = NonNullable<Snapshot['legacyAttendance']>[number];
 // Display-only chronology: neither payments nor current balances rewrite old lessons.
 // Imported numbers anchor the sequence; modern records take precedence on the same day.
 export function attendanceSequence(accounts: Pick<Account, 'id' | 'planUnits' | 'schedule' | 'passHistory' | 'initialPlanUnits' | 'referenceResetFrom'>[], records: RecordRow[], legacy: Legacy[], context?: SequenceContext) {
+  const paidFirstSlots = new Set<string>();
   const projections = new Map(Object.entries(context?.canonical||{}).map(([id,c])=>{
     const a=accounts.find(a=>a.id===id) as Account;
     const combined=new Map(c.records.map(r=>[r.day,r]));
     for(const r of records.filter(r=>r.studentId===id))combined.set(r.day,{...combined.get(r.day),...r,id:combined.get(r.day)?.id||`preview_${id}_${r.day}`,projected:!combined.has(r.day)} as Attendance);
-    return [id,projectLessonLedger(a,c.seed,[...combined.values()],c.invoices,c.today)] as const;
+    const projection = projectLessonLedger(a,c.seed,[...combined.values()],c.invoices,c.today);
+    // The invoice belongs to this pass, even when class starts later than its contract date.
+    const paidIds = new Set(c.invoices.filter(i=>i.studentId===id && receiptComplete(i)).map(i=>i.id));
+    for(const pass of projection.passes){
+      if(!paidIds.has(pass.invoiceId))continue;
+      const first=pass.slots.find(slot=>slot.ordinal===1);
+      if(first)paidFirstSlots.add(id+'_'+first.day);
+    }
+    return [id,projection] as const;
   }));
   const plans = new Map(accounts.map(a => [a.id, a]));
   const planResets = new Map(accounts.map(a => [a.id, passPlanResetFrom(a)]));
@@ -135,5 +145,5 @@ export function attendanceSequence(accounts: Pick<Account, 'id' | 'planUnits' | 
       ? missedLessons[`${row.studentId}_${row.relatedDay}`] : undefined;
     if (original || row.fallback) labels.set(row.key, original || row.fallback!);
   }
-  return { positions, labels, missedLessons, cycleFirstDays, firstLessonTimes };
+  return { positions, labels, missedLessons, cycleFirstDays, firstLessonTimes, paidFirstSlots };
 }

@@ -3660,3 +3660,31 @@ test('an owner-confirmed native pause supersedes a stale imported first lesson w
  const e={account:{id:'p',planUnits:4,planAmount:180000,remaining:5},sheet,attendance:[{id:'pause',studentId:'p',day:'2026-11-02',status:'paused',units:0,note:'원장 확인: 결석, 다음주 1회차'}],invoices:[{id:'paid',passId:'paid',studentId:'p',units:4,amount:180000,paid:180000,status:'paid',allocationState:'allocated',lessonDate:days[0]}],payments:[],references:[],legacy:[]};
  const original=structuredClone(e);const p=prepare(e,'2026-11-06','x');assert.equal(p.ready,true);assert.equal(p.afterRemaining,0);assert.equal(p.projection.passes.length,1);assert.deepEqual(e,original);
 });
+
+test('a moved prepaid first belongs to its invoice, but the following pass remains billable',()=>{
+ const s=setup(),f=canonicalFixture(),{billingProjection}=s.load('upcoming-billing');
+ const a={...f.account,ledgerVersion:2,remaining:0,schedule:{rules:[{start:'2026-11-01',weekdays:[5]}],moves:[]}};
+ const invoice={...f.invoices[0],lessonDate:'2026-11-06',cycleStart:'2026-11-06',createdAt:'2026-11-01'};
+ const seed={...f.seed,from:invoice.lessonDate,passes:[{...f.seed.passes[0],start:invoice.lessonDate}]};
+ function check(today,records,i=invoice){
+  const sequenceContext={positions:{},cycleStarts:[],canonical:{v2:{seed,records,invoices:[i],today}}};
+  const data={day:today,accounts:[a],students:[{id:a.id}],attendance:records,invoices:i.status==='open'?[i]:[],settledInvoices:i.status==='paid'?[i]:[],sequenceContext};
+  return billingProjection(data,today).upcoming.map(b=>b.lessonDate);
+ }
+ assert.deepEqual(check('2026-11-11',[]),[]);
+ assert.deepEqual(check('2026-11-11',[],{...invoice,status:'open',paid:10000}),['2026-11-13']);
+ const first=f.row('2026-11-13');
+ assert.ok(!check('2026-11-14',[first]).includes(first.day));
+ const records=['2026-11-13','2026-11-20','2026-11-27','2026-12-04'].map(day=>f.row(day));
+ assert.deepEqual(check('2026-12-10',records),['2026-12-11']);
+});
+test('a stale billing form cannot create another invoice or receipt for a prepaid first',async()=>{
+ const s=await canonicalServiceFixture(),today=s.load('model').seoulDay();
+ const next=new Date(Date.parse(today)+86400000).toISOString().slice(0,10),account=s.records.get('opsAccounts/v2');
+ account.schedule={rules:[{start:next,weekdays:[new Date(next).getUTCDay()]}],moves:[]};
+ for(const [key] of s.records)if(key.startsWith('opsAttendance/'))s.records.delete(key);
+ const previous=structuredClone(s.records);
+ await assert.rejects(s.service.prepareUpcomingInvoice({studentId:'v2',lessonDate:next,expectedUpdatedAt:account.updatedAt},'owner'),/이미 선납/);
+ await assert.rejects(s.service.monthlyPayment({studentId:'v2',lessonDate:next,requestId:'duplicate',paymentDate:today,method:'카드',amount:180000,expectedUpdatedAt:account.updatedAt},'owner'),/이미 선납/);
+ assert.deepEqual(s.records,previous);
+});
