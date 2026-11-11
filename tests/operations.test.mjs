@@ -3688,3 +3688,25 @@ test('a stale billing form cannot create another invoice or receipt for a prepai
  await assert.rejects(s.service.monthlyPayment({studentId:'v2',lessonDate:next,requestId:'duplicate',paymentDate:today,method:'카드',amount:180000,expectedUpdatedAt:account.updatedAt},'owner'),/이미 선납/);
  assert.deepEqual(s.records,previous);
 });
+
+test('a zero-charge pause can retain its pass ID while the next dated reservation reuses the unused invoice',async()=>{
+ const s=await canonicalServiceFixture();
+ const a=s.records.get('opsAccounts/v2'),future='2099-11-12';
+ a.updatedAt='2026-10-06T00:00:00Z';
+ const pause={...s.f.row('2026-10-06','paused',0),passId:'pending',passAllocations:[]};
+ s.records.set('opsAttendance/'+pause.id,pause);
+ const old=s.records.get('opsInvoices/a'),receipt=structuredClone(s.records.get('opsPayments/receipt'));
+ const pending={...old,id:'pending',passId:'pending',status:'open',paid:0,units:6,amount:270000,lessonDate:'',cycleStart:'',allocatedUnits:0,allocationState:'pending'};
+ s.records.set('opsInvoices/pending',pending);
+ const valid=s.load('invoice-contract').requireUnusedInvoice;
+ assert.throws(()=>valid(pending,[{...pause,status:'sick'}],[]),/이미 사용/);
+ assert.throws(()=>valid(pending,[pause],[{invoiceId:'pending'}]),/수납/);
+ assert.throws(()=>valid(pending,[{...pause,units:1}],[]),/사용/);
+ await s.service.saveNextPass({studentId:a.id,expectedUpdatedAt:a.updatedAt,units:4,amount:180000,mode:'date',start:future},'owner');
+ const updated=s.records.get('opsAccounts/v2'),bill=s.records.get('opsInvoices/pending');
+ assert.equal(updated.nextPass.invoiceId,pending.id);assert.equal(updated.nextPass.start,future);
+ assert.equal(bill.units,4);assert.equal(bill.amount,180000);assert.equal(bill.paid,0);
+ assert.equal([...s.records.keys()].filter(k=>k.startsWith('opsInvoices/')).length,2);
+ assert.deepEqual(s.records.get('opsAttendance/'+pause.id),pause);
+ assert.deepEqual(s.records.get('opsPayments/receipt'),receipt);
+});

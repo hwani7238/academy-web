@@ -6,7 +6,15 @@ export const invoiceStart=(i:Invoice)=>i.lessonDate||i.cycleStart||'';
 export const invoiceAwaitingStart=(i:Invoice)=>i.status!=='cancelled'&&(i.allocationState==='pending'||i.reservedPass||!invoiceStart(i));
 export function invoiceHasUsage(i:Invoice,records:Attendance[],seed?:LessonLedgerSeed){
  const ids=new Set([i.id,i.passId].filter(Boolean));
- return i.allocationState==='allocated'||(i.allocatedUnits||0)>0||records.some(r=>ids.has(r.passId)||r.passAllocations?.some(p=>ids.has(p.passId)))||!!seed?.passes.some(p=>p.invoiceId===i.id&&((p.openingUsed||0)>0||(p.openingOrdinal||0)>0));
+ const linkedLesson = records.some(row => {
+  // A paused or cancelled entry can retain its old pass ID after recalculation.
+  // Preserve that entry, but a zero-charge pause did not use a lesson.
+  if ((row.status === 'paused' || row.status === 'cancelled') && row.units === 0 &&
+      !row.passAllocations?.some(allocation => allocation.units > 0)) return false;
+  return ids.has(row.passId) || row.passAllocations?.some(allocation => ids.has(allocation.passId));
+ });
+ return i.allocationState === 'allocated' || (i.allocatedUnits || 0) > 0 || linkedLesson ||
+  !!seed?.passes.some(pass => pass.invoiceId === i.id && ((pass.openingUsed || 0) > 0 || (pass.openingOrdinal || 0) > 0));
 }
 export function requireUnusedInvoice(i:Invoice,records:Attendance[],payments:Payment[],seed?:LessonLedgerSeed){
  if(i.paid!==0||payments.some(p=>p.invoiceId===i.id)||invoiceHasUsage(i,records,seed))throw Error('이미 사용하거나 수납 기록이 있는 수강권입니다. 기존 청구·출결·수납은 유지하고, 수강권 관리에서 다음 수강권을 변경해주세요.');
