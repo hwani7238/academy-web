@@ -15,8 +15,7 @@ export function ledgerDatabase():Firestore{
   if(key!=='runTransaction'){const value=Reflect.get(target,key);return typeof value==='function'?value.bind(target):value;}
   return async <T,>(operation:(tx:Transaction)=>Promise<T>)=>db.runTransaction(async real=>{
    const writes:Write[]=[];
-   let buffered:Transaction;
-   buffered=new Proxy(real,{get(tx,name){
+   const buffered:Transaction=new Proxy(real,{get(tx,name){
     if(['create','set','update','delete'].includes(String(name)))return (ref:DocumentReference,data?:Record<string,unknown>,options?:unknown)=>{writes.push({kind:name as Write['kind'],ref,data,options});return buffered;};
     const value=Reflect.get(tx,name);return typeof value==='function'?value.bind(tx):value;
    }});
@@ -36,7 +35,23 @@ export function ledgerDatabase():Firestore{
     const account=overlay<Account>('opsAccounts',[e.account]).find(a=>a.id===id)!;
     const attendance=overlay<Attendance>('opsAttendance',e.attendance).filter(r=>r.studentId===id),invoices=overlay<Invoice>('opsInvoices',e.invoices).filter(i=>i.studentId===id);
     const payments=overlay<Payment>('opsPayments',e.payments).filter(p=>p.studentId===id);
-    for(const old of e.invoices){const next=invoices.find(i=>i.id===old.id);if(next&&(next.units!==old.units||next.amount!==old.amount))requireUnusedInvoice(old,e.attendance,e.payments,seed);}
+    const amendment = writes.find(w => w.ref.path.startsWith('opsAudit/') && w.data?.studentId === id && w.data.action === 'amend-first-lesson');
+    const amendedId = (amendment?.data?.detail as {invoiceId?:string} | undefined)?.invoiceId;
+    for (const old of e.invoices) {
+     const next = invoices.find(i => i.id === old.id);
+     if (!next || (next.units === old.units && next.amount === old.amount)) continue;
+     if (old.id !== amendedId) {
+      requireUnusedInvoice(old,e.attendance,e.payments,seed);
+      continue;
+     }
+     const today = seoulDay();
+     const before = projectLessonLedger(e.account,seed,e.attendance,e.invoices,today);
+     const pass = before.passes.find(p => p.id === before.currentPassId && p.invoiceId === old.id);
+     const used = pass?.slots.filter(s => !s.projected && s.day <= today);
+     if (!pass || pass.openingOrdinal || pass.openingUsed || used?.length !== 1 ||
+         used[0].day !== today || used[0].ordinal !== 1 || used[0].charged !== 1 || used[0].reserved)
+      throw Error('오늘 출석한 1회차 수강권만 당일 변경할 수 있습니다.');
+    }
     const legacyChanges=writes.filter(w=>w.ref.path.startsWith('opsLegacyCorrections/')&&w.data?.studentId===id);
     for(const w of legacyChanges){const r=seed.history?.find(r=>r.day===w.data?.day);if(r){const status=w.data!.status as Attendance['status'];Object.assign(r,{status,units:status==='present'?1:0,note:String(w.data!.note||''),updatedAt:String(w.data!.updatedAt||'')});}}
     const changed=attendance.filter(row=>{const old=e.attendance.find(r=>r.id===row.id);return !old||old.units!==row.units||old.status!==row.status||old.relatedDay!==row.relatedDay;});

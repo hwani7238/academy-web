@@ -3710,3 +3710,29 @@ test('a zero-charge pause can retain its pass ID while the next dated reservatio
  assert.deepEqual(s.records.get('opsAttendance/'+pause.id),pause);
  assert.deepEqual(s.records.get('opsPayments/receipt'),receipt);
 });
+
+test('first-day contract amendment keeps the first check-in, invoice and receipts and recalculates remaining rights',async()=>{
+ const s=await canonicalServiceFixture(),today=s.load('model').seoulDay();
+ await s.service.recordAttendance({studentId:'v2',day:'2026-10-04',status:'present',units:1},'owner');
+ await s.service.recordAttendance({studentId:'v2',day:today,status:'present',units:1},'owner');
+ const account=()=>s.records.get('opsAccounts/v2');
+ const invoice=[...s.records.values()].find(i=>i.status==='open'&&i.passId===account().currentPassId);
+ const passId=invoice.passId, attendance=structuredClone(s.records.get('opsAttendance/v2_'+today));
+ const existing=structuredClone(s.records.get('opsInvoices/a'));
+ const oldUpdated=account().updatedAt;
+ const save=(units,amount=180000,rev=account().updatedAt)=>s.service.saveNextPass({studentId:'v2',mode:'date',start:today,units,amount,expectedUpdatedAt:rev},'owner');
+ await save(8);
+ assert.equal(account().remaining,7);assert.equal(account().planUnits,8);assert.equal(account().currentPassId,passId);
+ assert.equal(s.records.get('opsInvoices/'+invoice.id).units,8);
+ assert.deepEqual(s.records.get('opsAttendance/v2_'+today),attendance);
+ assert.deepEqual(s.records.get('opsInvoices/a'),existing);
+ assert.equal([...s.records.keys()].filter(k=>k.startsWith('opsInvoices/')).length,2);
+ assert.equal(s.records.get('opsCourseLedgers/v2').projection.labels['v2_'+today],'1');
+ await assert.rejects(save(8,180000,oldUpdated),/변경/);
+ const bill=s.records.get('opsInvoices/'+invoice.id);Object.assign(bill,{paid:180000,status:'paid'});
+ const receipt={id:'first-paid',invoiceId:invoice.id,studentId:'v2',amount:180000,paymentDate:today,method:'카드'};
+ s.records.set('opsPayments/first-paid',receipt);
+ await assert.rejects(save(6,210000),/수납/);
+ await save(6);assert.equal(account().remaining,5);assert.deepEqual(s.records.get('opsPayments/first-paid'),receipt);
+ assert.equal(s.records.get('opsInvoices/'+invoice.id).status,'paid');
+});

@@ -894,10 +894,41 @@ export async function saveNextPass(input:Record<string,unknown>,actor:string){
   if(account.updatedAt!==input.expectedUpdatedAt)throw Error('수강 정보가 변경됐습니다. 창을 닫고 다시 확인해주세요.');
   const previous=account.nextPass;
   const cycles=await tx.get(db.collection('opsInvoices').where('studentId','==',id));
-  if(input.cancel!==true&&input.mode==='date'&&cycles.docs.some(d=>d.id!==previous?.invoiceId&&d.data().status!=='cancelled'&&(d.data().lessonDate||d.data().cycleStart)===input.start))throw Error('해당 날짜에 다른 수강권 청구가 있습니다. 1회차 날짜를 확인해주세요.');
-  if(input.cancel!==true)requireClearPassLinks(cycles.docs.map(d=>({...d.data(),id:d.id}) as Invoice));
+  const invoices = cycles.docs.map(d => ({...d.data(), id:d.id}) as Invoice);
   const history=(await tx.get(db.collection('opsAttendance').where('studentId','==',id))).docs.map(d=>d.data() as Attendance);
   const receipts=(await tx.get(db.collection('opsPayments').where('studentId','==',id))).docs.map(d=>d.data() as Payment);
+  const today = seoulDay();
+  const sameDay = invoices.filter(i => i.status !== 'cancelled' && (i.lessonDate || i.cycleStart) === input.start);
+  if (!input.cancel && input.mode === 'date' && input.start === today && account.currentPassStart === today && sameDay.length === 1) {
+   const bill = sameDay[0];
+   const passId = bill.passId || bill.id;
+   const lesson = history.find(r => r.day === today && (r.status || 'present') === 'present' && r.units === 1 && r.passId === passId);
+   if (!lesson || account.currentPassId !== passId || bill.reservedPass || bill.allocationState !== 'allocated' ||
+       bill.needsReview || bill.linkReview || (lesson.passAllocations?.length && !lesson.passAllocations.every(a => a.passId === passId && a.firstOrdinal === 1)) ||
+       history.some(r => r.day !== today && (r.passId === passId || r.passAllocations?.some(a => a.passId === passId)) &&
+         r.status !== 'cancelled' && r.status !== 'paused')) {
+    throw Error('현재 수강권에 연결된 오늘의 1회차 출석을 확인해주세요.');
+   }
+   const terms = nextPassInput(input,bill.id,today);
+   if (terms.amount !== bill.amount) {
+    if (bill.paid || receipts.some(p => p.invoiceId === bill.id)) throw Error('수납 기록이 있는 1회차는 수강료를 유지하고 횟수만 변경할 수 있습니다.');
+    const notice = (await tx.get(db.doc('opsNotices/billing_'+bill.id))).data();
+    if (notice && !['cancelled','failed','blocked'].includes(notice.status)) throw Error('이미 요청한 결제 안내 금액을 먼저 확인해주세요.');
+   }
+   const stamp = new Date(Math.max(Date.now(),(Date.parse(account.updatedAt)||0)+1)).toISOString();
+   const remaining = account.remaining + terms.units - bill.units;
+   if (remaining < 0) throw Error('사용한 횟수와 잔여 횟수를 확인해주세요.');
+   tx.update(db.doc('opsInvoices/'+bill.id),{units:terms.units, amount:terms.amount, allocatedUnits:terms.units, updatedAt:stamp,
+    ...(bill.renewalReservation ? {renewalReservation:{...bill.renewalReservation,units:terms.units,amount:terms.amount}} : {})});
+   tx.update(ref,{planUnits:terms.units,planAmount:terms.amount,remaining,updatedAt:stamp,
+    initialPlanUnits:account.initialPlanUnits||account.planUnits,
+    passHistory:[...(account.passHistory||[]).filter(p=>p.start!==today),{start:today,units:terms.units}].sort((a,b)=>a.start.localeCompare(b.start))});
+   audit(tx,db,actor,'amend-first-lesson',id,{invoiceId:bill.id,day:today,before:{units:bill.units,amount:bill.amount},after:{units:terms.units,amount:terms.amount},note:terms.note});
+   return;
+  }
+  if(input.amendToday===true)throw Error('오늘의 1회차 수강권이 변경됐습니다. 다시 확인해주세요.');
+  if(input.cancel!==true&&input.mode==='date'&&sameDay.some(i=>i.id!==previous?.invoiceId))throw Error('해당 날짜에 다른 수강권 청구가 있습니다. 1회차 날짜를 확인해주세요.');
+  if(input.cancel!==true)requireClearPassLinks(invoices);
   const pending=cycles.docs.filter(d=>d.id!==previous?.invoiceId&&d.data().status!=='cancelled'&&(d.data().allocationState==='pending'||!d.data().lessonDate&&!d.data().cycleStart&&!d.data().reservedPass));
   if(!previous&&pending.length>1)throw Error('다음 수강권이 여러 건 있습니다. 청구·수납에서 먼저 확인해주세요.');
   const reusable=!previous?pending[0]:undefined;
