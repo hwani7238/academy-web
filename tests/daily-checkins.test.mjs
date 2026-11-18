@@ -10,7 +10,7 @@ const code = ts.transpileModule(fs.readFileSync('src/lib/operations/daily-checki
 new Function('exports', code)(exported);
 const { dailyCheckins } = exported;
 
-test('daily arrivals exclude pre-entered leave, manual attendance and cancelled check-ins', () => {
+test('daily attendance includes completed manual lessons but excludes leave, reservations and cancelled check-ins', () => {
   const day = '2026-10-01';
   const row = (id, source, status, units = 1) => ({id, day, source, status, units});
   const rows = [row('travel', 'manual', 'travel', 0), row('absent', 'manual', 'absent', 0),
@@ -20,10 +20,11 @@ test('daily arrivals exclude pre-entered leave, manual attendance and cancelled 
     row('sick-kiosk', 'kiosk', 'sick', 0), row('late-cancel', 'kiosk', 'late_cancel'),
     {...row('yesterday', 'kiosk', 'present'), day: '2026-09-30'}];
   const before = structuredClone(rows);
-  assert.deepEqual(dailyCheckins(rows, day).map(r => r.id), ['kiosk', 'adjusted-kiosk']);
+  assert.deepEqual(dailyCheckins(rows, day).map(r => r.id), ['manual-present', 'manual-makeup', 'kiosk', 'adjusted-kiosk']);
   assert.deepEqual(rows, before);
-  assert.deepEqual(dailyCheckins(rows.slice(0, 5), day), []);
-  // A manual time edit does not turn a manual record into a kiosk arrival.
-  assert.deepEqual(dailyCheckins([{...rows[2], arrivalAt: `${day}T05:00:00Z`}], day), []);
+  assert.deepEqual(dailyCheckins(rows.slice(0, 5), day).map(r=>r.id), ['manual-present','manual-makeup']);
+  // An explicitly corrected time preserves the same manual attendance record.
+  assert.equal(dailyCheckins([{...rows[2], arrivalAt: `${day}T05:00:00Z`}], day)[0].source, 'manual');
+  assert.deepEqual(dailyCheckins([row('reserved','manual','makeup_reserved',0)],day),[]);
   assert.equal(dailyCheckins([row('older-kiosk', 'kiosk', undefined)], day).length, 1);
 });

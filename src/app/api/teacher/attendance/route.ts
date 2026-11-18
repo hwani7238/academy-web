@@ -31,7 +31,7 @@ export async function GET(request: Request) {
     const roster = new URL(request.url).searchParams.get('roster') === '1';
     const records = await db.collection('opsAttendance').where('day', '==', day)
       .select('studentId','day','source','status','arrivalAt','at','updatedAt').get();
-    const candidates = records.docs.filter(doc => { const row = doc.data(); return ['kiosk','teacher'].includes(row.source) && ['present','makeup'].includes(row.status || 'present'); });
+    const candidates = records.docs.filter(doc => { const row = doc.data(); return ['kiosk','teacher','manual'].includes(row.source) && ['present','makeup'].includes(row.status || 'present'); });
     const ids = [...new Set(candidates.map(doc=>doc.data().studentId).filter((id): id is string=>typeof id==='string' && /^[A-Za-z0-9_-]{1,160}$/.test(id)))];
     const fields = ['name','sourceStudentId','subject','displaySubject','attendanceGroup','active','schedule'];
     const activeAccounts = (await db.collection('opsAccounts').where('active','==',true).select(...fields).get()).docs;

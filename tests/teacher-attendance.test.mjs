@@ -65,7 +65,7 @@ test('daily arrivals match the manager kiosk criteria and preserve corrected Kor
   const s = setup(), at = s.day + 'T09:00:00+09:00', arrivalAt = s.day + 'T10:30:00+09:00';
   const account = { subject: '피아노' }, owner = { name: '학생', operationsCourseGroups: { 피아노: '어린이 피아노 (2관)' } };
   const base = { day: s.day, source: 'kiosk', status: 'present', at, arrivalAt };
-  for (const changed of [{ source: 'manual' }, { day: '2000-01-01' }, ...['cancelled', 'late_cancel', 'absent', 'travel', 'sick', 'paused', 'makeup_reserved'].map(status => ({ status }))]) assert.equal(s.policy.pianoArrival('id', { ...base, ...changed }, account, owner, s.day), null);
+  for (const changed of [{ source: 'unknown' }, { day: '2000-01-01' }, ...['cancelled', 'late_cancel', 'absent', 'travel', 'sick', 'paused', 'makeup_reserved'].map(status => ({ status }))]) assert.equal(s.policy.pianoArrival('id', { ...base, ...changed }, account, owner, s.day), null);
   assert.equal(s.policy.pianoArrival('id', base, account, owner, s.day).arrivalAt, new Date(arrivalAt).toISOString());
   assert.equal(s.policy.pianoArrival('id', { ...base, status: 'makeup' }, account, owner, s.day).status, 'makeup');
   assert.equal(s.policy.pianoArrival('id', base, { subject: '드럼' }, owner, s.day), null);
@@ -84,7 +84,7 @@ test('teacher writes require a valid role and same origin, and only expose succe
  const r=await call('piano','https://manage.wheemusic.com');assert.equal(r.status,200);assert.deepEqual(await r.json(),{ok:true,duplicate:false});assert.equal(s.writes[0].actor,'teacher:piano');
  assert.equal((await call('piano','https://manage.wheemusic.com',{...input,action:'payment'})).status,400);assert.equal(s.writes.length,1);
 });
-test('teacher arrivals are visible, manual calendar rows remain excluded and roster hides private data',async()=>{
+test('teacher arrivals are visible and roster hides private data',async()=>{
  const s=setup();
  for(const[id,subject,state]of[['piano','피아노','active'],['drum','드럼','active'],['paused','피아노','paused']]){
   s.records.set('opsAccounts/'+id,{active:true,subject,sourceStudentId:id,name:'학생',phone:'private-phone',remaining:8});
@@ -113,4 +113,20 @@ test('expected piano roster follows schedules and turns into an arrival, then ba
  result=await(await s.call('piano')).json();assert.equal(result.waiting.length,1);assert.equal(result.waiting[0].status,'waiting');assert.equal(result.arrivals.length,1);
  s.records.get('opsAttendance/scheduled').status='sick';
  result=await(await s.call('piano')).json();assert.equal(result.waiting[0].status,'sick');
+});
+
+test('monthly manual attendance becomes an arrival without treating its save time as arrival time',async()=>{
+ const s=setup(),weekday=new Date(s.day+'T00:00:00Z').getUTCDay();
+ s.records.set('opsAccounts/manual',{active:true,subject:'피아노',schedule:{rules:[{start:'2026-01-01',weekdays:[weekday]}],moves:[]}});
+ s.records.set('students/manual',{name:'수동출석',instruments:['피아노']});
+ let result=await(await s.call('piano')).json();assert.equal(result.waiting.length,1);
+ const row={studentId:'manual',day:s.day,source:'manual',status:'present',at:s.day+'T15:00:00+09:00',updatedAt:'saved',units:1,note:'private'};
+ s.records.set('opsAttendance/manual',row);
+ result=await(await s.call('piano')).json();assert.equal(result.waiting.length,0);assert.equal(result.arrivals.length,1);
+ assert.equal(result.arrivals[0].source,'manual');assert.equal(result.arrivals[0].arrivalAt,'');assert.doesNotMatch(JSON.stringify(result),/private|units/);
+ assert.equal((await(await s.call('piano','?roster=1')).json()).students[0].attended,true);
+ row.arrivalAt=s.day+'T13:15:00+09:00';row.status='makeup';
+ result=await(await s.call('piano')).json();assert.equal(result.arrivals[0].arrivalAt,new Date(row.arrivalAt).toISOString());assert.equal(result.arrivals[0].status,'makeup');
+ row.status='cancelled';
+ result=await(await s.call('piano')).json();assert.equal(result.arrivals.length,0);assert.equal(result.waiting.length,1);
 });
