@@ -3736,3 +3736,49 @@ test('first-day contract amendment keeps the first check-in, invoice and receipt
  await save(6);assert.equal(account().remaining,5);assert.deepEqual(s.records.get('opsPayments/first-paid'),receipt);
  assert.equal(s.records.get('opsInvoices/'+invoice.id).status,'paid');
 });
+
+test('a current pass can be reduced after its start while retaining lessons, receipt history and one invoice',async()=>{
+ const s=await canonicalServiceFixture(),start='2026-10-05';
+ for(const day of ['2026-10-04',start,'2026-10-06','2026-10-07'])
+  await s.service.recordAttendance({studentId:'v2',day,status:'present',units:1},'owner');
+ const account=()=>s.records.get('opsAccounts/v2');
+ const invoice=[...s.records.values()].find(i=>i.status==='open'&&i.passId===account().currentPassId);
+ // Match the live regression: a 12-lesson pass with three used lessons.
+ invoice.units=12;invoice.allocatedUnits=12;account().planUnits=12;account().remaining=9;
+ const attendance=structuredClone([...s.records].filter(([key])=>key.startsWith('opsAttendance/')));
+ const receipts=structuredClone([...s.records].filter(([key])=>key.startsWith('opsPayments/')));
+ const oldInvoice=structuredClone(s.records.get('opsInvoices/a'));
+ const input={studentId:'v2',mode:'date',start,units:8,amount:180000,amendCurrent:true,expectedUpdatedAt:account().updatedAt};
+ await s.service.saveNextPass(input,'owner');
+ assert.equal(account().planUnits,8);assert.equal(account().remaining,5);assert.equal(account().currentPassStart,start);
+ assert.equal(s.records.get('opsInvoices/'+invoice.id).units,8);
+ assert.equal(s.records.get('opsInvoices/'+invoice.id).lessonDate,start);
+ assert.equal([...s.records.keys()].filter(k=>k.startsWith('opsInvoices/')).length,2);
+ assert.deepEqual([...s.records].filter(([key])=>key.startsWith('opsAttendance/')),attendance);
+ assert.deepEqual([...s.records].filter(([key])=>key.startsWith('opsPayments/')),receipts);
+ assert.deepEqual(s.records.get('opsInvoices/a'),oldInvoice);
+ assert.equal(s.records.get('opsCourseLedgers/v2').projection.labels['v2_2026-10-07'],'3');
+ await assert.rejects(s.service.saveNextPass(input,'owner'),/변경/);
+ let before=structuredClone(s.records);
+ await assert.rejects(s.service.saveNextPass({...input,units:2,expectedUpdatedAt:account().updatedAt},'owner'),/사용|배정/);
+ assert.deepEqual(s.records,before);
+ await assert.rejects(s.service.saveNextPass({...input,start:'2026-10-01',expectedUpdatedAt:account().updatedAt},'owner'),/변경/);
+ assert.deepEqual(s.records,before);
+ // Future reserved absences also own a lesson, even before they affect today's balance.
+ const future=new Date(Date.parse(s.load('model').seoulDay())+86400000).toISOString().slice(0,10);
+ await s.service.recordAttendance({studentId:'v2',day:future,status:'sick',units:0},'owner');
+ before=structuredClone(s.records);
+ await assert.rejects(s.service.saveNextPass({...input,units:3,expectedUpdatedAt:account().updatedAt},'owner'),/예약된 회차/);
+ assert.deepEqual(s.records,before);
+});
+
+test('legacy current-pass amendments retain paid invoices and subtract the plan difference only once',async()=>{
+ const s=setup();await s.seed('legacy',9);
+ const a=s.records.get('opsAccounts/legacy');Object.assign(a,{currentPassId:'p',currentPassStart:'2026-11-11',planUnits:12,planAmount:180000});
+ const bill={id:'p',passId:'p',studentId:a.id,lessonDate:'2026-11-11',units:12,amount:180000,paid:180000,status:'paid',allocationState:'allocated',allocatedUnits:12};
+ s.records.set('opsInvoices/p',bill);
+ const receipt={id:'receipt',invoiceId:'p',studentId:a.id,amount:180000};s.records.set('opsPayments/receipt',receipt);
+ await s.service.saveNextPass({studentId:a.id,mode:'date',start:'2026-11-11',units:8,amount:180000,expectedUpdatedAt:a.updatedAt},'owner');
+ assert.equal(s.records.get('opsAccounts/legacy').remaining,5);assert.equal(s.records.get('opsInvoices/p').paid,180000);
+ assert.deepEqual(s.records.get('opsPayments/receipt'),receipt);
+});

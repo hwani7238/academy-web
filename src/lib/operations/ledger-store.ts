@@ -35,7 +35,7 @@ export function ledgerDatabase():Firestore{
     const account=overlay<Account>('opsAccounts',[e.account]).find(a=>a.id===id)!;
     const attendance=overlay<Attendance>('opsAttendance',e.attendance).filter(r=>r.studentId===id),invoices=overlay<Invoice>('opsInvoices',e.invoices).filter(i=>i.studentId===id);
     const payments=overlay<Payment>('opsPayments',e.payments).filter(p=>p.studentId===id);
-    const amendment = writes.find(w => w.ref.path.startsWith('opsAudit/') && w.data?.studentId === id && w.data.action === 'amend-first-lesson');
+    const amendment = writes.find(w => w.ref.path.startsWith('opsAudit/') && w.data?.studentId === id && w.data.action === 'amend-current-pass');
     const amendedId = (amendment?.data?.detail as {invoiceId?:string} | undefined)?.invoiceId;
     for (const old of e.invoices) {
      const next = invoices.find(i => i.id === old.id);
@@ -47,10 +47,13 @@ export function ledgerDatabase():Firestore{
      const today = seoulDay();
      const before = projectLessonLedger(e.account,seed,e.attendance,e.invoices,today);
      const pass = before.passes.find(p => p.id === before.currentPassId && p.invoiceId === old.id);
-     const used = pass?.slots.filter(s => !s.projected && s.day <= today);
-     if (!pass || pass.openingOrdinal || pass.openingUsed || used?.length !== 1 ||
-         used[0].day !== today || used[0].ordinal !== 1 || used[0].charged !== 1 || used[0].reserved)
-      throw Error('오늘 출석한 1회차 수강권만 당일 변경할 수 있습니다.');
+     if (!pass || pass.start !== e.account.currentPassStart || pass.start > today)
+      throw Error('현재 사용 중인 수강권을 다시 확인해주세요.');
+     // Include reserved absences and future recorded lessons. Shrinking a pass
+     // must not move existing lesson allocations onto another invoice.
+     if (next.units < pass.usedOrdinal)
+      throw Error('이미 사용하거나 예약된 회차보다 등록 횟수를 줄일 수 없습니다.');
+
     }
     const legacyChanges=writes.filter(w=>w.ref.path.startsWith('opsLegacyCorrections/')&&w.data?.studentId===id);
     for(const w of legacyChanges){const r=seed.history?.find(r=>r.day===w.data?.day);if(r){const status=w.data!.status as Attendance['status'];Object.assign(r,{status,units:status==='present'?1:0,note:String(w.data!.note||''),updatedAt:String(w.data!.updatedAt||'')});}}
