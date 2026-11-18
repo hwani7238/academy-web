@@ -20,6 +20,14 @@ service cloud.firestore {
       return request.auth != null;
     }
 
+    // Only a random revision is exposed; all student/financial rows stay behind
+    // the authorized server APIs. No client can forge a change notification.
+    match /opsSignals/{topic} {
+      allow get: if topic in ['operations', 'integrity'] && isAuthenticated() &&
+        get(userDoc(request.auth.uid)).data.role in ['admin', 'wonjang'];
+      allow list, write: if false;
+    }
+
     function isAdmin() {
       return isAuthenticated() &&
         exists(userDoc(request.auth.uid)) &&

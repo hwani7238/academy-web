@@ -75,13 +75,13 @@ export async function processNotices(noticeId?: string) {
       const body = await response.json();
       const recipient = body.message?.sendResults?.[0];
       if (response.ok && body.header?.isSuccessful === true && recipient?.resultCode === 0 && typeof body.message?.requestId === 'string' && body.message.requestId && Number.isInteger(recipient.recipientSeq)) {
-        await item.ref.update({ status: 'submitted', templateCode: notice.template, requestId: body.message.requestId, recipientSeq: recipient.recipientSeq, submittedAt: new Date().toISOString() }); submitted++;
+        await db.doc(item.ref.path).update({ status: 'submitted', templateCode: notice.template, requestId: body.message.requestId, recipientSeq: recipient.recipientSeq, submittedAt: new Date().toISOString() }); submitted++;
       } else {
         const rejected = body.header?.isSuccessful === false || (typeof recipient?.resultCode === 'number' && recipient.resultCode !== 0);
-        await item.ref.update({ status: response.status >= 500 || !rejected ? 'unknown' : 'failed', error: 'NHN 처리 결과를 확인해주세요.', resultCode: String(recipient?.resultCode ?? body.header?.resultCode ?? response.status) });
+        await db.doc(item.ref.path).update({ status: response.status >= 500 || !rejected ? 'unknown' : 'failed', error: 'NHN 처리 결과를 확인해주세요.', resultCode: String(recipient?.resultCode ?? body.header?.resultCode ?? response.status) });
       }
     } catch {
-      await item.ref.update({ status: 'unknown', error: '발송 결과가 불명확합니다. NHN 발송 내역을 확인해주세요.' });
+      await db.doc(item.ref.path).update({ status: 'unknown', error: '발송 결과가 불명확합니다. NHN 발송 내역을 확인해주세요.' });
     }
   }
   return { examined: pending.docs.length, submitted };

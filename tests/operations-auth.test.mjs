@@ -9,8 +9,9 @@ function loadAuth(role = 'wonjang', status = 'approved') {
  const ref=path=>({path});
  const db={doc:ref,runTransaction:async fn=>fn({get:async r=>({data:()=>rows.get(r.path)}),update:(r,d)=>rows.set(r.path,{...rows.get(r.path),...d})})};
  db.doc=path=>({path,get:async()=>({data:()=>rows.get(path)})});
+ const signals={};new Function('require','exports',ts.transpileModule(fs.readFileSync('src/lib/operations/signal-store.ts','utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText)(require,signals);
  const code=ts.transpileModule(fs.readFileSync('src/lib/operations/auth.ts','utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText;
- const exports={};new Function('require','exports',code)(name=>name==='@/lib/firebase-admin'?{adminDb:db,adminAuth:{verifyIdToken:async token=>{if(token!=='valid')throw Error('bad');return {uid:'user'};}}}:require(name),exports);
+ const exports={};new Function('require','exports',code)(name=>name==='./signal-store'?signals:name==='@/lib/firebase-admin'?{adminDb:db,adminAuth:{verifyIdToken:async token=>{if(token!=='valid')throw Error('bad');return {uid:'user'};}}}:require(name),exports);
  return {auth:exports,rows};
 }
 test('finance rejects teachers, pending teachers, and manager role without owner access',async()=>{

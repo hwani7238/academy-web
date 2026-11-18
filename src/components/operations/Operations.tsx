@@ -13,7 +13,7 @@ import { ScheduleSummary } from './ScheduleSummary';
 import { CloseButton } from './CloseButton';
 import { PaymentAmountInput } from './PaymentAmountInput';
 import { applySnapshotChanges, reconcileSnapshot, type SnapshotChanges } from '@/lib/operations/snapshot-changes';
-import { autoRefresh, ATTENDANCE_POLL_MS } from '@/lib/operations/auto-refresh';
+import { watchOperations } from '@/lib/operations/live-signals';
 import { enrollmentState } from '@/lib/operations/lifecycle';
 import { LifecycleDialog } from './LifecycleDialog';
 
@@ -52,7 +52,7 @@ export function Operations({ demo = false }: { demo?: boolean }) {
   const [scheduleAccount,setScheduleAccount]=useState<Account|null>(null);
   const [loadedDay, setLoadedDay] = useState('');
   const [todayDate,setTodayDate]=useState(seoulDay());
-  useEffect(()=>{const timer=setInterval(()=>setTodayDate(seoulDay()),30000);return ()=>clearInterval(timer);},[]);
+  useEffect(()=>{const midnight=Date.parse(`${todayDate}T00:00:00+09:00`)+86400000;const timer=setTimeout(()=>setTodayDate(seoulDay()),Math.max(1,midnight-Date.now()));return ()=>clearTimeout(timer);},[todayDate]);
   const [courseStudent,setCourseStudent]=useState<Snapshot['students'][number]|null>(null);
   const [invoiceAccount,setInvoiceAccount]=useState<Account|null>(null);
   const [editingInvoice, setEditingInvoice] = useState<Invoice | null>(null);
@@ -68,16 +68,16 @@ export function Operations({ demo = false }: { demo?: boolean }) {
     void Promise.all([import('@/lib/firebase-auth'), import('firebase/auth')]).then(([f, a]) => { if (!stopped) off = a.onAuthStateChanged(f.auth, u => { setUser(u); setAuthReady(true); }); });
     return () => { stopped = true; off?.(); };
   }, [demo]);
-  const api = useCallback(async (body?: Record<string, unknown>, since?: string | null) => {
+  const api = useCallback(async (body?: Record<string, unknown>) => {
     if (!user) throw new Error('원장 계정으로 로그인해주세요.');
-    const response = await fetch(`/api/operations?day=${day}${body || since === null ? '' : `&sync=1${since ? `&since=${encodeURIComponent(since)}` : ''}`}`, { method: body ? 'POST' : 'GET', cache: 'no-store', ...(!body ? { signal: AbortSignal.timeout(20000) } : {}), headers: { 'Authorization': `Bearer ${await user.getIdToken()}`, ...(body ? { 'Content-Type': 'application/json' } : {}) }, ...(body ? { body: JSON.stringify(body) } : {}) });
+    const response = await fetch(`/api/operations?day=${day}`, { method: body ? 'POST' : 'GET', cache: 'no-store', ...(!body ? { signal: AbortSignal.timeout(20000) } : {}), headers: { 'Authorization': `Bearer ${await user.getIdToken()}`, ...(body ? { 'Content-Type': 'application/json' } : {}) }, ...(body ? { body: JSON.stringify(body) } : {}) });
     const result = await response.json(); if (!response.ok) throw new Error(result.error); return result;
   }, [user, day]);
-  const refresh = useCallback(async (force = false, since?: string) => {
+  const refresh = useCallback(async (force = false) => {
     if (mutation.current && !force) { pendingRefresh.current = true; return false as const; }
     const version = ++refreshVersion.current;
     try {
-      const result = await api(undefined, force ? null : since);
+      const result = await api();
       if (version !== refreshVersion.current) return false as const;
       if (!result.unchanged) {
         const snapshot = { ...result };
@@ -87,7 +87,7 @@ export function Operations({ demo = false }: { demo?: boolean }) {
         setLoadedDay(day);
       }
       setError('');
-      return { revision: result.revision as string, refreshed: !result.unchanged };
+      return true;
     } catch (e) {
       if (version === refreshVersion.current) setError(e instanceof Error ? e.message : '불러오지 못했습니다.');
       return false as const;
@@ -96,25 +96,14 @@ export function Operations({ demo = false }: { demo?: boolean }) {
   latestRefresh.current = () => { void refresh(); };
   useEffect(() => {
     if (demo || !user) return;
-    const live = autoRefresh({
-      visible: () => document.visibilityState === 'visible',
-      refresh: since => refresh(false, since),
+    const stop = watchOperations({
+      refresh: async () => Boolean(await refresh()),
+      failed: setError,
     });
-    const resume = () => { void live.check(true); };
-    resume();
-    const timer = setInterval(() => { void live.check(); }, ATTENDANCE_POLL_MS);
-    document.addEventListener('visibilitychange', resume);
-    window.addEventListener('focus', resume);
-    window.addEventListener('online', resume);
-    const invalidateRefresh = () => { refreshVersion.current++; };
-    return () => {
-      live.stop(); clearInterval(timer); invalidateRefresh();
-      document.removeEventListener('visibilitychange', resume);
-      window.removeEventListener('focus', resume);
-      window.removeEventListener('online', resume);
-    };
-  // Reconnect only when the user or selected date changes; keep forms and filters mounted.
-  }, [demo, user, day, refresh]);
+    const invalidate = () => { refreshVersion.current++; };
+    return () => { stop(); invalidate(); };
+  // Initial/server reconnect and committed changes are the only remote triggers.
+  }, [demo, user, day, todayDate, refresh]);
   const act = useCallback(async (input: Record<string, unknown>) => {
     if (mutation.current) throw new Error('앞선 저장이 처리 중입니다.');
     mutation.current = true; refreshVersion.current++;
@@ -175,7 +164,7 @@ export function Operations({ demo = false }: { demo?: boolean }) {
       <div><span>미납 합계</span><strong>{won(data.invoices.reduce((s, i) => s + i.amount - i.paid, 0))}</strong></div>
       <div><span>총 등록 현황</span><strong>{activeAccounts.length}<small>/ {activeStudents.length}건</small></strong>{unconfigured > 0 && <button className="text-button" onClick={() => setTab('students')}>{unconfigured}건 설정 필요 →</button>}</div>
     </div></CollapsibleOverview>
-    {!demo && user && <IntegrityPanel user={user} revision={[...data.accounts.map(a=>a.updatedAt),...data.invoices.map(i=>i.updatedAt||i.id),...data.payments.map(p=>p.id+String(p.cancelledAt||''))].join('|')}/> }
+    {!demo && user && <IntegrityPanel user={user}/> }
     <nav className="ops-tabs" aria-label="관리 메뉴">{tabs.map(([id, label]) => <button key={id} aria-current={tab === id ? 'page' : undefined} onClick={() => { setTab(id); if(id==='billing' && day.slice(0,7)!==seoulDay().slice(0,7))setDay(seoulDay()); setMessage(''); }}>{label}{id === 'billing' && open.length > 0 && <b>{open.length}</b>}{id === 'today' && <b>{presentCount}</b>}</button>)}</nav>
     {error && <p className="error" role="alert">{error} {!demo && loadedDay !== day && <button onClick={() => void refresh()}>다시 불러오기</button>}</p>}{message && <p className="success" role="status">{message}</p>}
     <div className={demo && tab === 'today' ? 'workspace-with-kiosk' : ''}><section className="surface">

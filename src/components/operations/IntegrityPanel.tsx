@@ -1,17 +1,15 @@
 'use client';
 import {useCallback,useEffect,useRef,useState} from 'react';
+import {watchOperations} from '@/lib/operations/live-signals';
 import type {User} from 'firebase/auth';
 import type {IntegrityIssue} from '@/lib/operations/billing-integrity';
 type Result={checked:number;checkedAt:string;lastFullAt:string;lastFullDay:string;lastScopedAt:string;issues:IntegrityIssue[];error:string;scheduledConfigured:boolean;monthlyStale:boolean;monthly:null|{month:string;checkedAt:string;amount:number;receiptCount:number;byMethod:Record<string,number>;issues:IntegrityIssue[]};notification:null|{key:string;at:string;count:number}};
 const time=(value:string)=>new Date(value).toLocaleString('ko-KR',{timeZone:'Asia/Seoul'});
-export function IntegrityPanel({user,revision}:{user:User;revision:string}){
+export function IntegrityPanel({user}:{user:User}){
  const [result,setResult]=useState<Result|null>(null),[error,setError]=useState(''),[busy,setBusy]=useState(false),[search,setSearch]=useState('');
  const running=useRef(false);
- const load=useCallback(async(manual=false)=>{if(running.current)return;running.current=true;if(manual)setBusy(true);try{const response=await fetch('/api/operations/integrity',{method:manual?'POST':'GET',headers:{Authorization:`Bearer ${await user.getIdToken()}`,...(manual?{'X-Integrity-Review':'manual'}:{})},signal:AbortSignal.timeout(55000)});const data=await response.json();if(!response.ok)throw Error(data.error||'점검 결과를 불러오지 못했습니다.');setResult(data);setError('');}catch(e){setError(e instanceof Error?e.message:'점검 결과를 불러오지 못했습니다.');}finally{running.current=false;if(manual)setBusy(false);}},[user]);
- useEffect(()=>{void load();const focus=()=>void load();window.addEventListener('focus',focus);return()=>window.removeEventListener('focus',focus);},[load]);
- // Read the single saved report after a change; never start a full scan on mount,
- // revision changes, or a browser timer. Domain mutations validate their own course.
- useEffect(()=>{const timer=setTimeout(()=>void load(),2500),followup=setTimeout(()=>void load(),8000);return()=>{clearTimeout(timer);clearTimeout(followup);};},[revision,load]);
+ const load=useCallback(async(manual=false)=>{if(running.current)return false;running.current=true;if(manual)setBusy(true);try{const response=await fetch('/api/operations/integrity',{method:manual?'POST':'GET',headers:{Authorization:`Bearer ${await user.getIdToken()}`,...(manual?{'X-Integrity-Review':'manual'}:{})},signal:AbortSignal.timeout(55000)});const data=await response.json();if(!response.ok)throw Error(data.error||'점검 결과를 불러오지 못했습니다.');setResult(data);setError('');return true;}catch(e){setError(e instanceof Error?e.message:'점검 결과를 불러오지 못했습니다.');return false;}finally{running.current=false;if(manual)setBusy(false);}},[user]);
+ useEffect(()=>watchOperations({topic:'integrity',refresh:()=>load(),failed:setError}),[load]);
  const priority:Record<string,number>={'scan-failed':0,'attendance-missing':1,'ledger-missing':0,'missing-invoice':1,'duplicate-invoice':1,'wrong-pass':1,'missing-student':2,'unlinked-invoice':3,'receipt-link':3,'no-pass-start':4,'balance-review':5};
  const visible=[...(result?.issues||[])].filter(i=>!search||i.name.includes(search)).sort((a,b)=>(priority[a.kind]??4)-(priority[b.kind]??4)||a.name.localeCompare(b.name,'ko')||a.day.localeCompare(b.day));
  return <section className="surface" aria-label="출석·청구 자동 점검" style={{margin:'12px 0',padding:16}}>

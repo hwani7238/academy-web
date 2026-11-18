@@ -1,7 +1,8 @@
 import { createHash, timingSafeEqual } from 'node:crypto';
 import { adminAuth, adminDb } from '@/lib/firebase-admin';
+import { signalDatabase } from './signal-store';
 export class HttpError extends Error { constructor(public status: number, message: string) { super(message); } }
-export function database() { if (!adminDb) throw new HttpError(503, '서버 연결 설정이 필요합니다.'); return adminDb; }
+export function database() { if (!adminDb) throw new HttpError(503, '서버 연결 설정이 필요합니다.'); return signalDatabase(adminDb); }
 export async function manager(request: Request) {
   if (!adminAuth) throw new HttpError(503, '서버 연결 설정이 필요합니다.');
   const token = request.headers.get('authorization')?.replace(/^Bearer /, '');
