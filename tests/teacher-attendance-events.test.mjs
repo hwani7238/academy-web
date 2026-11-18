@@ -46,7 +46,7 @@ test('a cancellation during an in-flight read is not lost, and logout discards l
  global.window={addEventListener(){},removeEventListener(){}};
  global.fetch=()=>new Promise(resolve=>pending.push(resolve));
  const hooks={useEffect:fn=>effects.push(fn),useState:initial=>{const i=cursor++;if(!(i in state))state[i]=initial;return [state[i],v=>{state[i]=typeof v==='function'?v(state[i]):v;}];}};
- const dependencies={'react':hooks,'next/link':{default:()=>null},'lucide-react':{Pencil:()=>null,Clock3:()=>null},'./TeacherArrivalDialog':{TeacherArrivalDialog:()=>null},'@/lib/teacher-attendance':policy,'@/lib/firebase':{auth:{currentUser:null}},'firebase/auth':{onAuthStateChanged:(_,fn)=>{authCallback=fn;return ()=>{};}},'@/lib/teacher-attendance-events':{watchTeacherAttendance:options=>{subscription=options;return ()=>{};}}};
+ const dependencies={'./AttendanceDateNav':{AttendanceDateNav:()=>null},'react':hooks,'next/link':{default:()=>null},'lucide-react':{Pencil:()=>null,Clock3:()=>null},'./TeacherArrivalDialog':{TeacherArrivalDialog:()=>null},'@/lib/teacher-attendance':policy,'@/lib/firebase':{auth:{currentUser:null}},'firebase/auth':{onAuthStateChanged:(_,fn)=>{authCallback=fn;return ()=>{};}},'@/lib/teacher-attendance-events':{watchTeacherAttendance:options=>{subscription=options;return ()=>{};}}};
  const exports={};new Function('require','exports',ts.transpileModule(fs.readFileSync('src/components/TeacherAttendance.tsx','utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.ReactJSX,target:ts.ScriptTarget.ES2022}}).outputText)(id=>dependencies[id]??require(id),exports);
  let cleanup;
  try{
@@ -54,5 +54,24 @@ test('a cancellation during an in-flight read is not lost, and logout discards l
   subscription.changed();subscription.changed();pending[0](Response.json({day:policy.koreaDay(),arrivals:[{id:'removed-student'}]}));await settle();assert.equal(pending.length,2,'queued changes must trigger one fresh read after the current read');
   pending[1](Response.json({day:policy.koreaDay(),arrivals:[]}));await settle();assert.deepEqual(state[0].arrivals,[]);
   subscription.changed();await settle();assert.equal(pending.length,3);authCallback(null);pending[2](Response.json({day:policy.koreaDay(),arrivals:[{id:'private'}]}));await settle();assert.equal(state[0],null);assert.equal(state[2],'signed-out');
+ }finally{cleanup?.();Object.assign(global,original);}
+});
+
+test('changing dates cancels old reads, uses one selected-day request and only subscribes while viewing today',async()=>{
+ const {createRequire}=await import('node:module'),require=createRequire(import.meta.url),original={fetch:global.fetch,document:global.document,window:global.window};
+ const state=[],effects=[],pending=[];let cursor=0,authCallback,subscriptions=0,stops=0,cleanup;
+ global.document={visibilityState:'visible',addEventListener(){},removeEventListener(){}};global.window={addEventListener(){},removeEventListener(){}};
+ global.fetch=(url)=>new Promise(resolve=>pending.push({url,resolve}));
+ const hooks={useEffect:fn=>effects.push(fn),useState:initial=>{const i=cursor++;if(!(i in state))state[i]=initial;return [state[i],v=>state[i]=typeof v==='function'?v(state[i]):v];}};
+ const dependencies={'react':hooks,'next/link':{default:()=>null},'lucide-react':{Clock3:()=>null},'./AttendanceDateNav':{AttendanceDateNav:()=>null},'./TeacherArrivalDialog':{TeacherArrivalDialog:()=>null},'@/lib/teacher-attendance':policy,'@/lib/firebase':{auth:{currentUser:null}},'firebase/auth':{onAuthStateChanged:(_,fn)=>{authCallback=fn;return()=>{};}},'@/lib/teacher-attendance-events':{watchTeacherAttendance:()=>{subscriptions++;return()=>stops++;}}};
+ const exports={};new Function('require','exports',ts.transpileModule(fs.readFileSync('src/components/TeacherAttendance.tsx','utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.ReactJSX,target:ts.ScriptTarget.ES2022}}).outputText)(id=>dependencies[id]??require(id),exports);
+ const mount=()=>{cursor=0;effects.length=0;exports.TeacherAttendance();cleanup=effects[0]();authCallback({getIdToken:async()=>'valid'});};
+ try{
+  mount();await settle();assert.equal(subscriptions,1);assert.match(pending[0].url,new RegExp('day='+policy.koreaDay()));
+  cleanup();state[6]='2026-10-01';mount();await settle();assert.equal(stops,1);assert.equal(subscriptions,1);assert.match(pending[1].url,/day=2026-10-01$/);
+  pending[0].resolve(Response.json({day:policy.koreaDay(),arrivals:[{name:'stale'}]}));await settle();assert.equal(state[0],null);
+  pending[1].resolve(Response.json({day:'2026-10-01',arrivals:[],waiting:[]}));await settle();assert.equal(state[0].day,'2026-10-01');assert.equal(pending.length,2);
+  cleanup();state[6]='';mount();await settle();assert.equal(subscriptions,2);assert.match(pending[2].url,new RegExp('day='+policy.koreaDay()));
+  pending[2].resolve(Response.json({day:policy.koreaDay(),arrivals:[],waiting:[]}));await settle();assert.equal(state[0].day,policy.koreaDay());
  }finally{cleanup?.();Object.assign(global,original);}
 });

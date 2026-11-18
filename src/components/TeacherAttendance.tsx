@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import { AttendanceDateNav } from './AttendanceDateNav';
 import { Clock3 } from 'lucide-react';
 import { watchTeacherAttendance } from '@/lib/teacher-attendance-events';
 import { TeacherArrivalDialog } from './TeacherArrivalDialog';
@@ -12,12 +13,18 @@ import { koreaDay, type PianoArrival, type PianoAttendance, type PianoWaiting } 
 const clock = (value: string) => value ? new Date(value).toLocaleTimeString('ko-KR', { timeZone: 'Asia/Seoul', hour: '2-digit', minute: '2-digit', hour12: false }) : '시간 미기록';
 
 export function TeacherAttendance() {
-  const [data, setData] = useState<PianoAttendance | null>(null);
+  const [snapshot, setData] = useState<PianoAttendance | null>(null);
   const [error, setError] = useState('');
   const [state, setState] = useState<'loading' | 'signed-out' | 'ready' | 'denied'>('loading');
   const [refresh, setRefresh] = useState(0);
   const [editor, setEditor] = useState<{row?:PianoArrival}|null>(null);
   const [message, setMessage] = useState('');
+  const [selectedDay,setSelectedDay] = useState('');
+  const [today,setToday] = useState(koreaDay());
+  const day = selectedDay || today;
+  const data = snapshot?.day === day ? snapshot : null;
+  const viewingToday = day === today;
+  const changeDay = (next:string) => {setEditor(null);setMessage('');setSelectedDay(next===today?'':next);};
 
   useEffect(() => {
     let stopped = false, version = 0, running = false, queued = false;
@@ -35,15 +42,16 @@ export function TeacherAttendance() {
       const requestController = new AbortController();
       controller = requestController;
       const timeout = setTimeout(() => requestController.abort(), 15000);
-      setData(previous => previous?.day === koreaDay() ? previous : null);
+      setData(previous => previous?.day === day ? previous : null);
       try {
-        const response = await fetch('/api/teacher/attendance', { cache: 'no-store', signal: requestController.signal, headers: { Authorization: `Bearer ${await user.getIdToken()}` } });
+        const response = await fetch(`/api/teacher/attendance?day=${encodeURIComponent(day)}`, { cache: 'no-store', signal: requestController.signal, headers: { Authorization: `Bearer ${await user.getIdToken()}` } });
         const result = await response.json();
         if (stopped || requestVersion !== version) return;
         if (!response.ok) {
           if ([401, 403].includes(response.status)) { accessDenied=true;queued=false;stopEvents?.(); stopEvents=undefined; setData(null); setEditor(null); setState(response.status === 401 ? 'signed-out' : 'denied'); }
           throw new Error(result.error || '출석 현황을 불러오지 못했습니다.');
         }
+        if(result.day!==day)throw new Error('조회 날짜가 일치하지 않습니다. 다시 불러와주세요.');
         retryDelay=1000;setData(result); setError(''); setState('ready');
       } catch (reason) {
         if (!stopped && requestVersion === version) {
@@ -59,7 +67,7 @@ export function TeacherAttendance() {
       if (document.visibilityState !== 'visible') { stopEvents?.(); stopEvents=undefined; return; }
       if (!current || stopped || stopEvents) return;
       const user=current, subscriptionVersion=version;
-      stopEvents=watchTeacherAttendance({
+      if(day===today)stopEvents=watchTeacherAttendance({
         token:()=>user.getIdToken(),
         changed:()=>{if(!stopped&&subscriptionVersion===version)void load();},
         connected:()=>{},
@@ -80,13 +88,17 @@ export function TeacherAttendance() {
     const reconnect=()=>{stopEvents?.();stopEvents=undefined;resume();};
     window.addEventListener('online',reconnect);
     return () => { stopped=true;version++;controller?.abort();clearTimeout(retryTimer);stopEvents?.();off();document.removeEventListener('visibilitychange',resume);window.removeEventListener('focus',resume);window.removeEventListener('online',reconnect); };
-  }, [refresh]);
+  }, [refresh,day,today]);
+  useEffect(()=>{
+    const midnight=Date.parse(`${today}T00:00:00+09:00`)+86400000;
+    const timer=setTimeout(()=>setToday(koreaDay()),Math.max(1,midnight-Date.now()));return()=>clearTimeout(timer);
+  },[today]);
 
-  const waitingLabels = {waiting:'미출석',makeup_reserved:'보강 예정',absent:'결석',travel:'여행',sick:'병가',late_cancel:'당일 취소'};
+  const waitingLabels = {waiting:day>today?'수업 예정':'미출석',makeup_reserved:'보강 예정',absent:'결석',travel:'여행',sick:'병가',late_cancel:'당일 취소'};
   const rows = [...(data?.arrivals||[]).map(arrival=>({studentId:arrival.studentId,name:arrival.name,course:arrival.course,arrival,waiting:undefined as PianoWaiting|undefined})),...(data?.waiting||[]).map(waiting=>({studentId:waiting.studentId,name:waiting.name,course:waiting.course,arrival:undefined as PianoArrival|undefined,waiting}))].sort((a,b)=>a.name.localeCompare(b.name,'ko')||a.studentId.localeCompare(b.studentId));
   return <main className="min-h-screen bg-slate-50 text-slate-900">
     <header className="border-b bg-white px-5 py-5"><div className="mx-auto flex max-w-5xl flex-wrap items-center justify-between gap-4">
-      <div><p className="text-xs font-bold tracking-widest text-blue-700">WHEE MUSIC</p><h1 className="mt-1 text-2xl font-bold">오늘 출석 · 피아노</h1></div>
+      <div><p className="text-xs font-bold tracking-widest text-blue-700">WHEE MUSIC</p><h1 className="mt-1 text-2xl font-bold">출석 현황 · 피아노</h1></div>
       <nav className="flex items-center gap-4 text-sm"><Link href="/admin" className="font-semibold text-blue-700">강사 업무</Link>{state !== 'signed-out' && <button onClick={() => void signOut(auth)}>로그아웃</button>}</nav>
     </div></header>
     <div className="mx-auto max-w-5xl space-y-5 px-5 py-8">
@@ -95,23 +107,23 @@ export function TeacherAttendance() {
         : state === 'denied' ? <section role="alert" className="rounded-xl border bg-white p-6"><h2 className="font-bold">조회 권한이 없습니다</h2><p className="mt-2">승인된 피아노 강사와 관리자만 사용할 수 있습니다.</p><Link className="mt-4 inline-block text-blue-700" href="/admin">내 계정 상태 확인</Link></section>
         : <>
           <section className="flex flex-wrap items-center justify-between gap-5 rounded-2xl border border-slate-200 bg-white p-5 sm:p-6">
-            <div><h2 className="text-sm font-semibold text-slate-500">{data?.day || koreaDay()} 출석 현황</h2>
-              <p className="mt-2 flex items-baseline gap-2" aria-live="polite"><span className="text-base font-semibold text-slate-700">출석</span><strong className="text-5xl font-extrabold tabular-nums tracking-tight text-blue-700">{data?data.arrivals.length:'—'}</strong><span className="text-xl font-bold text-slate-600">건</span></p><p className="mt-3 text-sm text-slate-500">미출석/사전 결석 {data?.waiting?.length||0}건 · 전체 {rows.length}건</p>
+            <div><div className="flex flex-wrap items-center gap-3"><h2 className="text-sm font-semibold text-slate-500">출석 현황</h2><AttendanceDateNav day={day} today={today} disabled={!!editor} onChange={changeDay}/></div>
+              <p className="mt-2 flex items-baseline gap-2" aria-live="polite"><span className="text-base font-semibold text-slate-700">출석</span><strong className="text-5xl font-extrabold tabular-nums tracking-tight text-blue-700">{data?data.arrivals.length:'—'}</strong><span className="text-xl font-bold text-slate-600">건</span></p><p className="mt-3 text-sm text-slate-500">{data?<>{day>today?'수업 예정':'미출석/사전 결석'} {data.waiting?.length||0}건 · 전체 {rows.length}건</>:'선택한 날짜를 불러오는 중…'}</p>
             </div>
-            <div className="flex gap-2">{state==='ready'&&<button disabled={!!editor} onClick={()=>{setMessage('');setEditor({});}} className="rounded-xl bg-blue-700 px-4 py-3 text-sm font-semibold text-white hover:bg-blue-800 disabled:opacity-50">+ 출석</button>}</div>
+            <div className="flex gap-2">{state==='ready'&&viewingToday&&data&&<button disabled={!!editor} onClick={()=>{setMessage('');setEditor({});}} className="rounded-xl bg-blue-700 px-4 py-3 text-sm font-semibold text-white hover:bg-blue-800 disabled:opacity-50">+ 출석</button>}</div>
           </section>
           {message&&<p role="status" className="rounded-lg bg-blue-50 p-3 text-sm text-blue-800">{message}</p>}
           {error && <p role="alert" className="rounded-lg bg-amber-50 p-4 text-sm text-amber-900">{error} {data && '아래 목록은 마지막으로 확인된 기록입니다.'}</p>}
           {data && <section className="overflow-hidden rounded-xl border bg-white">
-            <div className="overflow-x-auto"><table className="w-full text-left text-sm"><caption className="sr-only">오늘 피아노 수업 예정 및 출석 현황 · 이름순</caption><thead className="bg-slate-50 text-slate-600"><tr>{['학생','과목','등원 시간','상태'].map(label=><th className="whitespace-nowrap px-4 py-3" key={label}>{label}</th>)}</tr></thead><tbody>{rows.map(({studentId,name,course,arrival:row,waiting})=><tr key={studentId} className={`border-t ${row?'text-black':'text-[#737373]'}`} data-attendance={row?'arrived':'waiting'}>
+            <div className="overflow-x-auto"><table className="w-full text-left text-sm"><caption className="sr-only">{day} 피아노 수업 예정 및 출석 현황 · 이름순</caption><thead className="bg-slate-50 text-slate-600"><tr>{['학생','과목','등원 시간','상태'].map(label=><th className="whitespace-nowrap px-4 py-3" key={label}>{label}</th>)}</tr></thead><tbody>{rows.map(({studentId,name,course,arrival:row,waiting})=><tr key={studentId} className={`border-t ${row?'text-black':'text-[#737373]'}`} data-attendance={row?'arrived':'waiting'}>
               <td className="whitespace-nowrap px-4 py-4 font-semibold">{name}</td><td className="px-4 py-4">{course}</td>
-              <td className="whitespace-nowrap px-4 py-4 tabular-nums">{row?<button aria-label={`${row.name} 등원 시간 수정`} onClick={()=>{setMessage('');setEditor({row});}} className="inline-flex min-h-11 items-center gap-2 rounded-full border border-black/10 bg-white px-4 py-2 text-black shadow-sm hover:shadow-md focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-black"><Clock3 size={16} aria-hidden="true"/><span className="text-base font-bold">{clock(row.arrivalAt)}</span></button>:<span>—{waiting?.lessonTime&&<small className="mt-1 block">수업 {waiting.lessonTime}</small>}</span>}</td>
+              <td className="whitespace-nowrap px-4 py-4 tabular-nums">{row?viewingToday?<button aria-label={`${row.name} 등원 시간 수정`} onClick={()=>{setMessage('');setEditor({row});}} className="inline-flex min-h-11 items-center gap-2 rounded-full border border-black/10 bg-white px-4 py-2 text-black shadow-sm hover:shadow-md focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-black"><Clock3 size={16} aria-hidden="true"/><span className="text-base font-bold">{clock(row.arrivalAt)}</span></button>:<span className="font-semibold">{clock(row.arrivalAt)}</span>:<span>—{waiting?.lessonTime&&<small className="mt-1 block">수업 {waiting.lessonTime}</small>}</span>}</td>
               <td className="whitespace-nowrap px-4 py-4">{row?<><span>{row.status==='makeup'?'보강 출석':'출석'}</span>{row.source==='teacher'&&<span className="ml-2 text-xs">강사 확인</span>}{row.source==='manual'&&<span className="ml-2 text-xs">수동 출석</span>}</>:waitingLabels[waiting!.status]}</td>
             </tr>)}</tbody></table></div>
-            {!rows.length&&<p role="status" className="p-10 text-center text-sm text-slate-500">오늘 수업 예정 학생과 출석 기록이 없습니다.</p>}
+            {!rows.length&&<p role="status" className="p-10 text-center text-sm text-slate-500">선택한 날짜의 수업 예정 학생과 출석 기록이 없습니다.</p>}
           </section>}
         </>}
     </div>
-    {editor&&data&&<TeacherArrivalDialog day={data.day} row={editor.row} close={()=>setEditor(null)} saved={message=>{setEditor(null);setMessage(message);setRefresh(value=>value+1);}}/>}
+    {editor&&data&&viewingToday&&<TeacherArrivalDialog day={data.day} row={editor.row} close={()=>setEditor(null)} saved={message=>{setEditor(null);setMessage(message);setRefresh(value=>value+1);}}/>}
   </main>;
 }

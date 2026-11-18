@@ -1,3 +1,4 @@
+import { validAttendanceDay } from '@/lib/attendance-date';
 // Keep all lesson accounting and teacher authorization in the management
 // backend. The public teacher page uses this same-origin, uncached relay.
 export const runtime = 'nodejs';
@@ -10,7 +11,13 @@ async function relay(request: Request) {
   if (!token?.match(/^Bearer .+$/)) return Response.json({error:'로그인이 필요합니다.'},{status:401,headers});
   try {
     const roster = request.method === 'GET' && new URL(request.url).searchParams.get('roster') === '1';
-    const response = await fetch(BACKEND + (roster ? '?roster=1' : ''), {
+    const params = new URL(request.url).searchParams;
+    let suffix = roster ? '?roster=1' : '';
+    if (request.method === 'GET' && !roster && params.has('day')) {
+      try { suffix = '?day=' + encodeURIComponent(validAttendanceDay(params.get('day'))); }
+      catch { return Response.json({error:'조회 날짜를 확인해주세요.'},{status:400,headers}); }
+    }
+    const response = await fetch(BACKEND + suffix, {
       method:request.method, headers:{Authorization:token,'Content-Type':'application/json',Origin:'https://manage.wheemusic.com'},
       ...(request.method === 'POST' ? {body:JSON.stringify(await request.json())} : {}), cache:'no-store', redirect:'error', signal:AbortSignal.timeout(15000),
     });
