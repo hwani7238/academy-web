@@ -5,9 +5,10 @@ import {createRequire} from 'node:module';
 import ts from 'typescript';
 import {renderToStaticMarkup} from 'react-dom/server';
 const require=createRequire(import.meta.url);
-function render(data){
- let index=0;const values=[data,'','ready',0,null,''];
- const exports={};const dependencies={react:{useEffect:()=>{},useState:()=>[values[index++],()=>{}]},'next/link':{default:({children})=>children},'@/lib/teacher-attendance':{koreaDay:()=>data.day},'@/lib/teacher-attendance-events':{},'./TeacherArrivalDialog':{},'@/lib/firebase':{},'firebase/auth':{}};
+function render(data,selectedDay='',today=data.day){
+ let index=0;const values=[data,'','ready',0,null,'',selectedDay,today];
+ const load=(file)=>{const out={};new Function('require','exports',ts.transpileModule(fs.readFileSync(file,'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.ReactJSX,target:ts.ScriptTarget.ES2022}}).outputText)(id=>id.startsWith('@/')?load(id.replace('@/','src/')+'.ts'):require(id),out);return out;};
+ const exports={};const dependencies={'./AttendanceDateNav':load('src/components/AttendanceDateNav.tsx'),react:{useEffect:()=>{},useState:()=>[values[index++],()=>{}]},'next/link':{default:({children})=>children},'@/lib/teacher-attendance':{koreaDay:()=>today},'@/lib/teacher-attendance-events':{},'./TeacherArrivalDialog':{},'@/lib/firebase':{},'firebase/auth':{}};
  new Function('require','exports',ts.transpileModule(fs.readFileSync('src/components/TeacherAttendance.tsx','utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.ReactJSX,target:ts.ScriptTarget.ES2022}}).outputText)(id=>dependencies[id]??require(id),exports);
  return renderToStaticMarkup(exports.TeacherAttendance());
 }
@@ -24,4 +25,12 @@ test('waiting names are gray without an arrival time editor; checked-in names an
 test('manual attendance displays a black attended row and an honest missing-time label',()=>{
  const html=render({day:'2026-11-18',arrivals:[{id:'manual',studentId:'manual',name:'직접출석',course:'어린이 피아노',arrivalAt:'',status:'present',source:'manual'}],waiting:[]});
  assert.match(html,/text-black" data-attendance="arrived"/);assert.match(html,/수동 출석/);assert.match(html,/시간 미기록/);assert.match(html,/직접출석 등원 시간 수정/);assert.doesNotMatch(html,/data-attendance="waiting"/);
+});
+
+test('past dates show records without edit actions, future dates show plans, and old responses stay hidden',()=>{
+ const today='2026-11-18',past={day:'2026-11-17',arrivals:[{id:'p',studentId:'p',name:'이전 출석',course:'어린이 피아노',arrivalAt:'2026-11-17T06:10:00Z',status:'present',source:'manual'}],waiting:[]};
+ let html=render(past,past.day,today);assert.match(html,/2026-11-17 \(화\)/);assert.match(html,/15:10/);assert.doesNotMatch(html,/이전 출석 등원 시간 수정|\+ 출석/);assert.match(html,/이전 날짜/);assert.match(html,/다음 날짜/);assert.match(html,/오늘 날짜로 이동/);
+ const future={day:'2026-11-19',arrivals:[],waiting:[{studentId:'p',name:'예정 학생',course:'어린이 피아노',status:'waiting',lessonTime:'15:00'}]};
+ html=render(future,future.day,today);assert.match(html,/수업 예정/);assert.doesNotMatch(html,/>미출석<|\+ 출석/);
+ html=render(past,future.day,today);assert.doesNotMatch(html,/이전 출석/);assert.match(html,/불러오는 중/);
 });

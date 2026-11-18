@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import ts from 'typescript';
-function load(file){const exports={};new Function('exports',ts.transpileModule(fs.readFileSync(file,'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText)(exports);return exports;}
+function load(file){const exports={};new Function('require','exports',ts.transpileModule(fs.readFileSync(file,'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText)(id=>load(id.replace('@/', 'src/')+'.ts'),exports);return exports;}
 test('piano data model includes teacher and owner-confirmed attendance but excludes leave and other instruments',()=>{
  const p=load('src/lib/teacher-attendance.ts'),day=p.koreaDay(),account={subject:'피아노'},owner={name:'학생',operationsCourseGroups:{피아노:'어린이 피아노 (1관)'}};
  const row={studentId:'piano',day,source:'teacher',status:'present',at:day+'T14:00:00+09:00',arrivalAt:day+'T13:30:00+09:00',updatedAt:'revision'};
@@ -30,4 +30,15 @@ test('manual save time is not exposed as arrival time; a separately corrected ti
  const row={day,source:'manual',status:'present',at:day+'T14:00:00+09:00',studentId:'p'};
  assert.equal(p.pianoArrival('id',row,account,owner,day).arrivalAt,'');assert.equal(p.pianoArrival('id',row,account,owner,day).source,'manual');
  const arrivalAt=day+'T13:00:00+09:00';assert.equal(p.pianoArrival('id',{...row,arrivalAt},account,owner,day).arrivalAt,new Date(arrivalAt).toISOString());
+});
+
+test('date relay forwards only a validated date to the fixed backend',async()=>{
+ const route=load('src/app/api/teacher/attendance/route.ts'),original=global.fetch,calls=[];
+ global.fetch=async(url)=>{calls.push(url);return Response.json({day:'2026-11-17',arrivals:[],waiting:[]});};
+ const req=query=>new Request('https://wheemusic.com/api/teacher/attendance?'+query,{headers:{Authorization:'Bearer test-token'}});
+ try{
+  assert.equal((await route.GET(req('day=2026-11-17&url=https://evil.example'))).status,200);assert.equal(calls[0],'https://manage.wheemusic.com/api/teacher/attendance?day=2026-11-17');
+  for(const day of ['2026-02-30','bad',''])assert.equal((await route.GET(req('day='+day))).status,400);
+  assert.equal(calls.length,1);
+ }finally{global.fetch=original;}
 });
