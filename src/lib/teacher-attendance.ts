@@ -9,7 +9,8 @@ export function canViewPianoAttendance(profile?: AttendanceProfile) {
 }
 
 export type PianoArrival = { studentId: string; updatedAt: string; source: 'kiosk' | 'teacher'; id: string; name: string; course: string; arrivalAt: string; status: 'present' | 'makeup' };
-export type PianoAttendance = { day: string; checkedAt: string; arrivals: PianoArrival[] };
+export type PianoWaiting = { studentId:string; name:string; course:string; lessonTime:string; status:'waiting'|'makeup_reserved'|'absent'|'travel'|'sick'|'late_cancel' };
+export type PianoAttendance = { day: string; checkedAt: string; arrivals: PianoArrival[]; waiting?:PianoWaiting[] };
 type RecordData = Record<string, unknown>;
 // Use an allowlist: financial fields, phone numbers and notes never enter this DTO.
 export function pianoArrival(id: string, row: RecordData, account: RecordData | undefined, owner: RecordData | undefined, day: string): PianoArrival | null {
