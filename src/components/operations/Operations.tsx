@@ -38,6 +38,7 @@ import { CheckIn } from './CheckIn';
 import { checkInName } from '@/lib/operations/course-label';
 import { sample, demoAction } from './demo';
 import './operations.css';
+import { AttendanceDateNav } from '@/components/AttendanceDateNav';
 const invoiceDay = (invoice: Invoice) => invoice.lessonDate || invoice.cycleStart || seoulDay(new Date(invoice.createdAt));
 const won = (n: number) => `${n.toLocaleString('ko-KR')}원`;
 const time = (v: string) => new Date(v).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul', month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' });
@@ -97,14 +98,15 @@ export function Operations({ demo = false }: { demo?: boolean }) {
   latestRefresh.current = () => { void refresh(); };
   useEffect(() => {
     if (demo || !user) return;
+    const invalidate = () => { refreshVersion.current++; };
+    if (tab==='today' && day!==todayDate) { void refresh(); return invalidate; }
     const stop = watchOperations({
       refresh: async () => Boolean(await refresh()),
       failed: setError,
     });
-    const invalidate = () => { refreshVersion.current++; };
     return () => { stop(); invalidate(); };
   // Initial/server reconnect and committed changes are the only remote triggers.
-  }, [demo, user, day, todayDate, refresh]);
+  }, [demo, user, day, todayDate, refresh, tab]);
   const act = useCallback(async (input: Record<string, unknown>) => {
     if (mutation.current) throw new Error('앞선 저장이 처리 중입니다.');
     mutation.current = true; refreshVersion.current++;
@@ -141,9 +143,10 @@ export function Operations({ demo = false }: { demo?: boolean }) {
   if (!authReady) return <main className="whee-ops gate"><h1>출석·수납 관리</h1><p>계정을 확인하고 있습니다.</p></main>;
   if (!demo && !user) return <main className="whee-ops gate"><p className="brand">WHEE MUSIC</p><h1>원장님 관리실</h1><p>출석과 수납을 확인하려면 원장 계정으로 로그인해주세요.</p><a className="primary" href="/login">기존 계정으로 로그인</a><a href="/operations/demo">가상 학생으로 먼저 체험하기 →</a></main>;
   if (!data) return <main className="whee-ops gate"><h1>출석·수납 관리</h1><p role="alert">{error || '자료를 불러오고 있습니다.'}</p><button onClick={() => void refresh()}>다시 불러오기</button><a href="/operations/demo">가상 학생으로 체험하기</a></main>;
-  const todayAttendance = orderDailyAttendance(dailyCheckins(data.attendance, day), dailyOrder);
+  const dailyLoading = !demo && loadedDay !== day;
+  const todayAttendance = dailyLoading || day > todayDate ? [] : orderDailyAttendance(dailyCheckins(data.attendance, day), dailyOrder);
   const arrivedIds = new Set(todayAttendance.map(a=>a.studentId));
-  const expectedLessons = dailyExpectedLessons(data,day);
+  const expectedLessons = dailyLoading ? [] : dailyExpectedLessons(data,day);
   const waitingLessons = expectedLessons.filter(r=>!arrivedIds.has(r.studentId));
   const dailyRows = [...todayAttendance.map(arrival=>({studentId:arrival.studentId,arrival,waiting:undefined as typeof waitingLessons[number]|undefined})),...waitingLessons.map(waiting=>({studentId:waiting.studentId,arrival:undefined as Attendance|undefined,waiting}))];
   if(dailyOrder==='name')dailyRows.sort((a,b)=>compareNames(data.accounts.find(s=>s.id===a.studentId)?.name||a.arrival?.name||'',data.accounts.find(s=>s.id===b.studentId)?.name||b.arrival?.name||''));
@@ -178,14 +181,14 @@ export function Operations({ demo = false }: { demo?: boolean }) {
     {tab === 'announcements' && <Announcements user={user} data={data} demo={demo}/> }
     {tab === 'monthly' && <MonthlyAttendance data={data} day={day} busy={busy} loading={!demo && loadedDay !== day} onDayChange={setDay} save={act} />}
     {tab === 'today' && <>
-      <div className="section-head"><div><h2>당일 출석 현황</h2><p>수업 요일·날짜 이동·보강 예약을 기준으로 표시합니다. 미출석은 회색, 실제 출석은 등원 시간과 함께 검정색입니다.</p><p>출석 {todayAttendance.length}건 · 미출석/사전 결석 {waitingLessons.length}건 · 전체 {dailyRows.length}건</p></div></div>
-      {dailyRows.length ? <div className="table-wrap"><table><thead><tr>
+      <div className="section-head"><div><div style={{display:'flex',alignItems:'center',gap:14,flexWrap:'wrap'}}><h2>당일 출석 현황</h2><AttendanceDateNav day={day} today={todayDate} disabled={busy} onChange={next=>{setTimeAttendance(null);setPanel(null);setMessage('');setDay(next);}}/></div><p>수업 요일·날짜 이동·보강 예약을 기준으로 표시합니다. 미출석은 회색, 실제 출석은 등원 시간과 함께 검정색입니다.</p><p>{dailyLoading?'선택한 날짜를 불러오는 중…':<>출석 {todayAttendance.length}건 · {day>todayDate?'수업 예정':'미출석/사전 결석'} {waitingLessons.length}건 · 전체 {dailyRows.length}건</>}</p></div></div>
+      {dailyLoading ? <p role="status">선택한 날짜의 출석 현황을 불러오는 중…</p> : dailyRows.length ? <div className="table-wrap"><table><thead><tr>
         <th><span className="attendance-sort-heading">학생<button className="attendance-sort-button" aria-label="학생 이름 가나다순 정렬" aria-pressed={dailyOrder==='name'} onClick={()=>setDailyOrder('name')}>ㄱㄴㄷ</button></span></th>
-        <th>상태</th><th><span className="attendance-sort-heading">등원 시간<button className="attendance-sort-button" aria-label={dailyOrder==='earliest'?'나중에 온 순으로 정렬':'빨리 온 순으로 정렬'} onClick={()=>setDailyOrder(v=>v==='earliest'?'latest':'earliest')}>{dailyOrder==='latest'?'↓':'↑'}</button></span></th><th>차감</th><th>남은 횟수</th><th>비고</th><th>관리</th>
+        <th>상태</th><th><span className="attendance-sort-heading">등원 시간<button className="attendance-sort-button" aria-label={dailyOrder==='earliest'?'나중에 온 순으로 정렬':'빨리 온 순으로 정렬'} onClick={()=>setDailyOrder(v=>v==='earliest'?'latest':'earliest')}>{dailyOrder==='latest'?'↓':'↑'}</button></span></th><th>차감</th><th>현재 잔여</th><th>비고</th><th>관리</th>
       </tr></thead><tbody>{dailyRows.map(({studentId,arrival:a,waiting})=>{
         const account=data.accounts.find(s=>s.id===studentId),name=account?.name||a?.name||data.students.find(s=>s.id===studentId)?.name||'학생';
         return <tr key={studentId} className={a?'daily-arrived':'daily-waiting'}><td><strong>{displayCourseName(name)}</strong><small>{account?.checkinSuffixes.filter(n=>/^[0-9]{4}$/.test(n)).join(' · ')||'—'}</small></td>
-          <td>{a?<>{ATTENDANCE_LABELS[a.status||'present']}{a.source==='manual'&&<small>수동 출석</small>}</>:EXPECTED_LABELS[waiting!.status]}</td><td>{a?<button className="attendance-time-button" disabled={busy} aria-label={`${name} 출석 시간 수정`} onClick={()=>setTimeAttendance({...a})}><span>{attendanceClock(a)||'시간 미기록'}</span><span aria-hidden="true">⋮</span></button>:<span>—{waiting?.lessonTime&&<small>수업 {waiting.lessonTime}</small>}</span>}</td>
+          <td>{a?<>{ATTENDANCE_LABELS[a.status||'present']}{a.source==='manual'&&<small>수동 출석</small>}</>:(day>todayDate&&waiting!.status==='waiting'?'수업 예정':EXPECTED_LABELS[waiting!.status])}</td><td>{a?<button className="attendance-time-button" disabled={busy} aria-label={`${name} 출석 시간 수정`} onClick={()=>setTimeAttendance({...a})}><span>{attendanceClock(a)||'시간 미기록'}</span><span aria-hidden="true">⋮</span></button>:<span>—{waiting?.lessonTime&&<small>수업 {waiting.lessonTime}</small>}</span>}</td>
           <td>{a?`${a.units}회`:'—'}</td><td>{account?`${account.remaining}회`:'—'}</td><td>{a?.note||'—'}</td><td>{a?<button disabled={busy} onClick={()=>setPanel({type:'adjust',row:a})}>수정</button>:'—'}</td></tr>;
       })}</tbody></table></div>:<div className="empty"><h3>이 날짜의 수업 예정 학생과 출석 기록이 없습니다.</h3><p>학생의 수업 요일 또는 보강 예약을 등록하면 예정 명단에 표시됩니다.</p></div>}
     </>}

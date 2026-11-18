@@ -53,7 +53,7 @@ test('today-only read returns all piano groups with an explicit privacy allowlis
     s.records.set('students/owner-' + id, { name: '학생 ' + id, instruments: ['피아노', '드럼'], teachers: { 피아노: 'another-teacher' }, phone: 'secret' });
     s.records.set('opsAttendance/' + id, { studentId: id, day: s.day, source: 'kiosk', status: 'present', at: arrival, units: 1, note: 'private', phone: 'secret' });
   }
-  const response = await s.call('piano', '?day=2000-01-01&subject=드럼&studentId=drum');
+  const response = await s.call('piano', '?subject=드럼&studentId=drum');
   assert.equal(response.status, 200); assert.match(response.headers.get('cache-control'), /no-store/);
   const result = await response.json(); assert.equal(result.day, s.day); assert.equal(result.arrivals.length, 3);
   assert.ok(result.arrivals.every(row => row.course === '어린이 피아노'));
@@ -129,4 +129,22 @@ test('monthly manual attendance becomes an arrival without treating its save tim
  result=await(await s.call('piano')).json();assert.equal(result.arrivals[0].arrivalAt,new Date(row.arrivalAt).toISOString());assert.equal(result.arrivals[0].status,'makeup');
  row.status='cancelled';
  result=await(await s.call('piano')).json();assert.equal(result.arrivals.length,0);assert.equal(result.waiting.length,1);
+});
+
+test('staff can read one selected past day and future schedules without enabling historical writes',async()=>{
+ const s=setup(),past='2026-11-01',future='2999-01-01';
+ s.records.set('opsAccounts/p',{active:true,subject:'피아노',schedule:{rules:[{start:'2026-01-01',weekdays:[0,1,2,3,4,5,6]}],moves:[]}});
+ s.records.set('students/p',{name:'날짜 조회',instruments:['피아노']});
+ for(const day of [past,s.day,future])s.records.set('opsAttendance/p_'+day,{studentId:'p',day,source:'manual',status:'present',at:day+'T10:00:00+09:00'});
+ let result=await(await s.call('piano','?day='+past)).json();assert.equal(result.day,past);assert.equal(result.arrivals.length,1);assert.equal(result.arrivals[0].id,'p_'+past);
+ assert.ok(s.reads.filter(r=>r.name==='opsAttendance').every(r=>r.field==='day'&&r.value===past));
+ const before=structuredClone(s.records);
+ result=await(await s.call('piano','?day='+future)).json();assert.equal(result.day,future);assert.equal(result.arrivals.length,0);assert.equal(result.waiting.length,1);
+ assert.deepEqual(s.records,before);assert.equal(s.writes.length,0);
+ // The separate editor roster always targets today.
+ result=await(await s.call('piano','?roster=1&day='+past)).json();assert.equal(result.day,s.day);
+});
+test('invalid or normalized dates are rejected before any attendance read',async()=>{
+ const s=setup();for(const day of ['','2026-02-30','2026-13-01','2026-1-01','not-a-date','2026-11-18T00:00:00Z'])assert.equal((await s.call('piano','?day='+encodeURIComponent(day))).status,400);
+ assert.equal(s.reads.length,0);
 });
