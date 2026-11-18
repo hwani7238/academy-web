@@ -16,7 +16,7 @@ export function legacyAttendanceAppearance(row: Pick<Legacy, 'value' | 'color' |
 }
 
 export function attendancePaymentDue(row: Pick<Attendance, 'day' | 'status' | 'units'>, account?: Account, invoice?: Invoice) {
-  if (!invoice || invoice.status !== 'open' || invoice.paid >= invoice.amount || row.units <= 0 || !['present', 'makeup'].includes(row.status || 'present')) return false;
+  if (account?.billingExempt || !invoice || invoice.status !== 'open' || invoice.paid >= invoice.amount || row.units <= 0 || !['present', 'makeup'].includes(row.status || 'present')) return false;
   // A linked first-lesson date is authoritative, including an ordinary renewal.
   const firstLesson = invoice.lessonDate || invoice.cycleStart;
   if (firstLesson) return row.day >= firstLesson;
@@ -72,6 +72,7 @@ export function unpaidForecastFirstLessons(forecast: Map<string, string>, invoic
 export function importedAttendanceAppearance(row: Legacy, account?: Account, invoice?: Invoice, confirmed = false) {
   const appearance = legacyAttendanceAppearance(row);
   if (row.status === 'cancelled') return appearance;
+  if (account?.billingExempt) return appearance.tone === 'payment-due' ? {tone:'present',label:''} : appearance;
   const status = appearance.tone === 'payment-due' ? 'present' : appearance.tone as Attendance['status'];
   const due = attendancePaymentDue({ day: row.day, status, units: 1 }, account, invoice);
   if (due) return { tone: 'payment-due', label: '결제 필요' };
@@ -108,6 +109,7 @@ export function monthlyPaymentDue({ key, row, original, account, invoice, sequen
   sequence: Map<string, string>; confirmedFirst: Set<string>; cycleFirstDays: Record<string, string[]>;
   unpaidCycles: Set<string>; unpaidForecastFirst: Set<string>;
 }): boolean {
+  if (account?.billingExempt) return false;
   if (row) return isUnpaidAttendance(row, cycleFirstDays, unpaidCycles)
     || attendancePaymentDue(row, account, invoice)
     || (isFirstLesson(sequence.get(key), row.status) && !confirmedFirst.has(key));

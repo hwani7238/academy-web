@@ -42,6 +42,7 @@ function initializeLessonLedger(tx:Transaction,db:Firestore,account:Account,invo
  tx.create(db.doc(`opsCourseLedgers/${account.id}`),{version:2,revision:'registration',seed:{version:2,from:start,passes:[{id:invoice.passId||invoice.id,invoiceId:invoice.id,start,units:invoice.units,amount:invoice.amount,openingUsed:used,openingOrdinal:used,fixedStart:true}],archived:[],adjustments:[],createdAt:account.updatedAt,sourceFingerprint:'owner-registration'},updatedAt:account.updatedAt});
 }
 function enqueue(tx: Transaction, db: Firestore, id: string, account: Account, kind: 'attendance' | 'billing', parameters: Record<string, string>) {
+  if (kind === 'billing' && account.billingExempt) return;
   tx.create(db.doc(`opsNotices/${id}`), { id, studentId: account.id, name: account.name, phone: account.phone, kind, parameters, status: 'queued', createdAt: now() });
 }
 function newInvoice(tx: Transaction, db: Firestore, account: Account, id: string, reason: string, createdAt = now()) {
@@ -183,8 +184,11 @@ export async function configure(input: Record<string, unknown>, actor: string) {
     if (old && (old.planUnits !== planUnits || old.planAmount !== planAmount)) throw Error('수강 횟수·수강료 변경은 수강권 관리에서 적용 시작일 또는 잔여 소진 후를 선택해주세요.');
     const overrideGroup=student.data()?.operationsCourseGroups?.[subject] as string|undefined;
     const overrideSubject=overrideGroup?(overrideGroup.includes('피아노')?'피아노':overrideGroup):undefined;
+    const billingExempt = Object.hasOwn(input, 'billingExempt') ? input.billingExempt === true : old?.billingExempt === true;
+    const pendingBilling = billingExempt ? (await tx.get(db.collection('opsNotices').where('studentId','==',id))).docs.filter(d => d.data().kind === 'billing') : [];
+    if (pendingBilling.some(d => d.data().status === 'processing')) throw Error('결제 안내를 처리 중입니다. 처리 결과를 확인한 뒤 수납 불필요로 변경해주세요.');
     const remaining = old ? old.remaining : integer(input.remaining, -1000, 1000, '현재 남은 횟수');
-    const saved = { id, ...(old?.referenceResetFrom ? {referenceResetFrom:old.referenceResetFrom} : {}), ...(old?.currentPassId?{currentPassId:old.currentPassId,currentPassStart:old.currentPassStart || ""}:{}),...(old?.lastPassLessonDay?{lastPassLessonDay:old.lastPassLessonDay}:{}), ...(old?.nextPass?{nextPass:old.nextPass}:{}), ...(old?.initialPlanUnits?{initialPlanUnits:old.initialPlanUnits}:{}), ...(old?.passHistory ? {passHistory:old.passHistory} : {}), ...(old?.schedule ? {schedule:old.schedule} : {}), ...(old?.importId ? { importId: old.importId, openingAsOf: old.openingAsOf } : {}), ...(old?.attendanceGroup ? { attendanceGroup: old.attendanceGroup } : {}), ...(old?.displaySubject ? { displaySubject: old.displaySubject } : {}), ...(subject ? { sourceStudentId, subject } : {}), name: subject ? `${student.data()?.name || '학생'} · ${subject}` : student.data()?.name || '학생', phone, checkinSuffixes: codes, planUnits, planAmount, remaining, openInvoiceId: old?.openInvoiceId || null, active: input.active !== false, autoBilling: input.autoBilling === true, updatedAt: now(), ...(overrideGroup?{attendanceGroup:overrideGroup,displaySubject:overrideSubject,name:`${student.data()?.name} · ${overrideSubject}`}:{}) };
+    const saved = { id, ...(old?.referenceResetFrom ? {referenceResetFrom:old.referenceResetFrom} : {}), ...(old?.currentPassId?{currentPassId:old.currentPassId,currentPassStart:old.currentPassStart || ""}:{}),...(old?.lastPassLessonDay?{lastPassLessonDay:old.lastPassLessonDay}:{}), ...(old?.nextPass?{nextPass:old.nextPass}:{}), ...(old?.initialPlanUnits?{initialPlanUnits:old.initialPlanUnits}:{}), ...(old?.passHistory ? {passHistory:old.passHistory} : {}), ...(old?.schedule ? {schedule:old.schedule} : {}), ...(old?.importId ? { importId: old.importId, openingAsOf: old.openingAsOf } : {}), ...(old?.attendanceGroup ? { attendanceGroup: old.attendanceGroup } : {}), ...(old?.displaySubject ? { displaySubject: old.displaySubject } : {}), ...(subject ? { sourceStudentId, subject } : {}), name: subject ? `${student.data()?.name || '학생'} · ${subject}` : student.data()?.name || '학생', phone, checkinSuffixes: codes, planUnits, planAmount, remaining, openInvoiceId: old?.openInvoiceId || null, active: input.active !== false, billingExempt, autoBilling: !billingExempt && input.autoBilling === true, updatedAt: now(), ...(overrideGroup?{attendanceGroup:overrideGroup,displaySubject:overrideSubject,name:`${student.data()?.name} · ${overrideSubject}`}:{}) };
     const firstInvoice = !old && input.firstBilling === true ? firstEnrollmentInvoice(saved as Account, validDay(input.firstLessonDate), saved.updatedAt) : null;
     let revisedInvoice: Invoice | undefined, invoiceBefore: Invoice | undefined;
     let billingNotice: FirebaseFirestore.DocumentSnapshot | undefined;
@@ -201,6 +205,7 @@ export async function configure(input: Record<string, unknown>, actor: string) {
         if (billingNotice.exists && !['queued','blocked','review','cancelled'].includes(billingNotice.data()?.status)) throw Error('이미 결제 안내를 처리한 청구입니다. 발송 결과를 확인한 뒤 청구를 수정해주세요.');
       }
     }
+    for (const notice of pendingBilling) if (['queued','blocked','failed','review'].includes(notice.data().status)) tx.update(notice.ref, {status:'cancelled',error:'수납 불필요 설정으로 결제 안내를 취소했습니다.'});
     if (firstInvoice) {
       saved.openInvoiceId = firstInvoice.id;
       tx.create(db.doc(`opsInvoices/${firstInvoice.id}`), { ...firstInvoice, reason: '신규 수강 등록' });
@@ -212,7 +217,7 @@ export async function configure(input: Record<string, unknown>, actor: string) {
       if (billingNotice?.exists && billingNotice.data()?.status !== 'cancelled') tx.update(billingNotice.ref, { parameters: { ...billingNotice.data()?.parameters, amount: String(revisedInvoice.amount - revisedInvoice.paid), lesson_count: String(revisedInvoice.units) } });
       audit(tx, db, actor, 'configure-invoice', id, { invoiceId: revisedInvoice.id, before: { units: invoiceBefore!.units, amount: invoiceBefore!.amount, creditUnits: invoiceBefore!.creditUnits ?? invoiceBefore!.units }, after: { units: revisedInvoice.units, amount: revisedInvoice.amount, creditUnits: revisedInvoice.creditUnits }, paid: revisedInvoice.paid });
     }
-    audit(tx, db, actor, 'configure', id, { planUnits, planAmount, remaining, active: input.active !== false, autoBilling: input.autoBilling === true, ...(firstInvoice ? { invoiceId: firstInvoice.id, firstLessonDate: firstInvoice.cycleStart } : {}) });
+    audit(tx, db, actor, 'configure', id, { planUnits, planAmount, remaining, active: input.active !== false, billingExempt, autoBilling: !billingExempt && input.autoBilling === true, ...(firstInvoice ? { invoiceId: firstInvoice.id, firstLessonDate: firstInvoice.cycleStart } : {}) });
     // Existing pass lengths change only through the dated pass workflow.
     return old ? { accounts: [saved as Account], ...(revisedInvoice ? { invoices: [revisedInvoice] } : {}) } : undefined;
   });
@@ -515,6 +520,7 @@ export async function invoiceAction(input: Record<string, unknown>, actor: strin
       tx.update(ref, { needsReview: false, updatedAt: now() });
       if (notice.data()?.status === 'review') tx.update(noticeRef, { status: 'queued', error: '' });
     } else {
+      if (account.billingExempt) throw Error('수납 불필요로 설정된 수강권입니다.');
       if (invoice.needsReview) throw new Error('횟수 수정에 따른 청구 내용을 먼저 확인해주세요.');
       if (notice.exists) throw new Error('이미 발송 대기 또는 처리 기록이 있습니다.');
       enqueue(tx, db, `billing_${id}`, account, 'billing', { student_name: account.name, amount: String(invoice.amount - invoice.paid), lesson_count: String(invoice.units) });

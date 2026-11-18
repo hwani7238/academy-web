@@ -3782,3 +3782,78 @@ test('legacy current-pass amendments retain paid invoices and subtract the plan 
  assert.equal(s.records.get('opsAccounts/legacy').remaining,5);assert.equal(s.records.get('opsInvoices/p').paid,180000);
  assert.deepEqual(s.records.get('opsPayments/receipt'),receipt);
 });
+
+test('collection exemption persists across configuration and exhaustion without changing receipts or attendance',async()=>{
+ const s=setup();await s.seed('free',1);await s.seed('paid-course',1);
+ const before=structuredClone(s.records.get('opsAccounts/free'));
+ s.records.set('opsNotices/pending',{id:'pending',studentId:'free',kind:'billing',status:'queued'});
+ s.records.set('opsNotices/sent',{id:'sent',studentId:'free',kind:'billing',status:'submitted'});
+ s.records.set('opsPayments/old',{id:'old',studentId:'free',amount:160000,method:'카드'});
+ const configure={studentId:'free',planUnits:8,planAmount:160000,phone:'01000001234',phones:['1234'],active:true,autoBilling:true};
+ await s.service.configure({...configure,billingExempt:true,expectedUpdatedAt:before.updatedAt},'owner');
+ assert.equal(s.records.get('opsAccounts/free').billingExempt,true);
+ assert.equal(s.records.get('opsAccounts/free').autoBilling,false);
+ assert.equal(s.records.get('opsAccounts/free').remaining,1);
+ assert.equal(s.records.get('opsNotices/pending').status,'cancelled');
+ assert.equal(s.records.get('opsNotices/sent').status,'submitted');
+ assert.equal(s.records.get('opsPayments/old').amount,160000);
+ await s.service.configure(configure,'owner'); // Old clients must not silently clear the policy.
+ assert.equal(s.records.get('opsAccounts/free').billingExempt,true);
+ await s.service.checkIn('free','1234','device');
+ const a=s.records.get('opsAccounts/free'),day=s.load('model').seoulDay();
+ assert.equal(a.remaining,0);assert.equal(a.active,true);assert.equal(a.billingExempt,true);
+ assert.equal(s.records.get(`opsAttendance/free_${day}`).units,1);
+ const invoice=s.records.get(`opsInvoices/${a.openInvoiceId}`);
+ assert.ok(invoice);assert.equal(invoice.paid,0); // Keep pass evidence; never fabricate payment.
+ assert.equal([...s.records.values()].filter(n=>n.studentId==='free'&&n.kind==='billing').length,2);
+ await assert.rejects(s.service.invoiceAction({invoiceId:invoice.id,action:'requestBilling'},'owner'),/수납 불필요/);
+ const {finalLessonInvoices,outstandingBillingAmount}=s.load('upcoming-billing');
+ const other={...invoice,id:'other',studentId:'paid-course'};
+ const data={accounts:[a,s.records.get('opsAccounts/paid-course')],students:[{id:'free'},{id:'paid-course'}],invoices:[invoice,other],attendance:[]};
+ assert.deepEqual(finalLessonInvoices(data,data.invoices,day).map(i=>i.id),['other']);
+ assert.equal(outstandingBillingAmount(data),other.amount);
+ await s.service.configure({...configure,billingExempt:false},'owner');
+ assert.equal(s.records.get('opsAccounts/free').billingExempt,false);
+});
+
+test('exempt courses suppress recorded, imported and future payment prompts while ordinary courses remain collectible',()=>{
+ const s=setup(),today='2026-11-18',a={id:'free',active:true,billingExempt:true,planUnits:8,planAmount:160000,remaining:0,schedule:{rules:[{start:'2026-11-01',weekdays:[1,3]}],moves:[]}};
+ const row={id:'free_'+today,studentId:'free',day:today,status:'present',units:1,unpaidCycleStart:today};
+ const invoice={id:'invoice',studentId:'free',status:'open',paid:0,amount:160000,units:8,lessonDate:today,createdAt:today};
+ const data={day:today,accounts:[a],students:[{id:a.id}],attendance:[row],invoices:[],sequenceContext:{positions:{free:0},cycleStarts:[],references:[]}};
+ const {billingProjection}=s.load('upcoming-billing');
+ assert.deepEqual(billingProjection(data,today).upcoming,[]);
+ assert.ok(billingProjection({...data,accounts:[{...a,billingExempt:false}]},today).upcoming.length>0);
+ const {monthlyPaymentDue,importedAttendanceAppearance}=s.load('attendance-appearance');
+ const key='free_'+today,args={key,account:a,invoice,sequence:new Map([[key,'1']]),confirmedFirst:new Set(),cycleFirstDays:{free:[today]},unpaidCycles:new Set([key]),unpaidForecastFirst:new Set([key])};
+ assert.equal(monthlyPaymentDue({...args,row}),false);
+ assert.equal(monthlyPaymentDue(args),false);
+ assert.equal(monthlyPaymentDue({...args,account:{...a,billingExempt:false},row}),true);
+ const legacy={studentId:'free',day:today,value:'1',color:'#FF00FF'};
+ assert.deepEqual(importedAttendanceAppearance(legacy,a,invoice),{tone:'present',label:''});
+ assert.equal(monthlyPaymentDue({...args,original:legacy}),false);
+});
+
+test('canonical renewal keeps the collection exemption after starting another pass',async()=>{
+ const s=await canonicalServiceFixture();
+ const receipts=structuredClone([...s.records].filter(([k])=>k.startsWith('opsPayments/')));
+ await s.service.configure({studentId:'v2',planUnits:4,planAmount:180000,phone:'01000001234',phones:['1234'],active:true,billingExempt:true},'owner');
+ for(const day of ['2026-10-04','2026-10-05'])await s.service.recordAttendance({studentId:'v2',day,status:'present',units:1,expectedUpdatedAt:''},'owner');
+ const account=s.records.get('opsAccounts/v2');
+ assert.equal(account.billingExempt,true);assert.equal(account.remaining,3);assert.equal(account.currentPassStart,'2026-10-05');
+ const invoices=[...s.records].filter(([k])=>k.startsWith('opsInvoices/')).map(([,v])=>v);
+ const data={accounts:[account],students:[{id:'v2'}],invoices,attendance:[]};
+ assert.deepEqual(s.load('upcoming-billing').finalLessonInvoices(data,invoices,'2026-10-05'),[]);
+ assert.equal(s.load('upcoming-billing').outstandingBillingAmount(data),0);
+ assert.deepEqual([...s.records].filter(([k])=>k.startsWith('opsPayments/')),receipts);
+});
+
+test('notice worker cancels a previously queued collection request for an exempt course',async()=>{
+ const s=setup();await s.seed('free',2);
+ s.records.get('opsAccounts/free').billingExempt=true;
+ s.records.set('opsNotices/billing_old',{id:'billing_old',kind:'billing',studentId:'free',status:'queued'});
+ s.records.set('opsInvoices/old',{id:'old',studentId:'free',status:'open',amount:160000,paid:0});
+ await s.load('notices').processNotices('billing_old');
+ assert.equal(s.records.get('opsNotices/billing_old').status,'cancelled');
+ assert.equal(s.records.get('opsAccounts/free').remaining,2);
+});

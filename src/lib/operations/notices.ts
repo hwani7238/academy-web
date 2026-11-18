@@ -35,6 +35,8 @@ export async function processNotices(noticeId?: string) {
       if (!fresh || fresh.status !== 'queued') return null;
       let reason = '';
       if (fresh.kind === 'billing') {
+        const billingAccount = (await tx.get(db.doc(`opsAccounts/${fresh.studentId}`))).data();
+        if (billingAccount?.billingExempt) { tx.update(item.ref, {status:'cancelled',error:'수납 불필요 설정입니다.'}); return null; }
         const invoice = (await tx.get(db.doc(`opsInvoices/${item.id.replace(/^billing_/, '')}`))).data();
         if (!invoice || invoice.status !== 'open') { tx.update(item.ref, { status: 'cancelled' }); return null; }
         if (invoice.needsReview) { tx.update(item.ref, { status: 'review', error: '횟수 수정 후 청구 확인이 필요합니다.' }); return null; }
