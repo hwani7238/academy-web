@@ -185,7 +185,7 @@ export function Operations({ demo = false }: { demo?: boolean }) {
       </tr></thead><tbody>{dailyRows.map(({studentId,arrival:a,waiting})=>{
         const account=data.accounts.find(s=>s.id===studentId),name=account?.name||a?.name||data.students.find(s=>s.id===studentId)?.name||'학생';
         return <tr key={studentId} className={a?'daily-arrived':'daily-waiting'}><td><strong>{displayCourseName(name)}</strong><small>{account?.checkinSuffixes.filter(n=>/^[0-9]{4}$/.test(n)).join(' · ')||'—'}</small></td>
-          <td>{a?ATTENDANCE_LABELS[a.status||'present']:EXPECTED_LABELS[waiting!.status]}</td><td>{a?<button className="attendance-time-button" disabled={busy} aria-label={`${name} 출석 시간 수정`} onClick={()=>setTimeAttendance({...a})}><span>{attendanceClock(a)||'시간 미기록'}</span><span aria-hidden="true">⋮</span></button>:<span>—{waiting?.lessonTime&&<small>수업 {waiting.lessonTime}</small>}</span>}</td>
+          <td>{a?<>{ATTENDANCE_LABELS[a.status||'present']}{a.source==='manual'&&<small>수동 출석</small>}</>:EXPECTED_LABELS[waiting!.status]}</td><td>{a?<button className="attendance-time-button" disabled={busy} aria-label={`${name} 출석 시간 수정`} onClick={()=>setTimeAttendance({...a})}><span>{attendanceClock(a)||'시간 미기록'}</span><span aria-hidden="true">⋮</span></button>:<span>—{waiting?.lessonTime&&<small>수업 {waiting.lessonTime}</small>}</span>}</td>
           <td>{a?`${a.units}회`:'—'}</td><td>{account?`${account.remaining}회`:'—'}</td><td>{a?.note||'—'}</td><td>{a?<button disabled={busy} onClick={()=>setPanel({type:'adjust',row:a})}>수정</button>:'—'}</td></tr>;
       })}</tbody></table></div>:<div className="empty"><h3>이 날짜의 수업 예정 학생과 출석 기록이 없습니다.</h3><p>학생의 수업 요일 또는 보강 예약을 등록하면 예정 명단에 표시됩니다.</p></div>}
     </>}

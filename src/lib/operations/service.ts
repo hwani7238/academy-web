@@ -318,7 +318,7 @@ export async function correctTeacherAttendanceTime(input: Record<string, unknown
   const id = key(input.attendanceId), db = database();
   return db.runTransaction(async tx => {
     const ref = db.doc(`opsAttendance/${id}`), old = (await tx.get(ref)).data() as Attendance | undefined;
-    if (!old || old.day !== seoulDay() || input.day !== old.day || !['kiosk','teacher'].includes(old.source || '') || !['present','makeup'].includes(old.status || 'present')) throw new HttpError(409, '오늘의 실제 출석 기록만 수정할 수 있습니다. 새로고침해주세요.');
+    if (!old || old.day !== seoulDay() || input.day !== old.day || !['kiosk','teacher','manual'].includes(old.source || '') || !['present','makeup'].includes(old.status || 'present')) throw new HttpError(409, '오늘의 실제 출석 기록만 수정할 수 있습니다. 새로고침해주세요.');
     const account = (await tx.get(db.doc(`opsAccounts/${old.studentId}`))).data() as Account | undefined;
     const owner = account ? (await tx.get(db.doc(`students/${account.sourceStudentId || old.studentId}`))).data() : undefined;
     if (!account || !owner || !courseSubject(account, owner).includes('피아노')) throw new HttpError(403, '피아노 출석만 수정할 수 있습니다.');

@@ -3857,3 +3857,21 @@ test('notice worker cancels a previously queued collection request for an exempt
  assert.equal(s.records.get('opsNotices/billing_old').status,'cancelled');
  assert.equal(s.records.get('opsAccounts/free').remaining,2);
 });
+
+test('manual monthly attendance appears once in daily attendance, permits time correction and never deducts twice',async()=>{
+ const s=setup();await s.seed('manual-piano',8);
+ s.records.get('opsAccounts/manual-piano').subject='피아노';s.records.get('students/manual-piano').instruments=['피아노'];
+ const day=s.load('model').seoulDay(),id='manual-piano_'+day;
+ await s.service.recordAttendance({studentId:'manual-piano',day,status:'present',units:1,expectedUpdatedAt:''},'owner');
+ let row=s.records.get('opsAttendance/'+id),balance=s.records.get('opsAccounts/manual-piano').remaining;
+ const {dailyCheckins}=s.load('daily-checkins'),{attendanceClock}=s.load('attendance-time');
+ assert.equal(dailyCheckins([row],day).length,1);assert.equal(attendanceClock(row),'');assert.equal(row.source,'manual');
+ const bills=structuredClone([...s.records].filter(([k])=>k.startsWith('opsInvoices/')));
+ await s.service.correctTeacherAttendanceTime({attendanceId:id,day,time:'00:00',expectedUpdatedAt:row.updatedAt},'teacher:t');
+ row=s.records.get('opsAttendance/'+id);assert.equal(attendanceClock(row),'00:00');assert.equal(row.source,'manual');
+ const duplicate=await s.service.checkIn('manual-piano','1234','device');assert.equal(duplicate.duplicate,true);
+ assert.equal(s.records.get('opsAccounts/manual-piano').remaining,balance);assert.deepEqual([...s.records].filter(([k])=>k.startsWith('opsInvoices/')),bills);
+ assert.equal([...s.records.keys()].some(k=>k.startsWith('opsNotices/')),false);
+ await s.service.recordAttendance({studentId:'manual-piano',day,status:'cancelled',units:0,expectedUpdatedAt:row.updatedAt},'owner');
+ assert.equal(dailyCheckins([s.records.get('opsAttendance/'+id)],day).length,0);
+});
