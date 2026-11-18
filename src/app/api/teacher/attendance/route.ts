@@ -1,7 +1,9 @@
+import { dailyExpectedLessons } from '@/lib/operations/daily-roster';
+import type { Account, Attendance } from '@/lib/operations/model';
 import {after} from 'next/server';
 import {reviewChangedOperation} from '@/lib/operations/integrity-review-service';
 import { adminAuth, adminDb } from '@/lib/firebase-admin';
-import { canViewPianoAttendance, koreaDay, pianoArrival, type PianoArrival, type PianoStudent } from '@/lib/teacher-attendance';
+import { canViewPianoAttendance, koreaDay, pianoArrival, type PianoArrival, type PianoStudent, type PianoWaiting } from '@/lib/teacher-attendance';
 import { teacherCheckIn, correctTeacherAttendanceTime } from '@/lib/operations/service';
 import { HttpError, sameOrigin } from '@/lib/operations/auth';
 import { courseLifecycle, enrollmentState } from '@/lib/operations/lifecycle';
@@ -31,9 +33,12 @@ export async function GET(request: Request) {
       .select('studentId','day','source','status','arrivalAt','at','updatedAt').get();
     const candidates = records.docs.filter(doc => { const row = doc.data(); return ['kiosk','teacher'].includes(row.source) && ['present','makeup'].includes(row.status || 'present'); });
     const ids = [...new Set(candidates.map(doc=>doc.data().studentId).filter((id): id is string=>typeof id==='string' && /^[A-Za-z0-9_-]{1,160}$/.test(id)))];
-    const fields = ['name','sourceStudentId','subject','displaySubject','attendanceGroup','active'];
-    const accounts = roster ? (await db.collection('opsAccounts').where('active','==',true).select(...fields).get()).docs
-      : ids.length ? await db.getAll(...ids.map(id=>db.doc(`opsAccounts/${id}`)), {fieldMask:fields}) : [];
+    const fields = ['name','sourceStudentId','subject','displaySubject','attendanceGroup','active','schedule'];
+    const activeAccounts = (await db.collection('opsAccounts').where('active','==',true).select(...fields).get()).docs;
+    const activeIds = new Set(activeAccounts.map(d=>d.id));
+    const extraIds = ids.filter(id=>!activeIds.has(id));
+    const extraAccounts = !roster && extraIds.length ? await db.getAll(...extraIds.map(id=>db.doc(`opsAccounts/${id}`)), {fieldMask:fields}) : [];
+    const accounts = [...activeAccounts,...extraAccounts];
     const accountById = new Map(accounts.map(doc=>[doc.id,doc.data()]));
     const ownerIds = [...new Set(accounts.filter(doc=>doc.exists).map(doc=>String(doc.data()?.sourceStudentId || doc.id)))].filter(id=>/^[A-Za-z0-9_-]{1,160}$/.test(id));
     const owners = ownerIds.length ? await db.getAll(...ownerIds.map(id=>db.doc(`students/${id}`)), {fieldMask:['name','instrument','instruments','operationsCourseGroups','lifecycle','courseLifecycles']}) : [];
@@ -52,7 +57,17 @@ export async function GET(request: Request) {
     }
     const arrivals = candidates.map(doc=>{const row=doc.data(),account=accountById.get(row.studentId);return pianoArrival(doc.id,row,account,ownerById.get(String(account?.sourceStudentId || row.studentId)),day);})
       .filter((row): row is PianoArrival=>row!==null).sort((a,b)=>(a.arrivalAt || 'z').localeCompare(b.arrivalAt || 'z') || a.name.localeCompare(b.name,'ko'));
-    return Response.json({day,checkedAt:new Date().toISOString(),arrivals},{headers});
+    const arrived = new Set(arrivals.map(r=>r.studentId));
+    const expected = dailyExpectedLessons({accounts:activeAccounts.map(d=>({...d.data(),id:d.id}) as Account),students:activeAccounts.map(d=>({id:d.id,lifecycle:courseLifecycle(ownerById.get(String(d.data()?.sourceStudentId||d.id))||{},d.id)})),attendance:records.docs.map(d=>d.data() as Attendance)},day);
+    const waiting:PianoWaiting[] = [];
+    for(const lesson of expected){
+      if(arrived.has(lesson.studentId))continue;
+      const account=accountById.get(lesson.studentId),owner=ownerById.get(String(account?.sourceStudentId||lesson.studentId));
+      const student=pianoArrival(lesson.studentId,{day,source:'teacher',studentId:lesson.studentId,status:'present'},account,owner,day);
+      if(student)waiting.push({studentId:lesson.studentId,name:student.name,course:student.course,lessonTime:lesson.lessonTime,status:lesson.status});
+    }
+    waiting.sort((a,b)=>a.name.localeCompare(b.name,'ko'));
+    return Response.json({day,checkedAt:new Date().toISOString(),arrivals,waiting},{headers});
   } catch (error) { return failed(error); }
 }
 export async function POST(request: Request) {
