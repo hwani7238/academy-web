@@ -59,7 +59,7 @@ test('today-only read returns all piano groups with an explicit privacy allowlis
   assert.ok(result.arrivals.every(row => row.course === '어린이 피아노'));
   assert.deepEqual(Object.keys(result.arrivals[0]).sort(), ['arrivalAt', 'course', 'id', 'name', 'source', 'status', 'studentId', 'updatedAt']);
   assert.ok(!JSON.stringify(result).includes('secret')); assert.ok(!JSON.stringify(result).includes('private'));
-  assert.deepEqual(s.reads, [{ name: 'opsAttendance', field: 'day', operator: '==', value: s.day }]);
+  assert.deepEqual(s.reads, [{ name: 'opsAttendance', field: 'day', operator: '==', value: s.day }, {name:'opsAccounts',field:'active',operator:'==',value:true}]);
 });
 test('daily arrivals match the manager kiosk criteria and preserve corrected Korea time', () => {
   const s = setup(), at = s.day + 'T09:00:00+09:00', arrivalAt = s.day + 'T10:30:00+09:00';
@@ -93,4 +93,24 @@ test('teacher arrivals are visible, manual calendar rows remain excluded and ros
  s.records.set('opsAttendance/arrival',{studentId:'piano',day:s.day,source:'teacher',status:'present',arrivalAt:s.day+'T09:10:00+09:00',updatedAt:'revision'});
  const result=await(await s.call('piano')).json();assert.equal(result.arrivals.length,1);assert.equal(result.arrivals[0].source,'teacher');assert.equal(result.arrivals[0].updatedAt,'revision');
  const roster=await(await s.call('piano','?roster=1')).json();assert.deepEqual(roster.students,[{id:'piano',name:'piano',course:'어린이 피아노',attended:true}]);assert.ok(!JSON.stringify(roster).includes('private-phone'));
+});
+
+test('expected piano roster follows schedules and turns into an arrival, then back after cancellation',async()=>{
+ const s=setup(),weekday=new Date(s.day+'T00:00:00Z').getUTCDay();
+ for(const [id,subject]of[['scheduled','피아노'],['extra','피아노'],['drums','드럼']]){
+  s.records.set('opsAccounts/'+id,{active:true,subject,sourceStudentId:'owner-'+id,schedule:{rules:[{start:'2026-01-01',weekdays:id==='extra'?[]:[weekday],times:{[weekday]:{start:'15:00',end:''}}}],moves:[]},phone:'private',remaining:7,planAmount:160000});
+  s.records.set('students/owner-'+id,{name:id,instruments:[subject],phone:'secret'});
+ }
+ let result=await(await s.call('piano')).json();
+ assert.deepEqual(result.waiting,[{studentId:'scheduled',name:'scheduled',course:'어린이 피아노',lessonTime:'15:00',status:'waiting'}]);
+ assert.deepEqual(result.arrivals,[]);assert.doesNotMatch(JSON.stringify(result),/private|secret|160000|"schedule"|sourceStudentId/);
+ const row={studentId:'scheduled',day:s.day,status:'present',source:'kiosk',at:s.day+'T15:05:00+09:00',updatedAt:'one'};
+ s.records.set('opsAttendance/scheduled',row);
+ s.records.set('opsAttendance/extra',{...row,studentId:'extra',source:'teacher'});
+ result=await(await s.call('piano')).json();assert.equal(result.waiting.length,0);assert.equal(result.arrivals.length,2);
+ assert.equal(result.arrivals.find(r=>r.studentId==='scheduled').arrivalAt,new Date(row.at).toISOString());
+ s.records.get('opsAttendance/scheduled').status='cancelled';
+ result=await(await s.call('piano')).json();assert.equal(result.waiting.length,1);assert.equal(result.waiting[0].status,'waiting');assert.equal(result.arrivals.length,1);
+ s.records.get('opsAttendance/scheduled').status='sick';
+ result=await(await s.call('piano')).json();assert.equal(result.waiting[0].status,'sick');
 });

@@ -208,3 +208,6 @@
 .whee-ops .monthly-table .attendance-cell .makeup-caption{font-size:9px;line-height:11px;word-break:keep-all;overflow-wrap:normal}.whee-ops .monthly-table .attendance-cell .makeup-date{display:inline-block;white-space:nowrap}
 
 .whee-ops .monthly-payment-dialog{width:min(560px,calc(100vw - 24px))}.whee-ops .monthly-payment-dialog select{min-width:0;max-width:100%}.whee-ops .monthly-payment-dialog .notice{margin:12px 0;font-size:13px;line-height:1.5}
+
+.whee-ops .daily-waiting td,.whee-ops .daily-waiting strong,.whee-ops .daily-waiting small{color:#737373}
+.whee-ops .daily-arrived td,.whee-ops .daily-arrived strong,.whee-ops .daily-arrived .attendance-time-button{color:#111}
