@@ -20,3 +20,8 @@ test('waiting names are gray without an arrival time editor; checked-in names an
  data.arrivals.push({...data.arrivals[0],studentId:'b',id:'b',name:'가예정',arrivalAt:'2026-11-18T06:10:00Z'});data.waiting=[];
  html=render(data);assert.doesNotMatch(html,/data-attendance="waiting"/);assert.match(html,/가예정 등원 시간 수정/);assert.match(html,/15:10/);
 });
+
+test('manual attendance displays a black attended row and an honest missing-time label',()=>{
+ const html=render({day:'2026-11-18',arrivals:[{id:'manual',studentId:'manual',name:'직접출석',course:'어린이 피아노',arrivalAt:'',status:'present',source:'manual'}],waiting:[]});
+ assert.match(html,/text-black" data-attendance="arrived"/);assert.match(html,/수동 출석/);assert.match(html,/시간 미기록/);assert.match(html,/직접출석 등원 시간 수정/);assert.doesNotMatch(html,/data-attendance="waiting"/);
+});
