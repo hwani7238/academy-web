@@ -9,7 +9,7 @@ import { onAuthStateChanged, signOut } from 'firebase/auth';
 import { auth } from '@/lib/firebase';
 import { koreaDay, type PianoArrival, type PianoAttendance, type PianoWaiting } from '@/lib/teacher-attendance';
 
-const clock = (value: string) => value ? new Date(value).toLocaleTimeString('ko-KR', { timeZone: 'Asia/Seoul', hour: '2-digit', minute: '2-digit', hour12: false }) : '시간 미확인';
+const clock = (value: string) => value ? new Date(value).toLocaleTimeString('ko-KR', { timeZone: 'Asia/Seoul', hour: '2-digit', minute: '2-digit', hour12: false }) : '시간 미기록';
 
 export function TeacherAttendance() {
   const [data, setData] = useState<PianoAttendance | null>(null);
@@ -106,7 +106,7 @@ export function TeacherAttendance() {
             <div className="overflow-x-auto"><table className="w-full text-left text-sm"><caption className="sr-only">오늘 피아노 수업 예정 및 출석 현황 · 이름순</caption><thead className="bg-slate-50 text-slate-600"><tr>{['학생','과목','등원 시간','상태'].map(label=><th className="whitespace-nowrap px-4 py-3" key={label}>{label}</th>)}</tr></thead><tbody>{rows.map(({studentId,name,course,arrival:row,waiting})=><tr key={studentId} className={`border-t ${row?'text-black':'text-[#737373]'}`} data-attendance={row?'arrived':'waiting'}>
               <td className="whitespace-nowrap px-4 py-4 font-semibold">{name}</td><td className="px-4 py-4">{course}</td>
               <td className="whitespace-nowrap px-4 py-4 tabular-nums">{row?<button aria-label={`${row.name} 등원 시간 수정`} onClick={()=>{setMessage('');setEditor({row});}} className="inline-flex min-h-11 items-center gap-2 rounded-full border border-black/10 bg-white px-4 py-2 text-black shadow-sm hover:shadow-md focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-black"><Clock3 size={16} aria-hidden="true"/><span className="text-base font-bold">{clock(row.arrivalAt)}</span></button>:<span>—{waiting?.lessonTime&&<small className="mt-1 block">수업 {waiting.lessonTime}</small>}</span>}</td>
-              <td className="whitespace-nowrap px-4 py-4">{row?<><span>{row.status==='makeup'?'보강 출석':'출석'}</span>{row.source==='teacher'&&<span className="ml-2 text-xs">강사 확인</span>}</>:waitingLabels[waiting!.status]}</td>
+              <td className="whitespace-nowrap px-4 py-4">{row?<><span>{row.status==='makeup'?'보강 출석':'출석'}</span>{row.source==='teacher'&&<span className="ml-2 text-xs">강사 확인</span>}{row.source==='manual'&&<span className="ml-2 text-xs">수동 출석</span>}</>:waitingLabels[waiting!.status]}</td>
             </tr>)}</tbody></table></div>
             {!rows.length&&<p role="status" className="p-10 text-center text-sm text-slate-500">오늘 수업 예정 학생과 출석 기록이 없습니다.</p>}
           </section>}

@@ -3,11 +3,11 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import ts from 'typescript';
 function load(file){const exports={};new Function('exports',ts.transpileModule(fs.readFileSync(file,'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText)(exports);return exports;}
-test('piano data model includes teacher-confirmed arrivals but excludes calendar edits and other instruments',()=>{
+test('piano data model includes teacher and owner-confirmed attendance but excludes leave and other instruments',()=>{
  const p=load('src/lib/teacher-attendance.ts'),day=p.koreaDay(),account={subject:'피아노'},owner={name:'학생',operationsCourseGroups:{피아노:'어린이 피아노 (1관)'}};
  const row={studentId:'piano',day,source:'teacher',status:'present',at:day+'T14:00:00+09:00',arrivalAt:day+'T13:30:00+09:00',updatedAt:'revision'};
  const result=p.pianoArrival('id',row,account,owner,day);assert.equal(result.source,'teacher');assert.equal(result.updatedAt,'revision');assert.equal(result.arrivalAt,new Date(row.arrivalAt).toISOString());
- for(const patch of [{source:'manual'},{status:'travel'},{status:'cancelled'},{day:'2000-01-01'}])assert.equal(p.pianoArrival('id',{...row,...patch},account,owner,day),null);
+ for(const patch of [{source:'unknown'},{status:'travel'},{status:'cancelled'},{day:'2000-01-01'}])assert.equal(p.pianoArrival('id',{...row,...patch},account,owner,day),null);
  assert.equal(p.pianoArrival('id',row,{subject:'드럼'},owner,day),null);
 });
 test('teacher API relay uses fixed management endpoint and preserves auth without forwarding user query targets',async()=>{
@@ -23,4 +23,11 @@ test('teacher API relay uses fixed management endpoint and preserves auth withou
   global.fetch=async()=>Response.json({error:'권한 없음'},{status:403});r=await route.GET(new Request('https://wheemusic.com/api/teacher/attendance',{headers:{Authorization:'Bearer invalid'}}));assert.equal(r.status,403);
   global.fetch=async()=>{throw Error('timeout');};r=await route.POST(request({action:'checkIn'},'https://wheemusic.com'));assert.equal(r.status,503);assert.match((await r.json()).error,/저장 여부/);
  }finally{global.fetch=original;}
+});
+
+test('manual save time is not exposed as arrival time; a separately corrected time is retained',()=>{
+ const p=load('src/lib/teacher-attendance.ts'),day=p.koreaDay(),account={subject:'피아노'},owner={name:'학생'};
+ const row={day,source:'manual',status:'present',at:day+'T14:00:00+09:00',studentId:'p'};
+ assert.equal(p.pianoArrival('id',row,account,owner,day).arrivalAt,'');assert.equal(p.pianoArrival('id',row,account,owner,day).source,'manual');
+ const arrivalAt=day+'T13:00:00+09:00';assert.equal(p.pianoArrival('id',{...row,arrivalAt},account,owner,day).arrivalAt,new Date(arrivalAt).toISOString());
 });
