@@ -12,6 +12,7 @@ export type Account = {
   sourceStudentId?: string; subject?: string; importId?: string; openingAsOf?: string;
   id: string; name: string; phone: string; checkinSuffixes: string[];
   planUnits: number; planAmount: number; remaining: number; openInvoiceId: string | null;
+  billingExempt?: boolean; // Collection exemption; retain pass allocations and historical receipts.
   autoBilling: boolean; active: boolean; updatedAt: string;
 };
 export const ATTENDANCE_LABELS = { present: "출석", absent: "결석", makeup: "보강", makeup_reserved: "보강 예약", late_cancel: "당일 취소", travel: "여행", sick: "병가", paused: "수강 일시 정지", cancelled: "취소" } as const;

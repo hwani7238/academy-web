@@ -40,7 +40,7 @@ export function billingProjection(data:Snapshot,today=seoulDay()){
  if(data.day.slice(0,7)!==today.slice(0,7))return {upcoming,invoiceDates,cycleFirstDays:cycles,firstLessonTimes:times};
  for(const key of [...candidateKeys].sort((a,b)=>a.slice(-10).localeCompare(b.slice(-10)))){
   const id=key.slice(0,-11),day=key.slice(-10),a=data.accounts.find(a=>a.id===id),s=data.students.find(s=>s.id===id);
-  if(seen.has(id)||!a?.active||a.nextPass||!s||enrollmentState(s.lifecycle,today)!=='active'||enrollmentState(s.lifecycle,day)!=='active')continue;
+  if(seen.has(id)||!a?.active||a.billingExempt||a.nextPass||!s||enrollmentState(s.lifecycle,today)!=='active'||enrollmentState(s.lifecycle,day)!=='active')continue;
   if(data.cancelledInvoiceKeys?.includes(key)||covered.has(key)){if(day>=today)seen.add(id);continue;}
   // An unlinked open bill must be resolved rather than duplicated.
   if(unresolvedReceipts(invoiceRows.filter(i=>i.studentId===id)).length)continue;
@@ -53,7 +53,7 @@ export function billingProjection(data:Snapshot,today=seoulDay()){
 /** Also collect a pass whose first lesson has arrived, even if the balance
  * retained during ledger reconciliation still exceeds one. */
 export function finalLessonInvoices(data: Snapshot, invoices: Invoice[], today = seoulDay()) {
- const eligible = new Map(data.accounts.filter(a => a.active &&
+ const eligible = new Map(data.accounts.filter(a => a.active && !a.billingExempt &&
   data.students.some(s => s.id === a.id && enrollmentState(s.lifecycle, today) === 'active')).map(a => [a.id,a]));
  const invoiceDates = attendanceInvoiceDates({...data,invoices:data.invoices||invoices},today);
  return invoices.filter(i => {
@@ -64,3 +64,8 @@ export function finalLessonInvoices(data: Snapshot, invoices: Invoice[], today =
  });
 }
 
+/** Collection policy does not alter the invoice/pass evidence used for sequencing. */
+export function outstandingBillingAmount(data: Pick<Snapshot,'accounts'|'invoices'>) {
+ const exempt = new Set(data.accounts.filter(a=>a.billingExempt).map(a=>a.id));
+ return data.invoices.filter(i=>i.status==='open'&&!exempt.has(i.studentId)).reduce((sum,i)=>sum+Math.max(0,i.amount-i.paid),0);
+}
