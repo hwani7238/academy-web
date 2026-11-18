@@ -1,3 +1,4 @@
+import { validAttendanceDay } from '@/lib/attendance-date';
 import { dailyExpectedLessons } from '@/lib/operations/daily-roster';
 import type { Account, Attendance } from '@/lib/operations/model';
 import {after} from 'next/server';
@@ -27,11 +28,13 @@ function failed(error: unknown) {
 }
 export async function GET(request: Request) {
   try {
-    await authorize(request); const db = adminDb!, day = koreaDay();
-    const roster = new URL(request.url).searchParams.get('roster') === '1';
+    await authorize(request); const db = adminDb!, today = koreaDay();
+    const params = new URL(request.url).searchParams, roster = params.get('roster') === '1';
+    let day = today;
+    if (!roster && params.has('day')) { try { day = validAttendanceDay(params.get('day')); } catch { throw new HttpError(400,'조회 날짜를 확인해주세요.'); } }
     const records = await db.collection('opsAttendance').where('day', '==', day)
       .select('studentId','day','source','status','arrivalAt','at','updatedAt').get();
-    const candidates = records.docs.filter(doc => { const row = doc.data(); return ['kiosk','teacher','manual'].includes(row.source) && ['present','makeup'].includes(row.status || 'present'); });
+    const candidates = day > today ? [] : records.docs.filter(doc => { const row = doc.data(); return ['kiosk','teacher','manual'].includes(row.source) && ['present','makeup'].includes(row.status || 'present'); });
     const ids = [...new Set(candidates.map(doc=>doc.data().studentId).filter((id): id is string=>typeof id==='string' && /^[A-Za-z0-9_-]{1,160}$/.test(id)))];
     const fields = ['name','sourceStudentId','subject','displaySubject','attendanceGroup','active','schedule'];
     const activeAccounts = (await db.collection('opsAccounts').where('active','==',true).select(...fields).get()).docs;
@@ -48,7 +51,7 @@ export async function GET(request: Request) {
       const students: PianoStudent[] = [];
       for (const doc of accounts) {
         const account = doc.data(), owner = ownerById.get(String(account?.sourceStudentId || doc.id));
-        if (!account || !owner || enrollmentState(courseLifecycle(owner,doc.id)) !== 'active') continue;
+        if (!account || !owner || enrollmentState(courseLifecycle(owner,doc.id),day) !== 'active') continue;
         const row = pianoArrival(doc.id,{day,source:'teacher',studentId:doc.id,status:'present'},account,owner,day);
         if (row) students.push({id:doc.id,name:row.name,course:row.course,attended:arrived.has(doc.id)});
       }
