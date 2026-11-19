@@ -4,7 +4,7 @@ import { useState } from "react";
 import { signInWithEmailAndPassword } from "firebase/auth";
 import { auth, db } from "@/lib/firebase";
 import { doc, getDoc } from "firebase/firestore";
-import { canViewPianoAttendance } from "@/lib/teacher-attendance";
+import { canViewTeacherAttendance } from "@/lib/teacher-attendance";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 
@@ -27,7 +27,7 @@ export default function LoginPage() {
         try {
             await signInWithEmailAndPassword(auth, email, password);
             const profile = (await getDoc(doc(db, "users", auth.currentUser!.uid))).data();
-            router.push(profile?.role === "teacher" && canViewPianoAttendance(profile) ? "/teacher/attendance" : "/admin");
+            router.push(profile?.role === "teacher" && canViewTeacherAttendance(profile) ? "/teacher/attendance" : "/admin");
         } catch (err: unknown) {
             console.error("Login error:", err);
             const errorCode =

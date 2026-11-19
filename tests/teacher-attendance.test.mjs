@@ -6,9 +6,9 @@ function load(file){const exports={};new Function('require','exports',ts.transpi
 test('piano data model includes teacher and owner-confirmed attendance but excludes leave and other instruments',()=>{
  const p=load('src/lib/teacher-attendance.ts'),day=p.koreaDay(),account={subject:'피아노'},owner={name:'학생',operationsCourseGroups:{피아노:'어린이 피아노 (1관)'}};
  const row={studentId:'piano',day,source:'teacher',status:'present',at:day+'T14:00:00+09:00',arrivalAt:day+'T13:30:00+09:00',updatedAt:'revision'};
- const result=p.pianoArrival('id',row,account,owner,day);assert.equal(result.source,'teacher');assert.equal(result.updatedAt,'revision');assert.equal(result.arrivalAt,new Date(row.arrivalAt).toISOString());
- for(const patch of [{source:'unknown'},{status:'travel'},{status:'cancelled'},{day:'2000-01-01'}])assert.equal(p.pianoArrival('id',{...row,...patch},account,owner,day),null);
- assert.equal(p.pianoArrival('id',row,{subject:'드럼'},owner,day),null);
+ const result=p.teacherArrival('id',row,account,owner,day);assert.equal(result.course,'어린이 피아노');assert.equal(result.source,'teacher');assert.equal(result.updatedAt,'revision');assert.equal(result.arrivalAt,new Date(row.arrivalAt).toISOString());
+ for(const patch of [{source:'unknown'},{status:'travel'},{status:'cancelled'},{day:'2000-01-01'}])assert.equal(p.teacherArrival('id',{...row,...patch},account,owner,day),null);
+ assert.equal(p.teacherArrival('id',row,{subject:'기타'},owner,day),null);
 });
 test('teacher API relay uses fixed management endpoint and preserves auth without forwarding user query targets',async()=>{
  const route=load('src/app/api/teacher/attendance/route.ts'),original=global.fetch,calls=[];
@@ -28,8 +28,8 @@ test('teacher API relay uses fixed management endpoint and preserves auth withou
 test('manual save time is not exposed as arrival time; a separately corrected time is retained',()=>{
  const p=load('src/lib/teacher-attendance.ts'),day=p.koreaDay(),account={subject:'피아노'},owner={name:'학생'};
  const row={day,source:'manual',status:'present',at:day+'T14:00:00+09:00',studentId:'p'};
- assert.equal(p.pianoArrival('id',row,account,owner,day).arrivalAt,'');assert.equal(p.pianoArrival('id',row,account,owner,day).source,'manual');
- const arrivalAt=day+'T13:00:00+09:00';assert.equal(p.pianoArrival('id',{...row,arrivalAt},account,owner,day).arrivalAt,new Date(arrivalAt).toISOString());
+ assert.equal(p.teacherArrival('id',row,account,owner,day).arrivalAt,'');assert.equal(p.teacherArrival('id',row,account,owner,day).source,'manual');
+ const arrivalAt=day+'T13:00:00+09:00';assert.equal(p.teacherArrival('id',{...row,arrivalAt},account,owner,day).arrivalAt,new Date(arrivalAt).toISOString());
 });
 
 test('date relay forwards only a validated date to the fixed backend',async()=>{
@@ -41,4 +41,13 @@ test('date relay forwards only a validated date to the fixed backend',async()=>{
   for(const day of ['2026-02-30','bad',''])assert.equal((await route.GET(req('day='+day))).status,400);
   assert.equal(calls.length,1);
  }finally{global.fetch=original;}
+});
+
+test('drum profiles and course labels are supported without allowing unrelated or unapproved teachers',()=>{
+ const p=load('src/lib/teacher-attendance.ts');
+ assert.equal(p.canViewTeacherAttendance({role:'teacher',status:'approved',subjects:['드럼']}),true);
+ for(const profile of [{role:'teacher',status:'pending',subjects:['드럼']},{role:'teacher',subjects:['기타'],subject:'드럼'},{role:'student',subject:'드럼'}])assert.equal(p.canViewTeacherAttendance(profile),false);
+ const day=p.koreaDay(),row={day,source:'teacher',status:'present',studentId:'drum'};
+ assert.equal(p.teacherArrival('drum',row,{subject:'드럼'},{name:'학생',instruments:['피아노','드럼']},day).course,'드럼');
+ assert.equal(p.teacherArrival('drum',row,{subject:'기타',attendanceGroup:'드럼'},{name:'학생'},day),null);
 });
