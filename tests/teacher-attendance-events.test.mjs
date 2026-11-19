@@ -15,7 +15,7 @@ function server(role={role:'teacher',subject:'피아노',status:'approved'}){
 const request=(token='valid',signal)=>new Request('https://wheemusic.com/api/teacher/attendance/events?day=2000-01-01',{headers:token?{Authorization:`Bearer ${token}`}:{},signal});
 const decode=chunk=>new TextDecoder().decode(chunk.value);
 test('stream requires a valid token and approved piano role before reading attendance',async()=>{
- for(const [profile,token,status] of [[undefined,'',401],[undefined,'invalid',401],[{role:'teacher',subject:'드럼',status:'approved'},'valid',403],[{role:'teacher',subject:'피아노',status:'pending'},'valid',403]]){const s=server(profile);assert.equal((await s.route.GET(request(token))).status,status);assert.equal(s.queries,0);}
+ for(const [profile,token,status] of [[undefined,'',401],[undefined,'invalid',401],[{role:'teacher',subject:'기타',status:'approved'},'valid',403],[{role:'teacher',subject:'피아노',status:'pending'},'valid',403]]){const s=server(profile);assert.equal((await s.route.GET(request(token))).status,status);assert.equal(s.queries,0);}
 });
 test('initial snapshot, edits and removals emit only change signals; cancellation closes subscriptions',async()=>{
  const s=server(),response=await s.route.GET(request()),reader=response.body.getReader();assert.match(response.headers.get('content-type'),/text\/event-stream/);assert.match(response.headers.get('cache-control'),/no-store/);
@@ -74,4 +74,9 @@ test('changing dates cancels old reads, uses one selected-day request and only s
   cleanup();state[6]='';mount();await settle();assert.equal(subscriptions,2);assert.match(pending[2].url,new RegExp('day='+policy.koreaDay()));
   pending[2].resolve(Response.json({day:policy.koreaDay(),arrivals:[],waiting:[]}));await settle();assert.equal(state[0].day,policy.koreaDay());
  }finally{cleanup?.();Object.assign(global,original);}
+});
+
+test('approved drum teacher receives live invalidations and revocation stops the stream',async()=>{
+ const s=server({role:'teacher',subjects:['드럼'],status:'approved'}),response=await s.route.GET(request());assert.equal(response.status,200);
+ const reader=response.body.getReader();s.changed();assert.match(decode(await reader.read()),/changed/);s.revoke();assert.match(decode(await reader.read()),/denied/);assert.equal((await reader.read()).done,true);assert.equal(s.stops,2);
 });

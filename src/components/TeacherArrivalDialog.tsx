@@ -1,11 +1,11 @@
 'use client';
 import { useEffect, useRef, useState } from 'react';
 import { auth } from '@/lib/firebase';
-import { koreaDay, type PianoArrival, type PianoRoster, type PianoStudent } from '@/lib/teacher-attendance';
+import { koreaDay, type TeacherArrival, type TeacherRoster, type TeacherStudent } from '@/lib/teacher-attendance';
 const currentClock = () => new Date().toLocaleTimeString('ko-KR',{timeZone:'Asia/Seoul',hour:'2-digit',minute:'2-digit',hour12:false});
-export function TeacherArrivalDialog({day,row,close,saved}:{day:string;row?:PianoArrival;close:()=>void;saved:(message:string)=>void}) {
+export function TeacherArrivalDialog({day,row,close,saved}:{day:string;row?:TeacherArrival;close:()=>void;saved:(message:string)=>void}) {
   const dialog=useRef<HTMLDialogElement>(null);
-  const [students,setStudents]=useState<PianoStudent[]>([]),[studentId,setStudentId]=useState(''),[search,setSearch]=useState('');
+  const [students,setStudents]=useState<TeacherStudent[]>([]),[studentId,setStudentId]=useState(''),[search,setSearch]=useState('');
   const [time,setTime]=useState(()=>row?.arrivalAt ? new Date(row.arrivalAt).toLocaleTimeString('ko-KR',{timeZone:'Asia/Seoul',hour:'2-digit',minute:'2-digit',hour12:false}) : currentClock());
   const [loading,setLoading]=useState(!row),[saving,setSaving]=useState(false),[error,setError]=useState(''),[retry,setRetry]=useState(0);
   useEffect(()=>{dialog.current?.showModal();},[]);
@@ -19,7 +19,7 @@ export function TeacherArrivalDialog({day,row,close,saved}:{day:string;row?:Pian
         if(!auth.currentUser)throw Error('다시 로그인해주세요.');
         const response=await fetch('/api/teacher/attendance?roster=1',{cache:'no-store',signal:controller.signal,headers:{Authorization:`Bearer ${await auth.currentUser.getIdToken()}`}});
         const result=await response.json();if(!response.ok)throw Error(result.error||'학생 목록을 불러오지 못했습니다.');
-        if((result as PianoRoster).day!==day)throw Error('날짜가 변경됐습니다. 창을 닫고 새로고침해주세요.');
+        if((result as TeacherRoster).day!==day)throw Error('날짜가 변경됐습니다. 창을 닫고 새로고침해주세요.');
         if(!stopped)setStudents(result.students);
       }catch(reason){if(!stopped)setError(reason instanceof Error&&reason.name!=='AbortError'?reason.message:'연결이 지연됩니다. 다시 불러와주세요.');}
       finally{clearTimeout(timer);if(!stopped)setLoading(false);}

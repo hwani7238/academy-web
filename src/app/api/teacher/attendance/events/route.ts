@@ -1,5 +1,5 @@
 import { adminAuth, adminDb } from '@/lib/firebase-admin';
-import { canViewPianoAttendance, koreaDay } from '@/lib/teacher-attendance';
+import { canViewTeacherAttendance, koreaDay } from '@/lib/teacher-attendance';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -16,7 +16,7 @@ export async function GET(request: Request) {
   catch { return Response.json({error:'다시 로그인해주세요.'},{status:401,headers}); }
   const db = adminDb, profile = db.doc(`users/${uid}`);
   try {
-    if (!canViewPianoAttendance((await profile.get()).data())) return Response.json({error:'승인된 피아노 강사와 관리자만 사용할 수 있습니다.'},{status:403,headers});
+    if (!canViewTeacherAttendance((await profile.get()).data())) return Response.json({error:'승인된 피아노·드럼 강사와 관리자만 사용할 수 있습니다.'},{status:403,headers});
   } catch { return Response.json({error:'연결을 확인해주세요.'},{status:503,headers}); }
   const day = koreaDay(), encoder = new TextEncoder();
   let cleanup = () => {};
@@ -44,7 +44,7 @@ export async function GET(request: Request) {
       timers.heartbeat = setInterval(()=>{if(!closed)controller.enqueue(encoder.encode(': keepalive\n\n'));},20000);
       try {
         subscribe(profile.onSnapshot(doc=>{
-          if (!canViewPianoAttendance(doc.data())) { send('denied'); close(); }
+          if (!canViewTeacherAttendance(doc.data())) { send('denied'); close(); }
         },()=>{send('retry');close();}));
         if (closed) return;
         // The raw records stay on the server. Teachers receive only an invalidation
