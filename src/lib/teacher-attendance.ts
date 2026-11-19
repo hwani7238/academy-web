@@ -38,8 +38,13 @@ export type TeacherStudent = { id: string; name: string; course: string; attende
 export type TeacherRoster = { day: string; students: TeacherStudent[] };
 
 export type TeacherAttendanceOrder = 'name' | 'earliest' | 'latest';
-type AttendanceSortRow = { name: string; course: string; studentId: string; arrival?: TeacherArrival };
+type AttendanceSortRow = { name: string; course: string; studentId: string; arrival?: TeacherArrival; waiting?: TeacherWaiting };
 export function compareTeacherAttendance(a: AttendanceSortRow, b: AttendanceSortRow, order: TeacherAttendanceOrder) {
+  if (Boolean(a.arrival) !== Boolean(b.arrival)) return a.arrival ? -1 : 1;
+  if (a.waiting && b.waiting) {
+    const statusDifference = waitingStatusPriority(a.waiting.status) - waitingStatusPriority(b.waiting.status);
+    if (statusDifference) return statusDifference;
+  }
   if (order !== 'name') {
     // Keep arrivals with unknown times after timed arrivals, and waiting students last.
     const time = (row: AttendanceSortRow) => row.arrival?.arrivalAt ? Date.parse(row.arrival.arrivalAt) : NaN;
@@ -50,4 +55,10 @@ export function compareTeacherAttendance(a: AttendanceSortRow, b: AttendanceSort
     if (Number.isFinite(ta) && Number.isFinite(tb) && ta !== tb) return order === 'earliest' ? ta - tb : tb - ta;
   }
   return a.name.localeCompare(b.name, 'ko') || a.course.localeCompare(b.course, 'ko') || a.studentId.localeCompare(b.studentId);
+}
+
+// Expected arrivals (including booked makeup) first, known absences next, same-day cancellations last.
+export function waitingStatusPriority(status: TeacherWaiting['status']) {
+  if (status === 'waiting' || status === 'makeup_reserved') return 0;
+  return status === 'late_cancel' ? 2 : 1;
 }

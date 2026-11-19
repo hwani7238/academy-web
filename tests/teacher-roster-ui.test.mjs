@@ -17,7 +17,7 @@ test('waiting names are gray without an arrival time editor; checked-in names an
  let html=render(data);
  assert.match(html,/text-\[#737373\]" data-attendance="waiting"/);assert.match(html,/text-black" data-attendance="arrived"/);
  assert.match(html,/나출석 등원 시간 수정/);assert.doesNotMatch(html,/가예정 등원 시간 수정/);assert.match(html,/15:05/);assert.match(html,/미출석/);
- assert.ok(html.indexOf('가예정')<html.indexOf('나출석'));
+ assert.ok(html.indexOf('나출석')<html.indexOf('가예정'));
  data.arrivals.push({...data.arrivals[0],studentId:'b',id:'b',name:'가예정',arrivalAt:'2026-11-18T06:10:00Z'});data.waiting=[];
  html=render(data);assert.doesNotMatch(html,/data-attendance="waiting"/);assert.match(html,/가예정 등원 시간 수정/);assert.match(html,/15:10/);
 });
@@ -37,9 +37,14 @@ test('past dates show records without edit actions, future dates show plans, and
 
 test('course filter and time ordering keep unknown times and waiting students at the bottom in either direction',()=>{
  const day='2026-11-19',arrival=(id,name,time,course='어린이 피아노')=>({id,studentId:id,name,course,arrivalAt:time?day+'T'+time+':00+09:00':'',status:'present',source:'manual'});
- const data={day,arrivals:[arrival('later','가늦음','15:00'),arrival('early','하빠름','12:00','드럼'),arrival('unknown','나미기록','')],waiting:[{studentId:'waiting',name:'다예정',course:'드럼',status:'waiting',lessonTime:'10:00'}]};
+ const data={day,arrivals:[arrival('later','가늦음','15:00'),arrival('early','하빠름','12:00','드럼'),arrival('unknown','나미기록','')],waiting:[{studentId:'cancel',name:'가취소',course:'드럼',status:'late_cancel',lessonTime:''},{studentId:'absent-z',name:'하결석',course:'드럼',status:'absent',lessonTime:''},{studentId:'waiting-z',name:'하예정',course:'드럼',status:'waiting',lessonTime:'16:00'},{studentId:'sick',name:'가병가',course:'드럼',status:'sick',lessonTime:''},{studentId:'waiting',name:'다예정',course:'드럼',status:'waiting',lessonTime:'10:00'}]};
  let html=render(data,'',day,'전체','earliest');assert.ok(html.indexOf('하빠름')<html.indexOf('가늦음'));assert.ok(html.indexOf('가늦음')<html.indexOf('나미기록'));assert.ok(html.indexOf('나미기록')<html.indexOf('다예정'));assert.match(html,/나중에 온 순으로 정렬/);assert.match(html,/aria-sort="ascending"/);
  html=render(data,'',day,'전체','latest');assert.ok(html.indexOf('가늦음')<html.indexOf('하빠름'));assert.ok(html.indexOf('하빠름')<html.indexOf('나미기록'));assert.ok(html.indexOf('나미기록')<html.indexOf('다예정'));assert.match(html,/빨리 온 순으로 정렬/);assert.match(html,/aria-sort="descending"/);
- html=render(data,'',day,'드럼','earliest');assert.match(html,/하빠름/);assert.match(html,/다예정/);assert.doesNotMatch(html,/가늦음|나미기록/);assert.match(html,/전체 2건/);
+ html=render(data,'',day,'드럼','earliest');assert.match(html,/하빠름/);assert.match(html,/다예정/);assert.doesNotMatch(html,/가늦음|나미기록/);assert.match(html,/전체 6건/);
+ for(const order of ['name','earliest','latest']){
+  const sorted=render(data,'',day,'전체',order), grayNames=['다예정','하예정','가병가','하결석','가취소'];
+  for(let i=1;i<grayNames.length;i++)assert.ok(sorted.indexOf(grayNames[i-1])<sorted.indexOf(grayNames[i]),order+' gray group/name order');
+  assert.ok(sorted.indexOf('나미기록')<sorted.indexOf('다예정'));
+ }
  html=render(data,'',day,'어린이 피아노');assert.match(html,/가늦음/);assert.doesNotMatch(html,/하빠름|다예정/);
 });
