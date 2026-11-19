@@ -1,4 +1,5 @@
 'use client';
+import { waitingStatusPriority } from '@/lib/teacher-attendance';
 import {billingProjection, finalLessonInvoices, outstandingBillingAmount} from '@/lib/operations/upcoming-billing';
 import {PassPaymentSummary} from './PassPaymentSummary';
 import {IntegrityPanel} from './IntegrityPanel';
@@ -149,7 +150,13 @@ export function Operations({ demo = false }: { demo?: boolean }) {
   const expectedLessons = dailyLoading ? [] : dailyExpectedLessons(data,day);
   const waitingLessons = expectedLessons.filter(r=>!arrivedIds.has(r.studentId));
   const dailyRows = [...todayAttendance.map(arrival=>({studentId:arrival.studentId,arrival,waiting:undefined as typeof waitingLessons[number]|undefined})),...waitingLessons.map(waiting=>({studentId:waiting.studentId,arrival:undefined as Attendance|undefined,waiting}))];
-  if(dailyOrder==='name')dailyRows.sort((a,b)=>compareNames(data.accounts.find(s=>s.id===a.studentId)?.name||a.arrival?.name||'',data.accounts.find(s=>s.id===b.studentId)?.name||b.arrival?.name||''));
+  dailyRows.sort((a,b)=>{
+    // Keep the gray roster below arrivals regardless of the arrival sort mode.
+    if(Boolean(a.arrival)!==Boolean(b.arrival))return a.arrival?-1:1;
+    const nameOrder=()=>compareNames(data.accounts.find(s=>s.id===a.studentId)?.name||a.arrival?.name||'',data.accounts.find(s=>s.id===b.studentId)?.name||b.arrival?.name||'')||a.studentId.localeCompare(b.studentId);
+    if(a.waiting&&b.waiting)return waitingStatusPriority(a.waiting.status)-waitingStatusPriority(b.waiting.status)||nameOrder();
+    return dailyOrder==='name'?nameOrder():0;
+  });
   const personByEnrollment = new Map([...data.accounts, ...data.students].map(s => [s.id, s.sourceStudentId || s.id]));
   const presentCount = new Set(todayAttendance.map(a => personByEnrollment.get(a.studentId) || a.studentId)).size;
   const activeStudents=data.students.filter(s=>enrollmentState(s.lifecycle,todayDate)==='active');
