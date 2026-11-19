@@ -36,3 +36,9 @@ export function teacherArrival(id: string, row: RecordData, account: RecordData 
 
 export type TeacherStudent = { id: string; name: string; course: string; attended: boolean };
 export type TeacherRoster = { day: string; students: TeacherStudent[] };
+
+// Expected arrivals (including booked makeup) first, known absences next, same-day cancellations last.
+export function waitingStatusPriority(status: TeacherWaiting['status']) {
+  if (status === 'waiting' || status === 'makeup_reserved') return 0;
+  return status === 'late_cancel' ? 2 : 1;
+}
