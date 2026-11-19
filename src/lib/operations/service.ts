@@ -1,3 +1,4 @@
+import { teacherAttendanceCourse } from '../teacher-attendance';
 import {invoiceAwaitingStart,requireInvoiceContract,requireUnusedInvoice} from './invoice-contract';
 import { attendanceForecastSequence } from './attendance-forecast';
 import { requireDistinctReceipt } from './pass-settlement';
@@ -269,7 +270,7 @@ async function registerArrival(studentId: string, digits: string, actor: string,
     if (!account?.active || (!teacher && !account.checkinSuffixes.includes(digits))) throw new HttpError(404, '등록된 학생을 찾을 수 없습니다.');
     const owner = (await tx.get(db.doc(`students/${account.sourceStudentId || id}`))).data();
     if (!owner || enrollmentState(courseLifecycle(owner,id)) !== 'active') throw new HttpError(409, '휴원·퇴원 상태입니다. 선생님께 복귀 처리를 요청해주세요.');
-    if (teacher && !courseSubject(account, owner).includes('피아노')) throw new HttpError(403, '피아노 수강생만 출석 처리할 수 있습니다.');
+    if (teacher && !teacherAttendanceCourse(courseSubject(account, owner))) throw new HttpError(403, '피아노·드럼 수강생만 출석 처리할 수 있습니다.');
     const imported = account.importId ? (await tx.get(db.doc(`opsImports/${account.importId}`))).data() : undefined;
     const sources = courseGroup(account, owner) ? [] : (await tx.get(db.collection('opsImports').where('matchedStudentId', '==', account.sourceStudentId || id))).docs.map(d => d.data());
     const name = checkInName(account, owner, sources);
@@ -321,7 +322,7 @@ export async function correctTeacherAttendanceTime(input: Record<string, unknown
     if (!old || old.day !== seoulDay() || input.day !== old.day || !['kiosk','teacher','manual'].includes(old.source || '') || !['present','makeup'].includes(old.status || 'present')) throw new HttpError(409, '오늘의 실제 출석 기록만 수정할 수 있습니다. 새로고침해주세요.');
     const account = (await tx.get(db.doc(`opsAccounts/${old.studentId}`))).data() as Account | undefined;
     const owner = account ? (await tx.get(db.doc(`students/${account.sourceStudentId || old.studentId}`))).data() : undefined;
-    if (!account || !owner || !courseSubject(account, owner).includes('피아노')) throw new HttpError(403, '피아노 출석만 수정할 수 있습니다.');
+    if (!account || !owner || !teacherAttendanceCourse(courseSubject(account, owner))) throw new HttpError(403, '피아노·드럼 출석만 수정할 수 있습니다.');
     const arrivalAt = correctedArrival(old.day, input.time);
     if (Date.parse(arrivalAt) > Date.now()) throw new HttpError(400, '미래 시간으로 수정할 수 없습니다.');
     if (old.arrivalAt === arrivalAt) return;

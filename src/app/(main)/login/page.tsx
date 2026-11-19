@@ -94,7 +94,7 @@ export default function LoginPage() {
                     <Button type="button" variant="outline" className="w-full" onClick={() => router.push("/teacher-signup")}>
                         강사 계정 신청
                     </Button>
-                    <a className="text-center text-sm text-blue-700" href="https://wheemusic.com/teacher/attendance">피아노 강사용 오늘 출석</a>
+                    <a className="text-center text-sm text-blue-700" href="https://wheemusic.com/teacher/attendance">피아노·드럼 강사용 오늘 출석</a>
                 </form>
             </div>
         </div>

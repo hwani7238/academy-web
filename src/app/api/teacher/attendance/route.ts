@@ -4,7 +4,7 @@ import type { Account, Attendance } from '@/lib/operations/model';
 import {after} from 'next/server';
 import {reviewChangedOperation} from '@/lib/operations/integrity-review-service';
 import { adminAuth, adminDb } from '@/lib/firebase-admin';
-import { canViewPianoAttendance, koreaDay, pianoArrival, type PianoArrival, type PianoStudent, type PianoWaiting } from '@/lib/teacher-attendance';
+import { canViewTeacherAttendance, koreaDay, teacherArrival, type TeacherArrival, type TeacherStudent, type TeacherWaiting } from '@/lib/teacher-attendance';
 import { teacherCheckIn, correctTeacherAttendanceTime } from '@/lib/operations/service';
 import { HttpError, sameOrigin } from '@/lib/operations/auth';
 import { courseLifecycle, enrollmentState } from '@/lib/operations/lifecycle';
@@ -20,7 +20,7 @@ async function authorize(request: Request) {
   try { uid = (await adminAuth.verifyIdToken(token, true)).uid; }
   catch { throw new HttpError(401, '다시 로그인해주세요.'); }
   const profile = (await adminDb.doc(`users/${uid}`).get()).data();
-  if (!canViewPianoAttendance(profile)) throw new HttpError(403, '승인된 피아노 강사와 관리자만 사용할 수 있습니다.');
+  if (!canViewTeacherAttendance(profile)) throw new HttpError(403, '승인된 피아노·드럼 강사와 관리자만 사용할 수 있습니다.');
   return uid;
 }
 function failed(error: unknown) {
@@ -48,25 +48,25 @@ export async function GET(request: Request) {
     const ownerById = new Map(owners.map(doc=>[doc.id,doc.data()]));
     if (roster) {
       const arrived = new Set(candidates.map(doc=>doc.data().studentId));
-      const students: PianoStudent[] = [];
+      const students: TeacherStudent[] = [];
       for (const doc of accounts) {
         const account = doc.data(), owner = ownerById.get(String(account?.sourceStudentId || doc.id));
         if (!account || !owner || enrollmentState(courseLifecycle(owner,doc.id),day) !== 'active') continue;
-        const row = pianoArrival(doc.id,{day,source:'teacher',studentId:doc.id,status:'present'},account,owner,day);
+        const row = teacherArrival(doc.id,{day,source:'teacher',studentId:doc.id,status:'present'},account,owner,day);
         if (row) students.push({id:doc.id,name:row.name,course:row.course,attended:arrived.has(doc.id)});
       }
       students.sort((a,b)=>a.name.localeCompare(b.name,'ko') || a.course.localeCompare(b.course,'ko'));
       return Response.json({day,students},{headers});
     }
-    const arrivals = candidates.map(doc=>{const row=doc.data(),account=accountById.get(row.studentId);return pianoArrival(doc.id,row,account,ownerById.get(String(account?.sourceStudentId || row.studentId)),day);})
-      .filter((row): row is PianoArrival=>row!==null).sort((a,b)=>(a.arrivalAt || 'z').localeCompare(b.arrivalAt || 'z') || a.name.localeCompare(b.name,'ko'));
+    const arrivals = candidates.map(doc=>{const row=doc.data(),account=accountById.get(row.studentId);return teacherArrival(doc.id,row,account,ownerById.get(String(account?.sourceStudentId || row.studentId)),day);})
+      .filter((row): row is TeacherArrival=>row!==null).sort((a,b)=>(a.arrivalAt || 'z').localeCompare(b.arrivalAt || 'z') || a.name.localeCompare(b.name,'ko'));
     const arrived = new Set(arrivals.map(r=>r.studentId));
     const expected = dailyExpectedLessons({accounts:activeAccounts.map(d=>({...d.data(),id:d.id}) as Account),students:activeAccounts.map(d=>({id:d.id,lifecycle:courseLifecycle(ownerById.get(String(d.data()?.sourceStudentId||d.id))||{},d.id)})),attendance:records.docs.map(d=>d.data() as Attendance)},day);
-    const waiting:PianoWaiting[] = [];
+    const waiting:TeacherWaiting[] = [];
     for(const lesson of expected){
       if(arrived.has(lesson.studentId))continue;
       const account=accountById.get(lesson.studentId),owner=ownerById.get(String(account?.sourceStudentId||lesson.studentId));
-      const student=pianoArrival(lesson.studentId,{day,source:'teacher',studentId:lesson.studentId,status:'present'},account,owner,day);
+      const student=teacherArrival(lesson.studentId,{day,source:'teacher',studentId:lesson.studentId,status:'present'},account,owner,day);
       if(student)waiting.push({studentId:lesson.studentId,name:student.name,course:student.course,lessonTime:lesson.lessonTime,status:lesson.status});
     }
     waiting.sort((a,b)=>a.name.localeCompare(b.name,'ko'));
