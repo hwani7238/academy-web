@@ -509,7 +509,7 @@ function setup() {
     const code = fs.readFileSync(path.join(root, name + '.ts'),'utf8'); const exports = {};
     modules[name] = exports;
     const output = ts.transpileModule(code, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
-    new Function('require','exports',output)(id => id === './auth' ? { database: () => db, HttpError, hash: v => require('node:crypto').createHash('sha256').update(v).digest('hex') } : id.startsWith('./') ? load(id.slice(2)) : require(id), exports);
+    new Function('require','exports',output)(id => id === './auth' ? { database: () => db, HttpError, hash: v => require('node:crypto').createHash('sha256').update(v).digest('hex') } : id.startsWith('./') ? load(id.slice(2)) : id.startsWith('../') ? load(id) : require(id), exports);
     return exports;
   }
   const service = load('service');
@@ -2498,7 +2498,7 @@ test('teacher time correction does not change balance or day, cancels unsent not
  assert.equal((await s.service.checkIn('piano','1234','device')).duplicate,true);
 });
 test('teacher scope rejects other instruments, past days, future times and inactive enrollment',async()=>{
- const s=setup();await s.seed('drum',8);s.records.get('opsAccounts/drum').subject='드럼';const day=s.load('model').seoulDay();
+ const s=setup();await s.seed('drum',8);s.records.get('opsAccounts/drum').subject='기타';const day=s.load('model').seoulDay();
  await assert.rejects(s.service.teacherCheckIn({studentId:'drum',day,time:'00:00'},'teacher:t'),/피아노/);
  await s.seed('piano',8);s.records.get('opsAccounts/piano').subject='피아노';
  await assert.rejects(s.service.teacherCheckIn({studentId:'piano',day:'2000-01-01',time:'00:00'},'teacher:t'));
@@ -2523,7 +2523,7 @@ test('teacher confirms a pre-recorded monthly attendance without charging twice'
  assert.equal((await s.service.checkIn('piano','1234','device')).duplicate,true);assert.equal([...s.records.keys()].filter(k=>k.startsWith('opsNotices/attendance_')).length,0);
 });
 test('teacher correction cannot modify another instrument and suppressed arrivals cannot send if requeued',async()=>{
- const s=setup();await s.seed('drum',8);s.records.get('opsAccounts/drum').subject='드럼';const day=s.load('model').seoulDay();await s.service.checkIn('drum','1234','device');
+ const s=setup();await s.seed('drum',8);s.records.get('opsAccounts/drum').subject='기타';const day=s.load('model').seoulDay();await s.service.checkIn('drum','1234','device');
  const drum=s.records.get(`opsAttendance/drum_${day}`);await assert.rejects(s.service.correctTeacherAttendanceTime({attendanceId:drum.id,day,time:'00:00',expectedUpdatedAt:drum.updatedAt},'teacher:t'),/피아노/);
  await s.seed('piano',8);s.records.get('opsAccounts/piano').subject='피아노';const {noticeId}=await s.service.checkIn('piano','1234','device');const row=s.records.get(`opsAttendance/piano_${day}`);
  await s.service.correctTeacherAttendanceTime({attendanceId:row.id,day,time:'00:00',expectedUpdatedAt:row.updatedAt},'teacher:t');s.records.get(`opsNotices/${noticeId}`).status='queued';
@@ -3874,4 +3874,15 @@ test('manual monthly attendance appears once in daily attendance, permits time c
  assert.equal([...s.records.keys()].some(k=>k.startsWith('opsNotices/')),false);
  await s.service.recordAttendance({studentId:'manual-piano',day,status:'cancelled',units:0,expectedUpdatedAt:row.updatedAt},'owner');
  assert.equal(dailyCheckins([s.records.get('opsAttendance/'+id)],day).length,0);
+});
+
+test('teacher drum check-in and time correction preserve course isolation, silent writes and duplicate protection',async()=>{
+ const s=setup();await s.seed('drum',4);await s.seed('piano',8);s.records.get('opsAccounts/drum').subject='드럼';s.records.get('opsAccounts/piano').subject='피아노';
+ s.records.get('opsAccounts/drum').sourceStudentId='piano';s.records.get('students/piano').instruments=['피아노','드럼'];
+ const day=s.load('model').seoulDay();await s.service.teacherCheckIn({studentId:'drum',day,time:'00:00'},'teacher:drum');
+ const id=`drum_${day}`,row=s.records.get('opsAttendance/'+id);assert.equal(row.source,'teacher');assert.equal(row.units,1);assert.equal(s.records.get('opsAccounts/drum').remaining,3);assert.equal(s.records.get('opsAccounts/piano').remaining,8);
+ // A kiosk arrival can be corrected for drums with the same optimistic revision guard.
+ delete row.arrivalAt;row.source='kiosk';await s.service.correctTeacherAttendanceTime({attendanceId:id,day,time:'00:00',expectedUpdatedAt:row.updatedAt},'teacher:drum');
+ assert.equal(s.records.get('opsAttendance/'+id).arrivalAt,new Date(day+'T00:00:00+09:00').toISOString());
+ assert.equal((await s.service.checkIn('drum','1234','device')).duplicate,true);assert.equal(s.records.get('opsAccounts/drum').remaining,3);assert.equal(s.records.get('opsAccounts/piano').remaining,8);assert.equal([...s.records.keys()].filter(k=>k.startsWith('opsNotices/')).length,0);
 });
