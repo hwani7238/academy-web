@@ -3672,7 +3672,9 @@ test('a moved prepaid first belongs to its invoice, but the following pass remai
   return billingProjection(data,today).upcoming.map(b=>b.lessonDate);
  }
  assert.deepEqual(check('2026-11-11',[]),[]);
- assert.deepEqual(check('2026-11-11',[],{...invoice,status:'open',paid:10000}),['2026-11-13']);
+ // A partial receipt still has an existing collectible invoice; its delayed
+ // first lesson must not manufacture a second full-price invoice.
+ assert.deepEqual(check('2026-11-11',[],{...invoice,status:'open',paid:10000}),[]);
  const first=f.row('2026-11-13');
  assert.ok(!check('2026-11-14',[first]).includes(first.day));
  const records=['2026-11-13','2026-11-20','2026-11-27','2026-12-04'].map(day=>f.row(day));
@@ -3885,4 +3887,81 @@ test('teacher drum check-in and time correction preserve course isolation, silen
  delete row.arrivalAt;row.source='kiosk';await s.service.correctTeacherAttendanceTime({attendanceId:id,day,time:'00:00',expectedUpdatedAt:row.updatedAt},'teacher:drum');
  assert.equal(s.records.get('opsAttendance/'+id).arrivalAt,new Date(day+'T00:00:00+09:00').toISOString());
  assert.equal((await s.service.checkIn('drum','1234','device')).duplicate,true);assert.equal(s.records.get('opsAccounts/drum').remaining,3);assert.equal(s.records.get('opsAccounts/piano').remaining,8);assert.equal([...s.records.keys()].filter(k=>k.startsWith('opsNotices/')).length,0);
+});
+
+async function earlyRenewalFixture(){
+ const s=setup();await s.seed('p',19);
+ const a=s.records.get('opsAccounts/p');Object.assign(a,{planUnits:20,planAmount:220000,currentPassId:'new',currentPassStart:'2026-11-24',openInvoiceId:'new',remaining:19,updatedAt:'v1',schedule:{rules:[{start:'2026-10-01',weekdays:[1,2,3,4,5]}],moves:[]}});
+ const invoice=(id,start,paid)=>({id,studentId:'p',name:'가상 학생',units:20,amount:220000,paid,status:paid?'paid':'open',passId:id,lessonDate:start,allocationState:'allocated',allocatedUnits:20,creditUnits:0,createdAt:start,updatedAt:'v1'});
+ s.records.set('opsInvoices/old',invoice('old','2026-10-28',220000));s.records.set('opsInvoices/new',invoice('new','2026-11-24',0));
+ s.records.set('opsPayments/receipt',{id:'receipt',studentId:'p',invoiceId:'old',passId:'old',lessonDate:'2026-10-28',paymentDate:'2026-11-16',amount:220000,method:'카드'});
+ for(const day of ['2026-10-28','2026-10-29','2026-10-30',...['02','03','04','05','06','09','10','11','12','13','16','17','18','19','20','23','24'].map(d=>'2026-11-'+d)]){
+  const id='p_'+day;s.records.set('opsAttendance/'+id,{id,studentId:'p',name:'가상 학생',day,status:'present',units:1,passId:day==='2026-11-24'?'new':'old',at:day,updatedAt:'v1',source:'kiosk'});
+ }
+ return s;
+}
+const correctionInput={invoiceId:'new',lessonDate:'2026-11-25',correctBoundary:true,expectedUpdatedAt:'v1',expectedAccountUpdatedAt:'v1'};
+test('early renewal correction moves only pass ownership, preserves attendance and money, and never credits another pass',async()=>{
+ const s=await earlyRenewalFixture(),facts=()=>[...s.records].filter(([k])=>k.startsWith('opsAttendance/')).map(([,r])=>{const {passId,updatedAt,...fact}=r;return fact;});
+ const before=facts(),money=structuredClone(s.records.get('opsPayments/receipt')),paidInvoice=structuredClone(s.records.get('opsInvoices/old'));
+ await s.service.linkInvoiceLesson(correctionInput,'owner');
+ assert.equal(s.records.get('opsAccounts/p').remaining,20);assert.equal(s.records.get('opsAccounts/p').currentPassStart,'2026-11-25');
+ assert.equal(s.records.get('opsAttendance/p_2026-11-24').passId,'old');assert.equal(s.records.has('opsAttendance/p_2026-11-25'),false);
+ assert.equal(s.records.get('opsInvoices/new').lessonDate,'2026-11-25');assert.equal(s.records.get('opsInvoices/new').cycleStart,'2026-11-25');assert.equal(s.records.get('opsInvoices/new').paid,0);assert.equal(s.records.get('opsInvoices/new').allocatedUnits,20);
+ assert.deepEqual(facts(),before);assert.deepEqual(s.records.get('opsPayments/receipt'),money);assert.deepEqual(s.records.get('opsInvoices/old'),paidInvoice);
+ assert.equal([...s.records.keys()].filter(k=>k.startsWith('opsInvoices/')).length,2);
+ await assert.rejects(s.service.linkInvoiceLesson(correctionInput,'owner'),/변경/);
+ assert.equal(s.records.get('opsAccounts/p').remaining,20);
+});
+test('boundary correction counts a lesson already recorded on the corrected first day, without recreating it',async()=>{
+ const s=await earlyRenewalFixture();s.records.set('opsAttendance/p_2026-11-25',{id:'p_2026-11-25',studentId:'p',day:'2026-11-25',status:'present',units:1,passId:'new',at:'today'});
+ s.records.get('opsAccounts/p').remaining=18;
+ await s.service.linkInvoiceLesson(correctionInput,'owner');assert.equal(s.records.get('opsAccounts/p').remaining,19);assert.equal(s.records.get('opsAttendance/p_2026-11-25').at,'today');
+});
+test('boundary correction rejects incomplete prior cycles and concurrent attendance without writes',async()=>{
+ const s=await earlyRenewalFixture();s.records.delete('opsAttendance/p_2026-11-23');const before=structuredClone(s.records);
+ await assert.rejects(s.service.linkInvoiceLesson(correctionInput,'owner'),/마지막 회차/);assert.deepEqual(s.records,before);
+ s.records.get('opsAccounts/p').updatedAt='concurrent';const fresh=structuredClone(s.records);await assert.rejects(s.service.linkInvoiceLesson(correctionInput,'owner'),/변경/);assert.deepEqual(s.records,fresh);
+});
+test('legacy preview and stale write requests cannot duplicate an allocated current pass on another date',async()=>{
+ const s=await earlyRenewalFixture(),a=s.records.get('opsAccounts/p'),invoices=[s.records.get('opsInvoices/new'),s.records.get('opsInvoices/old')],attendance=[...s.records.values()].filter(r=>r.day&&r.studentId==='p');
+ const data={day:'2026-11-25',accounts:[a],students:[{id:'p'}],attendance,invoices:invoices.filter(i=>i.status==='open'),settledInvoices:invoices.filter(i=>i.status==='paid'),sequenceContext:{positions:{},cycleStarts:[{studentId:'p',day:'2026-10-28'}]}};
+ assert.equal(s.load('upcoming-billing').billingProjection(data,'2026-11-25').upcoming.length,0);
+ const before=structuredClone(s.records);
+ await assert.rejects(s.service.prepareUpcomingInvoice({studentId:'p',lessonDate:'2026-11-25',expectedUpdatedAt:'v1'},'owner'),/기존 수강권/);
+ await assert.rejects(s.service.monthlyPayment({studentId:'p',lessonDate:'2026-11-25',requestId:'duplicate',expectedUpdatedAt:'v1',amount:220000,method:'카드',paymentDate:'2026-11-25',passAllocation:'activate'},'owner'),/기존 수강권/);
+ assert.deepEqual(s.records,before);
+});
+test('identity guard permits a genuine next cycle despite an unpaid previous pass and respects pauses and makeups',()=>{
+ const s=setup(),find=s.load('pass-boundary').currentPassInvoiceForDay;
+ const a={id:'p',planUnits:4,remaining:1,currentPassId:'old',currentPassStart:'2026-11-01',schedule:{rules:[{start:'2026-11-01',weekdays:[1,2,3,4,5]}],moves:[]}};
+ const i={id:'old',studentId:'p',passId:'old',status:'open',allocationState:'allocated'};
+ assert.equal(find(a,[i],[],'2026-11-26','2026-11-25'),undefined);
+ for(const status of ['paused','makeup_reserved','makeup'])assert.equal(find(a,[i],[{studentId:'p',day:'2026-11-25',status,units:0}],'2026-11-26','2026-11-25')?.id,'old');
+ assert.equal(find(a,[{...i,studentId:'another'}],[],'2026-11-25','2026-11-25'),undefined);
+});
+test('unpaid canonical invoice owns a delayed first slot in previews and server transactions',async()=>{
+ const s=await canonicalServiceFixture(),a=s.records.get('opsAccounts/v2');
+ const today=s.load('model').seoulDay(),future=new Date(Date.parse(today)+86400000).toISOString().slice(0,10);
+ Object.assign(a,{remaining:0,schedule:{rules:[{start:today,weekdays:[0,1,2,3,4,5,6]}],moves:[]}});
+ const final=s.f.row('2026-10-04');s.records.set('opsAttendance/'+final.id,{...final,passId:'a'});
+ const next={id:'next',passId:'next',studentId:'v2',units:4,amount:180000,paid:0,status:'open',lessonDate:today,allocationState:'pending',createdAt:today};s.records.set('opsInvoices/next',next);
+ s.records.set('opsAttendance/v2_'+today,{id:'v2_'+today,studentId:'v2',day:today,status:'paused',units:0});
+ const records=[...s.records.values()].filter(r=>r.day&&r.studentId==='v2'),invoices=[...s.records.values()].filter(r=>r.studentId==='v2'&&r.amount!==undefined&&r.status),seed=s.records.get('opsCourseLedgers/v2').seed;
+ const context={positions:{},cycleStarts:[],canonical:{v2:{seed,records,invoices,today}}};
+ const result=s.load('attendance-forecast').attendanceForecastSequence([a],records,[],context,[future],today);
+ assert.equal(result.sequence.firstSlotInvoices.get('v2_'+future),'next');
+ const projection=s.load('upcoming-billing').billingProjection({day:today,accounts:[a],students:[{id:'v2'}],attendance:records,invoices:[next],settledInvoices:invoices.filter(i=>i.status==='paid'),sequenceContext:context},today);
+ assert.equal(projection.upcoming.some(i=>i.lessonDate===future),false);
+ await assert.rejects(s.service.prepareUpcomingInvoice({studentId:'v2',lessonDate:future,expectedUpdatedAt:a.updatedAt},'owner'),/이미 있습니다/);
+});
+test('corrected pass continues at lesson one and one deduction without another invoice or receipt',async()=>{
+ const s=await earlyRenewalFixture();await s.service.linkInvoiceLesson(correctionInput,'owner');
+ const beforeInvoices=[...s.records.keys()].filter(k=>k.startsWith('opsInvoices/'));
+ await s.service.recordAttendance({studentId:'p',day:'2026-11-25',status:'present',units:1},'owner');
+ assert.equal(s.records.get('opsAccounts/p').remaining,19);assert.equal(s.records.get('opsAttendance/p_2026-11-25').passId,'new');
+ assert.deepEqual([...s.records.keys()].filter(k=>k.startsWith('opsInvoices/')),beforeInvoices);
+ assert.equal([...s.records.keys()].filter(k=>k.startsWith('opsPayments/')).length,1);
+ const a=s.records.get('opsAccounts/p'),records=[...s.records.values()].filter(r=>r.studentId==='p'&&r.day),seq=s.load('attendance-sequence').attendanceSequence([a],records,[]);
+ assert.equal(seq.labels.get('p_2026-11-24'),'20');assert.equal(seq.labels.get('p_2026-11-25'),'1');
 });

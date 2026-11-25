@@ -1,3 +1,4 @@
+import {currentPassInvoiceForDay} from './pass-boundary';
 import {attendanceInvoiceDates} from './billing-attendance';
 import {unresolvedReceipts} from './pass-link';
 import {attendanceForecastSequence} from './attendance-forecast';
@@ -35,13 +36,14 @@ export function billingProjection(data:Snapshot,today=seoulDay()){
  for(const i of invoiceRows)if(!invoiceDates[i.id]){const day=invoiceCycleStart(i,cycles,times);if(day)invoiceDates[i.id]=day;}
  const covered=new Set(invoiceRows.filter(i=>i.status!=='cancelled').flatMap(i=>{const day=invoiceDates[i.id];return day?[`${i.studentId}_${day}`]:[];}));
  for(const key of confirmedPassLessons(invoiceRows,records,cycles,times,sequence.labels))covered.add(key);
- for(const key of forecastSequence.paidFirstSlots)covered.add(key);
+ for(const key of forecastSequence.firstSlotInvoices.keys())covered.add(key);
  const upcoming:Invoice[]=[],seen=new Set<string>();
  if(data.day.slice(0,7)!==today.slice(0,7))return {upcoming,invoiceDates,cycleFirstDays:cycles,firstLessonTimes:times};
  for(const key of [...candidateKeys].sort((a,b)=>a.slice(-10).localeCompare(b.slice(-10)))){
   const id=key.slice(0,-11),day=key.slice(-10),a=data.accounts.find(a=>a.id===id),s=data.students.find(s=>s.id===id);
   if(seen.has(id)||!a?.active||a.billingExempt||a.nextPass||!s||enrollmentState(s.lifecycle,today)!=='active'||enrollmentState(s.lifecycle,day)!=='active')continue;
   if(data.cancelledInvoiceKeys?.includes(key)||covered.has(key)){if(day>=today)seen.add(id);continue;}
+  if(currentPassInvoiceForDay(a,invoiceRows,records,day,today)){seen.add(id);continue;}
   // An unlinked open bill must be resolved rather than duplicated.
   if(unresolvedReceipts(invoiceRows.filter(i=>i.studentId===id)).length)continue;
   if(data.invoices.some(i=>i.studentId===id&&i.status==='open'&&!invoiceCycleStart(i,cycles,times)))continue;

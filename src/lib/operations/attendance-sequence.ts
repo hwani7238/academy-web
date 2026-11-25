@@ -25,6 +25,7 @@ type Legacy = NonNullable<Snapshot['legacyAttendance']>[number];
 // Imported numbers anchor the sequence; modern records take precedence on the same day.
 export function attendanceSequence(accounts: Pick<Account, 'id' | 'planUnits' | 'schedule' | 'passHistory' | 'initialPlanUnits' | 'referenceResetFrom'>[], records: RecordRow[], legacy: Legacy[], context?: SequenceContext) {
   const paidFirstSlots = new Set<string>();
+  const firstSlotInvoices = new Map<string,string>();
   const projections = new Map(Object.entries(context?.canonical||{}).map(([id,c])=>{
     const a=accounts.find(a=>a.id===id) as Account;
     const combined=new Map(c.records.map(r=>[r.day,r]));
@@ -33,9 +34,9 @@ export function attendanceSequence(accounts: Pick<Account, 'id' | 'planUnits' | 
     // The invoice belongs to this pass, even when class starts later than its contract date.
     const paidIds = new Set(c.invoices.filter(i=>i.studentId===id && receiptComplete(i)).map(i=>i.id));
     for(const pass of projection.passes){
-      if(!paidIds.has(pass.invoiceId))continue;
       const first=pass.slots.find(slot=>slot.ordinal===1);
-      if(first)paidFirstSlots.add(id+'_'+first.day);
+      if(first&&pass.invoiceId)firstSlotInvoices.set(id+'_'+first.day,pass.invoiceId);
+      if(first&&paidIds.has(pass.invoiceId))paidFirstSlots.add(id+'_'+first.day);
     }
     return [id,projection] as const;
   }));
@@ -145,5 +146,5 @@ export function attendanceSequence(accounts: Pick<Account, 'id' | 'planUnits' | 
       ? missedLessons[`${row.studentId}_${row.relatedDay}`] : undefined;
     if (original || row.fallback) labels.set(row.key, original || row.fallback!);
   }
-  return { positions, labels, missedLessons, cycleFirstDays, firstLessonTimes, paidFirstSlots };
+  return { positions, labels, missedLessons, cycleFirstDays, firstLessonTimes, paidFirstSlots, firstSlotInvoices };
 }

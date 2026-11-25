@@ -61,7 +61,7 @@ export function BillingList({ data, invoices, busy, demo, pay, edit, action, sav
     {paymentTarget&&<MonthlyPaymentDialog data={data} studentId={paymentTarget.studentId} day={paymentTarget.day} initialInvoiceId={paymentTarget.invoiceId} save={save} close={()=>setPaymentTarget(null)}/>}
     <MonthlyPayments data={data} demo={demo} busy={busy} save={save}/>
     {selectedInvoice && <BillingActions key={selectedInvoice.id} invoice={selectedInvoice} firstDay={firstDay(selectedInvoice)} save={save} name={identity(data,selectedInvoice.studentId,selectedInvoice.name).name} busy={busy} demo={demo} sent={data.notices.some(n=>n.id===`billing_${selectedInvoice.id}`)} close={()=>setSelected(null)} edit={()=>{setSelected(null);void resolveInvoice(selectedInvoice,edit);}} action={name=>{setSelected(null);void resolveInvoice(selectedInvoice,i=>{if(name!=='prepareUpcoming')action(name,i);});}}/>}
-    {dateInvoice && <InvoiceDateDialog invoice={dateInvoice} initialDate={firstDay(dateInvoice)} save={save} close={()=>setDateInvoice(null)}/>}
+    {dateInvoice && <InvoiceDateDialog account={data.accounts.find(a=>a.id===dateInvoice.studentId)} invoice={dateInvoice} initialDate={firstDay(dateInvoice)} save={save} close={()=>setDateInvoice(null)}/>}
   </div>;
 }
 function BillingActions({invoice:i,firstDay,name,busy,demo,sent,close,edit,action,save}:{firstDay?:string;save:Props['save'];invoice:Invoice;name:string;busy:boolean;demo:boolean;sent:boolean;close:()=>void;edit:()=>void;action:(action:string)=>void}) {
